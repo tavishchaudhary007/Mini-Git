@@ -1,4 +1,5 @@
 #include "ObjectStore.h"
+#include <algorithm>
 
 Hash ObjectStore::save(const Object& obj) const {
     Hash h = obj.hash();
@@ -22,4 +23,12 @@ Hash ObjectStore::resolvePrefix(const std::string& prefix) const {
         }
     if (matches != 1) throw InvalidObjectException("unknown or ambiguous revision: " + prefix);
     return found;
+}
+
+std::vector<Hash> ObjectStore::listAll() const {
+    std::vector<Hash> out;
+    if (fs::exists(dir_))
+        for (const auto& e : fs::directory_iterator(dir_)) out.push_back(Hash(e.path().filename().string()));
+    std::sort(out.begin(), out.end());
+    return out;
 }
