@@ -214,3 +214,26 @@ std::string Repository::merge(const std::string& branch) {
     }
     throw MergeException("branches have diverged; only fast-forward merges are supported");
 }
+
+Snapshot Repository::snapshot() const {
+    Snapshot s;
+    s.currentBranch = refs_.currentBranch();
+    s.head = refs_.headCommit();
+    for (const auto& b : refs_.listBranches()) s.branches[b] = refs_.branchTip(b);
+    for (const auto& h : store_.listAll()) s.objects.push_back(store_.load(h));
+
+    for (const auto& f : workingFiles()) {
+        std::string content = readFile(root_ / f);
+        if (content.find('\0') != std::string::npos) continue;  // skip binary files
+        s.files[f] = std::move(content);
+    }
+
+    auto head = headTree();
+    for (const auto& [path, h] : index_.entries()) {
+        auto it = head.find(path);
+        if (it == head.end() || it->second != h) s.staged[path] = h;
+    }
+    for (const auto& [path, h] : head)
+        if (!index_.has(path)) s.stagedDeleted.push_back(path);
+    return s;
+}
