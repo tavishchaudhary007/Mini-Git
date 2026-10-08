@@ -1,5 +1,6 @@
 #pragma once
 #include <memory>
+#include <vector>
 #include "FileUtil.h"
 #include "Object.h"
 
@@ -13,6 +14,7 @@ public:
     std::unique_ptr<Object> load(const Hash& h) const;
     bool exists(const Hash& h) const { return fs::exists(dir_ / h.str()); }
     Hash resolvePrefix(const std::string& prefix) const;  // short hash -> full hash
+    std::vector<Hash> listAll() const;                    // every stored object id
 
     // Typed load; throws if the stored object is a different type.
     template <typename T>
