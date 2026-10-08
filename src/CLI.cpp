@@ -11,6 +11,7 @@ CLI::CLI() {
     registerCommand(std::make_unique<BranchCmd>());
     registerCommand(std::make_unique<CheckoutCmd>());
     registerCommand(std::make_unique<MergeCmd>());
+    registerCommand(std::make_unique<HtmlCmd>());
 }
 
 void CLI::printUsage() const {

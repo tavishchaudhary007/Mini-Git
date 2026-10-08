@@ -1,5 +1,7 @@
 #include "Commands.h"
+#include <cstdlib>
 #include <iostream>
+#include "HtmlExporter.h"
 
 using std::cout;
 
@@ -77,4 +79,32 @@ void CheckoutCmd::execute(Repository* repo, const Args& args) {
 void MergeCmd::execute(Repository* repo, const Args& args) {
     if (args.size() != 1) usageError(*this);
     cout << repo->merge(args[0]) << "\n";
+}
+
+// Opens a file with the OS default program (the browser, for .html).
+static bool openInBrowser(const fs::path& file) {
+#if defined(_WIN32)
+    std::string cmd = "start \"\" \"" + file.string() + "\"";
+#elif defined(__APPLE__)
+    std::string cmd = "open \"" + file.string() + "\"";
+#else
+    std::string cmd = "xdg-open \"" + file.string() + "\" >/dev/null 2>&1";
+#endif
+    return std::system(cmd.c_str()) == 0;
+}
+
+void HtmlCmd::execute(Repository* repo, const Args& args) {
+    bool open = true;
+    for (const auto& a : args) {
+        if (a == "--no-open") open = false;
+        else usageError(*this);
+    }
+    // Written inside .minigit/ so the report never shows up as an untracked file.
+    fs::path out = repo->root() / ".minigit" / "report.html";
+    writeFile(out, HtmlExporter::render(repo->snapshot(), repo->root().filename().string()));
+    cout << "Report written to " << out.generic_string() << "\n";
+    if (open) {
+        if (openInBrowser(out)) cout << "Opened in your default browser.\n";
+        else cout << "Could not launch a browser; open the file above manually.\n";
+    }
 }
