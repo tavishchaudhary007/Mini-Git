@@ -7,16 +7,18 @@ A small version control system written in C++17. It tracks changes to text files
 ## Table of Contents
 1. [Features](#features)
 2. [Requirements](#requirements)
-3. [Build](#build)
-4. [Tutorial: your first repository](#tutorial-your-first-repository)
-5. [Tutorial: branches and merging](#tutorial-branches-and-merging)
-6. [Command reference](#command-reference)
-7. [Project structure](#project-structure)
-8. [How it works](#how-it-works)
-9. [Error messages](#error-messages)
-10. [Troubleshooting](#troubleshooting)
-11. [Limitations](#limitations)
-12. [Team workflow](#team-workflow)
+3. [Quick start (one command)](#quick-start-one-command)
+4. [Build](#build)
+5. [Tutorial: your first repository](#tutorial-your-first-repository)
+6. [Tutorial: branches and merging](#tutorial-branches-and-merging)
+7. [Visual dashboard: `minigit html`](#visual-dashboard-minigit-html)
+8. [Command reference](#command-reference)
+9. [Project structure](#project-structure)
+10. [How it works](#how-it-works)
+11. [Error messages](#error-messages)
+12. [Troubleshooting](#troubleshooting)
+13. [Limitations](#limitations)
+14. [Team workflow](#team-workflow)
 
 ---
 
@@ -33,6 +35,7 @@ A small version control system written in C++17. It tracks changes to text files
 | `branch` | List or create branches |
 | `checkout` | Switch branch or go to a commit hash |
 | `merge` | Fast-forward merge |
+| `html` | Open a visual dashboard of the repository in your browser |
 
 ## Requirements
 
@@ -48,6 +51,17 @@ g++ --version
 ```
 pacman -S mingw-w64-ucrt-x86_64-gcc make
 ```
+
+## Quick start (one command)
+
+Put `setup.bat` / `setup.sh` in the project root (next to `src/` and `include/`), then run:
+
+| OS | Command |
+|---|---|
+| Windows | `setup.bat` (or double-click it) |
+| Linux / macOS / Git Bash | `bash setup.sh` |
+
+It builds the executable, creates a `minigit-demo` folder next to the project, and runs `init`, `add`, `commit` and `log` on a sample file. Use that folder to try the other commands. The full manual steps are below if you want them.
 
 ## Build
 
@@ -191,6 +205,31 @@ This puts you in a **detached HEAD** state. Return with `minigit checkout main`.
 
 ---
 
+## Visual dashboard: `minigit html`
+
+Run this inside any Mini-Git repository:
+```
+minigit html
+```
+It writes `.minigit/report.html` and opens it in your default browser (use `minigit html --no-open` to skip opening). The page shows your real repository:
+
+| Panel | What you see |
+|---|---|
+| **Workspace** | Working-directory files, grouped by folder, with the last commit that touched each file |
+| **Source Control** | Staged changes and unstaged changes (`A` added, `M` modified, `D` deleted, `U` untracked) |
+| **Side-by-Side Diff** | HEAD version vs. working copy for any file, aligned line by line |
+| **Commit Graph** | Every commit, one lane per branch, with branch labels |
+| **Branch / HEAD** | Current branch (or detached HEAD) in the header |
+| **Console** | Read-only helper terminal |
+
+Notes:
+- The page is a **read-only snapshot** taken when you ran the command. Make changes with the CLI, then run `minigit html` again to refresh. A banner at the top says so.
+- It needs an **internet connection** for styling (Tailwind, FontAwesome and Google Fonts load from CDNs). Offline, the data still loads but looks unstyled.
+- The report lives inside `.minigit/`, so it never shows up as an untracked file.
+- Opening `templates/frontend.html` directly (without the CLI) starts a self-contained **demo mode** with sample files.
+
+**Editing the web UI:** change `templates/frontend.html`, then run `python tools/embed_frontend.py` and rebuild. The script regenerates `include/FrontendTemplate.h`, which compiles the page into the executable.
+
 ## Command reference
 
 | Command | Usage | Notes |
@@ -204,6 +243,7 @@ This puts you in a **detached HEAD** state. Return with `minigit checkout main`.
 | `branch` | `minigit branch [name]` | No name = list |
 | `checkout` | `minigit checkout <branch\|hash>` | Refuses if uncommitted changes exist |
 | `merge` | `minigit merge <branch>` | Fast-forward only |
+| `html` | `minigit html [--no-open]` | Writes `.minigit/report.html` and opens it |
 
 Exit codes: `0` success, `1` Mini-Git error, `2` unexpected error.
 
@@ -225,13 +265,18 @@ minigit/
 │   ├── Index.h          staging area
 │   ├── RefManager.h     HEAD and branches
 │   ├── DiffEngine.h     template LCS diff
-│   ├── Repository.h     backend facade
-│   ├── Commands.h       Command base + 9 commands
+│   ├── Repository.h     backend facade (+ Snapshot struct)
+│   ├── HtmlExporter.h   snapshot -> JSON -> web page
+│   ├── FrontendTemplate.h  generated: web UI embedded as a string
+│   ├── Commands.h       Command base + 10 commands
 │   └── CLI.h            argument dispatcher
 ├── src/                 implementations (.cpp) + main.cpp
+├── templates/frontend.html   the web UI (edit this)
+├── tools/embed_frontend.py   regenerates FrontendTemplate.h
 ├── tests/demo.sh        end-to-end demo script
 ├── Makefile
-├── architecture.txt     architecture and flowcharts
+├── setup.bat / setup.sh one-command build + demo repo
+├── architecture.md      architecture and flowcharts
 └── README.md
 ```
 
@@ -253,7 +298,7 @@ main -> CLI -> Command -> Repository -> ObjectStore / Index / RefManager -> .min
 └── objects/<sha1>       blob, tree and commit objects
 ```
 
-**Object model:** a *blob* stores file content, a *tree* maps file paths to blob hashes, and a *commit* points to a tree and its parent commit. Each object's name is the SHA-1 of its contents, so identical content is stored once. See `architecture.txt` for flowcharts of every command.
+**Object model:** a *blob* stores file content, a *tree* maps file paths to blob hashes, and a *commit* points to a tree and its parent commit. Each object's name is the SHA-1 of its contents, so identical content is stored once. See [architecture.md](architecture.md) for flowcharts of every command.
 
 ## Error messages
 
@@ -282,6 +327,7 @@ main -> CLI -> Command -> Repository -> ObjectStore / Index / RefManager -> .min
 
 - Merge is **fast-forward only**; diverged branches are rejected.
 - `diff` compares the working file against the **staged** version (like `git diff`), not against HEAD.
+- The `html` dashboard is a read-only snapshot (re-run to refresh), shows text files only, and needs internet for styling.
 - No `.gitignore`-style ignore file, no remotes, no tags, no file rename detection.
 - The diff uses an O(n·m) table, fine for normal text files but not huge ones.
 - Intended for text files; no compression of stored objects.
