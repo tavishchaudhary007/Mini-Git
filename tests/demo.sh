@@ -23,6 +23,7 @@ printf 'feature work\n' > f.txt
 run add f.txt
 run commit -m "Add feature file"
 run log --oneline
+run html --no-open
 run checkout main
 ls
 run merge feature
