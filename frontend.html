@@ -3,15 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mini-Git &middot; Repository Studio</title>
+    <title>Mini-Git Web Workspace & GUI</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Google Fonts Inter & JetBrains Mono -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400&display=swap" rel="stylesheet">
     <script>
         tailwind.config = {
             darkMode: 'class',
@@ -19,639 +19,579 @@
                 extend: {
                     colors: {
                         git: {
-                            dark: '#000000',
-                            card: '#0A0A0A',
-                            border: '#222222',
-                            text: '#FFFFFF',
-                            muted: '#888888',
+                            orange: '#F05032',
+                            dark: '#0D1117',
+                            card: '#161B22',
+                            border: '#30363D',
+                            text: '#C9D1D9',
+                            muted: '#8B949E',
+                            accent: '#238636',
+                            blue: '#58A6FF',
+                            purple: '#A371F7'
                         }
                     },
                     fontFamily: {
-                        sans: ['-apple-system', 'BlinkMacSystemFont', '"SF Pro Display"', '"SF Pro Text"', 'Inter', 'sans-serif'],
-                        mono: ['"JetBrains Mono"', '"SF Mono"', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
                     }
                 }
             }
         }
     </script>
     <style>
-        /* Pure Black and White Canvas */
-        body {
-            background-color: #000000;
-            color: #FFFFFF;
-        }
-
-        /* Pure Monochrome Surface Panels */
-        .liquid-glass {
-            background: #0A0A0A;
-            border: 1px solid #222222;
-            box-shadow: 0 16px 40px -10px rgba(0, 0, 0, 0.9), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-        }
-
-        .liquid-glass-subtle {
-            background: #111111;
-            border: 1px solid #222222;
-        }
-
-        .liquid-pill {
-            background: #141414;
-            border: 1px solid #2A2A2A;
-            color: #FFFFFF;
-            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-        }
-        .liquid-pill:hover {
-            background: #202020;
-            border-color: #444444;
-            transform: translateY(-0.5px);
-        }
-        .liquid-pill:active {
-            transform: scale(0.97);
-        }
-
-        /* Segmented Control Pill Classes */
-        .segmented-track {
-            background: #0E0E0E;
-            border: 1px solid #262626;
-        }
-
-        .segmented-pill-active {
-            background: #2C67C5 !important;
-            color: #FFFFFF !important;
-        }
-
-        .segmented-pill-inactive {
-            color: #888888 !important;
-        }
-        .segmented-pill-inactive:hover {
-            color: #FFFFFF !important;
-            background: rgba(44, 103, 197, 0.15) !important;
-        }
-
-        /* Custom Scrollbars */
+        /* Custom scrollbars */
         ::-webkit-scrollbar {
-            width: 5px;
-            height: 5px;
+            width: 6px;
+            height: 6px;
         }
         ::-webkit-scrollbar-track {
-            background: #000000;
+            background: #161b22;
         }
         ::-webkit-scrollbar-thumb {
-            background: #2A2A2A;
-            border-radius: 9999px;
+            background: #30363d;
+            border-radius: 4px;
         }
         ::-webkit-scrollbar-thumb:hover {
-            background: #2C67C5;
+            background: #8b949e;
         }
-
-        /* Diff Highlighting */
-        .diff-added {
-            background-color: rgba(44, 103, 197, 0.16);
-            color: #FFFFFF;
-            border-left: 2px solid #2C67C5;
-            font-weight: 500;
-        }
-        .diff-removed {
-            background-color: rgba(255, 255, 255, 0.03);
-            color: #666666;
-            text-decoration: line-through;
-            border-left: 2px solid #333333;
-        }
-        .diff-neutral {
-            color: #888888;
-        }
-
-        /* Line numbers */
-        .line-num {
-            user-select: none;
-            color: #444444;
-            text-align: right;
-            padding-right: 1rem;
-            min-width: 3rem;
-            display: inline-block;
-        }
-
-        /* Smooth Selection */
-        ::selection {
-            background: #2C67C5;
-            color: #FFFFFF;
-        }
+        .diff-added { background-color: rgba(46, 160, 67, 0.15); color: #7ee787; }
+        .diff-removed { background-color: rgba(248, 81, 73, 0.15); color: #ff7b72; }
+        .diff-neutral { color: #8b949e; }
     </style>
 </head>
-<body class="font-sans h-screen flex flex-col overflow-hidden select-none p-3 gap-3">
+<body class="bg-git-dark text-git-text font-sans h-screen flex flex-col overflow-hidden select-none">
 
-    <!-- FLOATING TOP NAVBAR ISLAND -->
-    <header class="h-14 liquid-glass rounded-2xl flex items-center justify-between px-5 z-20 shrink-0 border border-white/10">
-        
-        <!-- Left Section: Clean Repository Name -->
+    <!-- TOP NAVBAR -->
+    <header class="h-14 bg-git-card border-b border-git-border flex items-center justify-between px-4 z-20 shrink-0">
         <div class="flex items-center space-x-3">
-            <span class="tracking-tight text-white font-bold text-base">Mini<span class="text-[#2C67C5]">Git</span></span>
-            <span class="text-white/20 text-sm">/</span>
-            <span id="repoNamePill" class="liquid-pill text-white font-mono text-xs px-3 py-1 rounded-full font-medium border border-[#2C67C5]/30 bg-[#2C67C5]/10">repo</span>
-        </div>
-
-        <!-- Center Section: Segmented View Switcher -->
-        <div class="segmented-track rounded-full p-1 flex items-center shadow-lg">
-            <button id="tabBtnWorkspace" onclick="switchMainView('workspace')" class="px-4 py-1 rounded-full text-xs font-semibold bg-[#2C67C5] text-white flex items-center space-x-1.5 transition-all cursor-pointer">
-                <i class="fa-solid fa-folder-tree text-xs"></i>
-                <span>Workspace</span>
-            </button>
-            <button id="tabBtnChanges" onclick="switchMainView('changes')" class="px-4 py-1 rounded-full text-xs font-medium text-white/70 hover:text-white hover:bg-white/10 flex items-center space-x-1.5 transition-all cursor-pointer relative">
-                <i class="fa-solid fa-code-compare text-xs"></i>
-                <span>Changes &amp; Diff</span>
-                <span id="changesCountBadge" class="hidden ml-1 px-1.5 py-0.2 bg-[#2C67C5] text-white text-[10px] font-bold rounded-full">0</span>
-            </button>
-            <button id="tabBtnGraph" onclick="switchMainView('graph')" class="px-4 py-1 rounded-full text-xs font-medium text-white/70 hover:text-white hover:bg-white/10 flex items-center space-x-1.5 transition-all cursor-pointer">
-                <i class="fa-solid fa-diagram-project text-xs"></i>
-                <span>Commit Graph</span>
-            </button>
-            <button id="tabBtnLog" onclick="switchMainView('log')" class="px-4 py-1 rounded-full text-xs font-medium text-white/70 hover:text-white hover:bg-white/10 flex items-center space-x-1.5 transition-all cursor-pointer">
-                <i class="fa-solid fa-clock-rotate-left text-xs"></i>
-                <span>Commits Log</span>
-            </button>
-        </div>
-
-        <!-- Right Section: Branch Info & CLI Helper -->
-        <div class="flex items-center space-x-2.5">
-            <!-- Active Branch Pill -->
-            <div id="branchIndicator" class="flex items-center liquid-pill rounded-full px-3.5 py-1.5 text-xs font-mono font-medium border border-[#2C67C5]/30 bg-[#2C67C5]/10">
-                <span class="w-1.5 h-1.5 rounded-full bg-[#2C67C5] mr-2"></span>
-                <i class="fa-solid fa-code-branch text-[#2C67C5] mr-2 text-[11px]"></i>
-                <span class="text-white/50 mr-1.5 font-sans">Branch:</span>
-                <span id="currentBranchDisplay" class="text-white font-semibold">main</span>
+            <div class="flex items-center space-x-2.5">
+                <!-- Bespoke M-Branch Icon -->
+                <svg class="w-7 h-7 drop-shadow-[0_0_8px_rgba(240,80,50,0.5)] hover:scale-110 transition-transform shrink-0" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M6 24V12C6 8 11 8 13 12L16 17L19 12C21 8 26 8 26 12V24" stroke="url(#mGradLive)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M16 17V24" stroke="url(#mGradLive)" stroke-width="2.6" stroke-linecap="round"/>
+                    <circle cx="6" cy="24" r="2.3" fill="#FFF" stroke="#F05032" stroke-width="1.8"/>
+                    <circle cx="26" cy="24" r="2.3" fill="#FFF" stroke="#F05032" stroke-width="1.8"/>
+                    <circle cx="16" cy="17" r="2.3" fill="#FFF" stroke="#F05032" stroke-width="1.8"/>
+                    <circle cx="16" cy="24" r="2" fill="#FF8A65"/>
+                    <defs>
+                        <linearGradient id="mGradLive" x1="6" y1="8" x2="26" y2="24" gradientUnits="userSpaceOnUse">
+                            <stop stop-color="#FF7A45"/>
+                            <stop offset="1" stop-color="#F05032"/>
+                        </linearGradient>
+                    </defs>
+                </svg>
+                <span class="tracking-wide text-white font-bold text-lg">MiniGit</span>
+                <span class="bg-gradient-to-r from-git-orange to-[#FF7A45] text-white text-[11px] font-bold px-2 py-0.5 rounded-md shadow-sm">STUDIO</span>
             </div>
-
-            <!-- CLI Helper Button -->
-            <button onclick="toggleCliDrawer()" class="liquid-pill text-xs text-white px-3.5 py-1.5 rounded-full flex items-center space-x-1.5 font-medium hover:border-[#2C67C5]/40 hover:bg-[#2C67C5]/10 transition-all">
-                <i class="fa-solid fa-terminal text-[#2C67C5] text-[11px]"></i>
-                <span>CLI Helper</span>
-            </button>
+        </div>
+        <!-- Repository Controls Header Info -->
+        <div class="flex items-center space-x-4">
+            <!-- Active Branch Dropdown / Indicator -->
+            <div class="flex items-center bg-git-dark border border-git-border rounded-md px-3 py-1 text-xs">
+                <i class="fa-solid fa-code-branch text-git-purple mr-2"></i>
+                <span class="text-git-muted mr-1.5">Branch:</span>
+                <select id="branchSelect" onchange="switchBranchUI(this.value)" class="bg-transparent text-white font-mono font-medium focus:outline-none cursor-pointer">
+                    <!-- Populated dynamically -->
+                </select>
+            </div>
         </div>
     </header>
 
-    <!-- MAIN CONTENT AREA -->
-    <div class="flex flex-1 gap-3 overflow-hidden min-h-0">
+    <!-- MAIN WORKSPACE LAYOUT -->
+    <div class="flex flex-1 overflow-hidden">
 
-        <!-- ================================================================= -->
-        <!-- VIEW 1: WORKSPACE & CODE VIEWER -->
-        <!-- ================================================================= -->
-        <div id="viewWorkspace" class="flex flex-1 gap-3 overflow-hidden">
+        <!-- LEFT SIDEBAR: EXPLORER & GIT CONTROL -->
+        <aside class="w-80 bg-git-card border-r border-git-border flex flex-col shrink-0">
             
-            <!-- Left Sidebar: File Explorer Tree -->
-            <aside class="w-80 liquid-glass rounded-2xl flex flex-col shrink-0 overflow-hidden">
-                <div class="p-3.5 border-b border-white/10 flex items-center justify-between">
-                    <span class="text-xs font-semibold uppercase tracking-wider text-white/60">Repository Files</span>
-                    <span id="workspaceFileCount" class="text-[11px] bg-white/10 px-2.5 py-0.5 rounded-full text-white font-mono font-medium">0 files</span>
-                </div>
-                <!-- File Tree Container -->
-                <div id="fileTreeContainer" class="flex-1 overflow-y-auto p-3 space-y-1 font-mono text-sm">
-                    <!-- Populated dynamically -->
-                </div>
-                <!-- Bottom Stats -->
-                <div class="p-3 border-t border-white/10 bg-black/40 text-xs text-white/50 flex justify-between items-center">
-                    <span id="totalCommitsCount">0 commits</span>
-                    <span id="totalBranchesCount">0 branches</span>
-                </div>
-            </aside>
+            <!-- Sidebar Header: Workspace -->
+            <div class="h-10 px-4 border-b border-git-border text-xs font-semibold text-white flex items-center space-x-2 shrink-0 bg-git-card">
+                <!-- Laptop + Gear + Orbit Network Workspace Icon -->
+                <svg class="w-4 h-4 text-git-orange shrink-0" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <!-- Orbital Rings & Nodes -->
+                    <circle cx="32" cy="32" r="28" stroke="currentColor" stroke-width="2" stroke-opacity="0.4"/>
+                    <circle cx="12" cy="12" r="3" fill="currentColor"/>
+                    <circle cx="52" cy="12" r="3" fill="currentColor"/>
+                    <circle cx="60" cy="32" r="3" fill="currentColor"/>
+                    <circle cx="32" cy="60" r="3" fill="currentColor"/>
+                    <!-- Laptop Screen & Base -->
+                    <rect x="17" y="21" width="30" height="20" rx="2" stroke="currentColor" stroke-width="3" fill="#161B22"/>
+                    <path d="M12 46 L17 41 H47 L52 46 H12 Z" stroke="currentColor" stroke-width="3" fill="#161B22"/>
+                    <line x1="29" y1="44" x2="35" y2="44" stroke="currentColor" stroke-width="1.8"/>
+                    <!-- Gear with Checkmark -->
+                    <circle cx="32" cy="31" r="4" stroke="currentColor" stroke-width="2"/>
+                    <path d="M30.5 31.2 L31.8 32.5 L34 29.8" stroke="#FFFFFF" stroke-width="2"/>
+                </svg>
+                <span class="tracking-wide">Workspace</span>
+            </div>
 
-            <!-- Right Main Panel: Clean Read-Only Code Viewer -->
-            <main class="flex-1 liquid-glass rounded-2xl flex flex-col overflow-hidden relative">
-                <!-- Code Header & File Details -->
-                <div class="h-12 bg-black/50 border-b border-white/10 flex items-center justify-between px-4 text-xs shrink-0">
-                    <div class="flex items-center space-x-2 truncate">
-                        <i id="codeHeaderIcon" class="fa-regular fa-file-code text-[#2C67C5] text-sm"></i>
-                        <span id="codeFilePath" class="text-white font-mono font-semibold text-sm truncate">Select a file</span>
-                        <span id="codeLineCount" class="text-white/40 text-xs ml-2 font-mono"></span>
+            <!-- FILE EXPLORER PANEL -->
+            <div id="tabFilesPanel" class="flex-1 flex flex-col overflow-y-auto p-3">
+                <div class="flex items-center justify-between text-xs text-git-muted uppercase font-semibold tracking-wider mb-2">
+                    <span>Working Directory</span>
+                </div>
+                <!-- File Tree List -->
+                <div id="fileTreeContainer" class="space-y-1 font-mono text-sm">
+                    <!-- Dynamic File List Items -->
+                </div>
+            </div>
+
+            <!-- Storage Quick Footer (Hidden) -->
+            <div id="storageQuickFooter" style="display: none;" class="p-2.5 border-t border-git-border bg-git-dark text-[11px] text-git-muted flex justify-between items-center">
+                <span class="flex items-center"><i class="fa-solid fa-database mr-1.5 text-git-blue"></i> Web VFS Engine</span>
+                <span id="repoStatusIndicator" class="text-green-400 font-mono">● Active</span>
+            </div>
+
+        </aside>
+
+        <!-- MAIN CENTER CONTENT WORKSPACE -->
+        <main class="flex-1 flex flex-col bg-git-dark overflow-hidden">
+
+            <!-- Workspace Top View Tabs -->
+            <div class="h-10 bg-git-card border-b border-git-border flex items-center justify-between px-2 shrink-0 text-xs">
+                <div class="flex items-center space-x-1 overflow-x-auto">
+                    <button id="viewTabEditor" onclick="switchViewTab('editor')" class="px-3 py-1.5 rounded-t-md text-git-muted hover:text-white flex items-center space-x-2">
+                        <i class="fa-solid fa-code text-git-blue"></i>
+                        <span id="activeEditorFileName">File Editor</span>
+                    </button>
+                    <button id="viewTabDiff" onclick="switchViewTab('diff')" class="px-3 py-1.5 rounded-t-md text-git-muted hover:text-white flex items-center space-x-2">
+                        <i class="fa-solid fa-file-code text-git-orange"></i>
+                        <span>Side-by-Side Diff</span>
+                    </button>
+                    <button id="viewTabGraph" onclick="switchViewTab('graph')" class="px-3 py-1.5 rounded-t-md bg-git-dark text-white font-medium flex items-center space-x-2 border-t-2 border-git-orange">
+                        <i class="fa-solid fa-diagram-project text-git-purple"></i>
+                        <span>Commit Graph (DAG)</span>
+                    </button>
+                </div>
+                <button id="viewTabPreview" onclick="switchViewTab('preview')" title="Preview Dashboard & Feedback" class="px-3 py-1 rounded text-git-muted hover:text-white hover:bg-git-dark flex items-center space-x-1.5 transition cursor-pointer border border-git-border hover:border-git-orange">
+                    <i class="fa-solid fa-display text-git-orange"></i>
+                    <span>Preview</span>
+                </button>
+            </div>
+
+            <!-- VIEW 1: CODE EDITOR -->
+            <div id="viewContainerEditor" class="flex-1 flex flex-col overflow-hidden relative hidden">
+                <!-- Editor Info Bar: Folder Breadcrumb & Commit Details -->
+                <div class="min-h-8 py-1.5 bg-git-dark/80 border-b border-git-border flex items-center justify-between px-3 text-xs font-mono text-git-muted gap-2">
+                    <!-- Folder Breadcrumb -->
+                    <div class="flex items-center space-x-1.5 truncate">
+                        <i class="fa-solid fa-folder-tree text-git-orange text-[11px]"></i>
+                        <span id="editorFolderDisplay" class="text-git-blue font-semibold">/ (root)</span>
+                        <span class="text-git-muted">/</span>
+                        <span id="editorFilePathDisplay" class="text-white font-medium">index.html</span>
                     </div>
-                    <div class="flex items-center space-x-2">
-                        <!-- Commit Details Pill for this file -->
-                        <div id="fileCommitPill" class="hidden items-center space-x-1.5 liquid-pill px-3 py-1 rounded-full text-[11px] font-mono cursor-pointer border border-[#2C67C5]/30 bg-[#2C67C5]/10 hover:bg-[#2C67C5]/20" onclick="showActiveFileCommitHistory()">
-                            <i class="fa-solid fa-code-commit text-[#2C67C5]"></i>
-                            <span id="fileCommitHash" class="text-[#2C67C5] font-semibold"></span>
-                            <span id="fileCommitMsg" class="text-white/60 max-w-[150px] truncate hidden md:inline"></span>
+
+                    <!-- Commit Info & Actions -->
+                    <div class="flex items-center space-x-2 shrink-0">
+                        <!-- Commit Badge -->
+                        <div id="editorFileCommitDisplay" onclick="openActiveFileCommitModal()" title="Click to view file commit history" class="flex items-center space-x-1.5 bg-git-card border border-git-border hover:border-git-purple px-2 py-0.5 rounded cursor-pointer transition text-[11px]">
+                            <i class="fa-solid fa-code-commit text-git-purple"></i>
+                            <span id="editorCommitHashBadge" class="text-git-purple font-mono font-semibold">commit</span>
+                            <span id="editorCommitMsgBadge" class="text-git-muted max-w-[130px] truncate hidden sm:inline">msg</span>
                         </div>
-                        <button onclick="copyCodeToClipboard()" class="liquid-pill text-xs px-3.5 py-1 rounded-full text-white font-medium flex items-center space-x-1.5 hover:border-[#2C67C5]/40 hover:text-[#2C67C5]" title="Copy file content">
-                            <i class="fa-regular fa-copy text-xs"></i>
-                            <span id="copyBtnText">Copy</span>
+                        <span id="editorFileHashDisplay" class="text-[11px] text-git-blue hidden md:inline">Hash: e3b0c442...</span>
+                        <button onclick="saveActiveFileFromEditor()" class="text-git-accent hover:text-green-400 flex items-center space-x-1 font-sans">
+                            <i class="fa-solid fa-floppy-disk"></i>
+                            <span>Save Changes</span>
                         </button>
                     </div>
                 </div>
+                <!-- Textarea Editor -->
+                <textarea id="codeEditorArea" oninput="markFileAsModified()" class="flex-1 bg-git-dark p-4 font-mono text-sm text-git-text focus:outline-none resize-none leading-relaxed" spellcheck="false"></textarea>
+            </div>
 
-                <!-- Code Content Container with Line Numbers -->
-                <div class="flex-1 overflow-y-auto overflow-x-auto p-4 font-mono text-xs leading-relaxed flex select-text bg-black/30" id="codeContainer">
-                    <div id="codeLineNumbers" class="line-num select-none"></div>
-                    <pre id="codeContent" class="flex-1 text-white whitespace-pre overflow-x-visible font-mono"></pre>
-                </div>
-            </main>
-
-        </div>
-
-        <!-- ================================================================= -->
-        <!-- VIEW 2: CHANGES & SIDE-BY-SIDE DIFF -->
-        <!-- ================================================================= -->
-        <div id="viewChanges" class="hidden flex-1 gap-3 overflow-hidden">
-            
-            <!-- Left Sidebar: Changed Files List -->
-            <aside class="w-80 liquid-glass rounded-2xl flex flex-col shrink-0 overflow-hidden">
-                <div class="p-3.5 border-b border-white/10 flex items-center justify-between">
-                    <span class="text-xs font-semibold uppercase tracking-wider text-white/60">Source Control</span>
-                    <span id="totalChangesPill" class="text-[11px] bg-[#2C67C5] text-white font-bold px-2.5 py-0.5 rounded-full">0 changes</span>
-                </div>
-
-                <div class="flex-1 overflow-y-auto p-3 space-y-4">
-                    <!-- Staged Changes Section -->
-                    <div>
-                        <div class="text-[11px] font-semibold text-white/60 uppercase tracking-wider mb-2 flex items-center justify-between">
-                            <span>Staged Changes</span>
-                            <span id="stagedCountDisplay" class="font-mono text-[#2C67C5] font-bold">(0)</span>
-                        </div>
-                        <div id="stagedListContainer" class="space-y-1 font-mono text-xs">
-                            <!-- Populated dynamically -->
-                        </div>
-                    </div>
-
-                    <!-- Unstaged Working Directory Changes -->
-                    <div>
-                        <div class="text-[11px] font-semibold text-white/60 uppercase tracking-wider mb-2 flex items-center justify-between">
-                            <span>Working Directory Changes</span>
-                            <span id="unstagedCountDisplay" class="font-mono text-white font-bold">(0)</span>
-                        </div>
-                        <div id="unstagedListContainer" class="space-y-1 font-mono text-xs">
-                            <!-- Populated dynamically -->
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Quick Terminal Tip -->
-                <div class="p-3.5 border-t border-white/10 bg-black/50 text-xs text-white/70 space-y-1">
-                    <div class="font-medium text-white flex items-center space-x-1.5">
-                        <i class="fa-solid fa-lightbulb text-[#2C67C5]"></i>
-                        <span>CLI Quick Hint</span>
-                    </div>
-                    <p class="text-[11px] text-white/50">Run <code class="text-white font-mono bg-white/10 px-1 py-0.5 rounded">minigit add &lt;file&gt;</code> to stage, and <code class="text-white font-mono bg-white/10 px-1 py-0.5 rounded">minigit commit -m "..."</code> to record changes.</p>
-                </div>
-            </aside>
-
-            <!-- Right Main Panel: Side-by-Side & Unified Diff Viewer -->
-            <main class="flex-1 liquid-glass rounded-2xl flex flex-col overflow-hidden relative">
-                <!-- Diff Toolbar -->
-                <div class="h-12 bg-black/50 border-b border-white/10 flex items-center justify-between px-4 text-xs shrink-0 font-mono">
-                    <div class="flex items-center space-x-2.5">
-                        <span class="text-white/50">Diffing:</span>
-                        <select id="diffFileSelect" onchange="renderSelectedDiff()" class="liquid-pill text-white px-3 py-1 rounded-lg focus:outline-none cursor-pointer">
+            <!-- VIEW 2: VISUAL SIDE-BY-SIDE DIFF VIEWER -->
+            <div id="viewContainerDiff" class="flex-1 flex flex-col overflow-hidden hidden">
+                <div class="h-8 bg-git-card border-b border-git-border flex items-center justify-between px-4 text-xs font-mono">
+                    <div class="flex items-center space-x-2">
+                        <span class="text-git-muted">Comparing:</span>
+                        <select id="diffFileSelect" onchange="renderDiffView()" class="bg-git-dark border border-git-border text-white px-2 py-0.5 rounded focus:outline-none">
                             <!-- Populated dynamically -->
                         </select>
                     </div>
-                    <div class="flex items-center space-x-3">
-                        <span class="bg-zinc-800 text-zinc-300 border border-zinc-600 px-3 py-0.5 rounded-full flex items-center text-[11px]"><i class="fa-solid fa-minus mr-1.5"></i> HEAD Baseline</span>
-                        <span class="bg-[#2C67C5] text-white font-semibold px-3 py-0.5 rounded-full flex items-center text-[11px]"><i class="fa-solid fa-plus mr-1.5"></i> Working Copy</span>
+                    <div class="flex items-center space-x-4">
+                        <span class="text-red-400 flex items-center"><i class="fa-solid fa-minus mr-1"></i> HEAD Commit</span>
+                        <span class="text-green-400 flex items-center"><i class="fa-solid fa-plus mr-1"></i> Working Copy</span>
                     </div>
                 </div>
 
                 <!-- Diff Content Grid -->
-                <div class="flex-1 grid grid-cols-2 divide-x divide-white/10 font-mono text-xs overflow-y-auto">
-                    <!-- Left: Baseline (Head) -->
-                    <div class="p-4 bg-black/40 overflow-x-auto">
-                        <div class="text-white/40 border-b border-white/10 pb-1 mb-2 font-bold uppercase text-[10px] tracking-wider">HEAD Commit Version</div>
+                <div class="flex-1 grid grid-cols-2 divide-x divide-git-border font-mono text-xs overflow-y-auto">
+                    <!-- Left: Original (Head) -->
+                    <div class="p-3 bg-git-dark/40 overflow-x-auto">
+                        <div class="text-git-muted border-b border-git-border pb-1 mb-2 font-bold uppercase text-[10px]">Baseline / Staged File</div>
                         <div id="diffOriginalLines" class="space-y-0.5"></div>
                     </div>
-                    <!-- Right: Working Copy -->
-                    <div class="p-4 bg-black/40 overflow-x-auto">
-                        <div class="text-white/40 border-b border-white/10 pb-1 mb-2 font-bold uppercase text-[10px] tracking-wider">Working Copy Version</div>
+                    <!-- Right: Modified (Working Copy) -->
+                    <div class="p-3 bg-git-dark/40 overflow-x-auto">
+                        <div class="text-git-muted border-b border-git-border pb-1 mb-2 font-bold uppercase text-[10px]">Working Copy</div>
                         <div id="diffModifiedLines" class="space-y-0.5"></div>
                     </div>
                 </div>
-            </main>
-
-        </div>
-
-        <!-- ================================================================= -->
-        <!-- VIEW 3: INTERACTIVE COMMIT GRAPH (DAG) -->
-        <!-- ================================================================= -->
-        <div id="viewGraph" class="hidden flex-1 liquid-glass rounded-2xl flex flex-col overflow-hidden p-4 relative">
-            <div class="flex justify-between items-center mb-3 shrink-0">
-                <div class="flex items-center space-x-3">
-                    <h3 class="text-sm font-semibold text-white flex items-center space-x-2">
-                        <i class="fa-solid fa-diagram-project text-white/80"></i>
-                        <span>Directed Acyclic Graph (DAG)</span>
-                    </h3>
-                    <span class="text-xs text-white/40">Click any commit to inspect details</span>
-                </div>
-                <div class="flex items-center space-x-3 text-xs text-white/60">
-                    <span class="flex items-center space-x-1.5"><span class="w-2.5 h-2.5 rounded-full bg-[#2C67C5] inline-block"></span> <span>HEAD Commit</span></span>
-                    <span class="flex items-center space-x-1.5"><span class="w-2.5 h-2.5 rounded-full bg-white inline-block"></span> <span>Commit</span></span>
-                    <span class="flex items-center space-x-1.5"><span class="w-2.5 h-0.5 bg-[#2C67C5]/60 inline-block"></span> <span>Parent Edge</span></span>
-                </div>
             </div>
 
-            <!-- Interactive Canvas & Inspector Split -->
-            <div class="flex-1 flex gap-3 overflow-hidden min-h-0">
-                <!-- SVG Canvas Container -->
-                <div class="flex-1 bg-black/60 border border-white/10 rounded-2xl relative overflow-y-auto p-4 shadow-inner">
+            <!-- VIEW 3: COMMIT DAG GRAPH VISUALIZER -->
+            <div id="viewContainerGraph" class="flex-1 flex flex-col bg-git-dark overflow-hidden p-4">
+                <div class="flex justify-between items-center mb-3">
+                    <h3 class="text-sm font-semibold text-white flex items-center space-x-2">
+                        <i class="fa-solid fa-diagram-project text-git-purple"></i>
+                        <span>Commit History & Branch Graph</span>
+                    </h3>
+                    <span class="text-xs text-git-muted">Interactive Directed Acyclic Graph (DAG)</span>
+                </div>
+                <!-- Interactive Canvas Container -->
+                <div class="flex-1 bg-git-card border border-git-border rounded-lg relative overflow-auto p-4">
                     <svg id="commitDagSvg" class="w-full h-full min-h-[300px]">
-                        <!-- Rendered dynamically -->
+                        <!-- Rendered lines & nodes dynamically -->
                     </svg>
                 </div>
+            </div>
 
-                <!-- Commit Inspector Drawer -->
-                <div id="commitInspectorDrawer" class="w-80 liquid-glass-subtle rounded-2xl p-4 border border-white/15 flex flex-col space-y-3 overflow-y-auto shrink-0">
-                    <span class="text-xs font-semibold uppercase tracking-wider text-white/40">Commit Details</span>
-                    <div id="inspectorContent" class="space-y-3 text-xs">
-                        <p class="text-white/40 italic">Select a commit from the graph to inspect its tree and metadata.</p>
+            <!-- VIEW 4: PREVIEW WITH DASHBOARD & FEEDBACK -->
+            <div id="viewContainerPreview" class="flex-1 flex flex-col bg-git-dark overflow-y-auto hidden">
+                <!-- Preview Navigation Sub-bar -->
+                <div class="h-10 bg-git-card/60 border-b border-git-border flex items-center justify-between px-4 shrink-0 text-xs">
+                    <div class="flex items-center space-x-2">
+                        <i class="fa-solid fa-gauge-high text-git-orange"></i>
+                        <span class="font-semibold text-white">Project Preview Hub</span>
+                    </div>
+                    <div class="flex items-center bg-git-dark p-0.5 rounded-lg border border-git-border">
+                        <button id="previewSubBtnDashboard" onclick="switchPreviewSubTab('dashboard')" class="px-3 py-1 rounded-md text-xs font-medium bg-git-orange text-white flex items-center space-x-1.5 transition">
+                            <i class="fa-solid fa-chart-line text-[11px]"></i>
+                            <span>Dashboard</span>
+                        </button>
+                        <button id="previewSubBtnFeedback" onclick="switchPreviewSubTab('feedback')" class="px-3 py-1 rounded-md text-xs font-medium text-git-muted hover:text-white flex items-center space-x-1.5 transition">
+                            <i class="fa-solid fa-comment-dots text-[11px]"></i>
+                            <span>Feedback</span>
+                            <span id="feedbackBadgeCount" class="bg-git-border text-white text-[10px] px-1.5 py-0.2 rounded-full font-bold">2</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- SUB-VIEW 1: DASHBOARD -->
+                <div id="previewSubViewDashboard" class="flex-1 p-4 space-y-4 overflow-y-auto">
+                    <!-- Metrics Summary Grid -->
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div class="bg-git-card border border-git-border rounded-lg p-3 flex flex-col justify-between">
+                            <div class="flex items-center justify-between text-git-muted text-xs">
+                                <span>Total Commits</span>
+                                <i class="fa-solid fa-code-commit text-git-purple"></i>
+                            </div>
+                            <div id="metricTotalCommits" class="text-xl font-bold text-white mt-1">0</div>
+                            <span class="text-[10px] text-git-muted">In commit history</span>
+                        </div>
+                        <div class="bg-git-card border border-git-border rounded-lg p-3 flex flex-col justify-between">
+                            <div class="flex items-center justify-between text-git-muted text-xs">
+                                <span>Active Branches</span>
+                                <i class="fa-solid fa-code-branch text-git-blue"></i>
+                            </div>
+                            <div id="metricTotalBranches" class="text-xl font-bold text-white mt-1">1</div>
+                            <span id="metricBranchNames" class="text-[10px] text-git-blue truncate">main</span>
+                        </div>
+                        <div class="bg-git-card border border-git-border rounded-lg p-3 flex flex-col justify-between">
+                            <div class="flex items-center justify-between text-git-muted text-xs">
+                                <span>Project Files</span>
+                                <i class="fa-solid fa-folder-tree text-git-orange"></i>
+                            </div>
+                            <div id="metricTotalFiles" class="text-xl font-bold text-white mt-1">0</div>
+                            <span class="text-[10px] text-git-muted">In Virtual FS</span>
+                        </div>
+                        <div class="bg-git-card border border-git-border rounded-lg p-3 flex flex-col justify-between">
+                            <div class="flex items-center justify-between text-git-muted text-xs">
+                                <span>Current HEAD</span>
+                                <i class="fa-solid fa-circle-dot text-green-400"></i>
+                            </div>
+                            <div id="metricCurrentHead" class="text-xs font-mono font-bold text-git-purple mt-1 truncate">root</div>
+                            <span id="metricActiveBranchDisplay" class="text-[10px] text-green-400">branch: main</span>
+                        </div>
+                    </div>
+
+                    <!-- Live App Sandbox Preview + Recent Activity Grid -->
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        <!-- Live Web Output Card -->
+                        <div class="bg-git-card border border-git-border rounded-lg flex flex-col h-[380px] overflow-hidden">
+                            <div class="px-3 py-2 border-b border-git-border flex items-center justify-between bg-git-dark text-xs">
+                                <div class="flex items-center space-x-2">
+                                    <i class="fa-solid fa-window-maximize text-git-blue"></i>
+                                    <span class="font-medium text-white">Live Web Preview</span>
+                                    <select id="previewFileSelect" onchange="updateLivePreviewIframe()" class="bg-git-card border border-git-border text-white text-[11px] rounded px-1.5 py-0.5 focus:outline-none">
+                                        <!-- HTML files from VFS -->
+                                    </select>
+                                </div>
+                                <button onclick="updateLivePreviewIframe()" class="text-git-muted hover:text-white px-2 py-0.5 rounded text-[11px] flex items-center space-x-1" title="Reload Sandbox">
+                                    <i class="fa-solid fa-arrow-rotate-right"></i>
+                                    <span>Reload</span>
+                                </button>
+                            </div>
+                            <div class="flex-1 bg-white relative">
+                                <iframe id="projectLiveIframe" sandbox="allow-scripts allow-modals" class="w-full h-full border-none bg-white"></iframe>
+                            </div>
+                        </div>
+
+                        <!-- Activity Stream & Commit Log -->
+                        <div class="bg-git-card border border-git-border rounded-lg flex flex-col h-[380px] overflow-hidden">
+                            <div class="px-3 py-2 border-b border-git-border flex items-center justify-between bg-git-dark text-xs">
+                                <div class="flex items-center space-x-2">
+                                    <i class="fa-solid fa-clock-rotate-left text-git-purple"></i>
+                                    <span class="font-medium text-white">Recent Commit Activity</span>
+                                </div>
+                                <span class="text-[10px] text-git-muted">Audit Trail</span>
+                            </div>
+                            <div id="previewActivityStream" class="flex-1 p-3 overflow-y-auto space-y-2 font-mono text-xs">
+                                <!-- Populated dynamically -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SUB-VIEW 2: FEEDBACK -->
+                <div id="previewSubViewFeedback" class="flex-1 p-4 space-y-4 overflow-y-auto hidden">
+                    <div class="max-w-2xl mx-auto space-y-4">
+                        <!-- Feedback Input Card -->
+                        <div class="bg-git-card border border-git-border rounded-lg p-4 space-y-3">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <h4 class="text-sm font-semibold text-white">User Feedback &amp; Suggestions</h4>
+                                    <p class="text-xs text-git-muted">Share your thoughts on MiniGit Studio experience</p>
+                                </div>
+                                <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-git-orange/20 text-git-orange border border-git-orange/30">Community</span>
+                            </div>
+
+                            <!-- Rating Stars -->
+                            <div>
+                                <label class="block text-xs font-medium text-git-muted mb-1">Your Rating</label>
+                                <div class="flex items-center space-x-2" id="feedbackRatingStars">
+                                    <button type="button" onclick="setFeedbackRating(1)" class="star-btn text-yellow-400 text-base focus:outline-none"><i class="fa-solid fa-star"></i></button>
+                                    <button type="button" onclick="setFeedbackRating(2)" class="star-btn text-yellow-400 text-base focus:outline-none"><i class="fa-solid fa-star"></i></button>
+                                    <button type="button" onclick="setFeedbackRating(3)" class="star-btn text-yellow-400 text-base focus:outline-none"><i class="fa-solid fa-star"></i></button>
+                                    <button type="button" onclick="setFeedbackRating(4)" class="star-btn text-yellow-400 text-base focus:outline-none"><i class="fa-solid fa-star"></i></button>
+                                    <button type="button" onclick="setFeedbackRating(5)" class="star-btn text-yellow-400 text-base focus:outline-none"><i class="fa-solid fa-star"></i></button>
+                                    <span id="feedbackRatingLabel" class="text-xs text-git-muted font-medium ml-2">5 of 5 Stars</span>
+                                </div>
+                            </div>
+
+                            <!-- Category Selection -->
+                            <div>
+                                <label class="block text-xs font-medium text-git-muted mb-1">Category</label>
+                                <div class="flex flex-wrap gap-1.5" id="feedbackCategoryContainer">
+                                    <button type="button" onclick="selectFeedbackCategory('General', this)" class="category-btn px-2.5 py-1 rounded text-xs border border-git-orange bg-git-orange text-white">General Experience</button>
+                                    <button type="button" onclick="selectFeedbackCategory('Feature', this)" class="category-btn px-2.5 py-1 rounded text-xs border border-git-border text-git-muted hover:text-white">Feature Request</button>
+                                    <button type="button" onclick="selectFeedbackCategory('Bug', this)" class="category-btn px-2.5 py-1 rounded text-xs border border-git-border text-git-muted hover:text-white">Bug Report</button>
+                                    <button type="button" onclick="selectFeedbackCategory('UI/UX', this)" class="category-btn px-2.5 py-1 rounded text-xs border border-git-border text-git-muted hover:text-white">UI / Design</button>
+                                </div>
+                            </div>
+
+                            <!-- Comment Input -->
+                            <div>
+                                <label class="block text-xs font-medium text-git-muted mb-1">Comments</label>
+                                <textarea id="feedbackCommentInput" rows="3" placeholder="Tell us what you liked, what can be improved, or bugs you encountered..." class="w-full bg-git-dark border border-git-border rounded-lg p-2.5 text-xs text-white placeholder-git-muted focus:outline-none focus:border-git-orange resize-none"></textarea>
+                            </div>
+
+                            <!-- Author Name / Handle (Optional) -->
+                            <div class="grid grid-cols-2 gap-2">
+                                <div>
+                                    <label class="block text-xs font-medium text-git-muted mb-1">Your Name / Handle</label>
+                                    <input id="feedbackAuthorInput" type="text" placeholder="e.g., Alex (dev)" class="w-full bg-git-dark border border-git-border rounded-md px-2.5 py-1.5 text-xs text-white focus:outline-none font-mono">
+                                </div>
+                                <div class="flex items-end">
+                                    <button onclick="submitUserFeedback()" class="w-full bg-git-accent hover:bg-green-700 text-white font-medium text-xs py-1.5 rounded-md transition flex items-center justify-center space-x-1.5">
+                                        <i class="fa-solid fa-paper-plane"></i>
+                                        <span>Submit Feedback</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Confirmation Notification (Hidden by default) -->
+                            <div id="feedbackSuccessAlert" class="hidden p-2.5 rounded-md bg-green-950/60 border border-green-700/60 text-green-300 text-xs flex items-center space-x-2">
+                                <i class="fa-solid fa-circle-check text-green-400"></i>
+                                <span>Thank you! Your feedback has been submitted successfully.</span>
+                            </div>
+                        </div>
+
+                        <!-- Feedback History / Wall -->
+                        <div class="space-y-2">
+                            <div class="flex items-center justify-between text-xs text-git-muted">
+                                <span class="font-semibold uppercase tracking-wider">Submitted Feedback</span>
+                                <span id="feedbackTotalCountLabel" class="text-git-muted">2 entries</span>
+                            </div>
+                            <div id="feedbackListContainer" class="space-y-2">
+                                <!-- Populated dynamically -->
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
 
-        <!-- ================================================================= -->
-        <!-- VIEW 4: COMMITS LOG & TIMELINE -->
-        <!-- ================================================================= -->
-        <div id="viewLog" class="hidden flex-1 liquid-glass rounded-2xl flex flex-col overflow-hidden p-5">
-            <div class="flex items-center justify-between pb-3 border-b border-white/10 mb-4 shrink-0">
+            <!-- BOTTOM CLI TERMINAL CONSOLE (Hidden by default) -->
+            <div id="cliTerminalContainer" class="hidden h-48 border-t border-git-border bg-black flex flex-col shrink-0">
+                <!-- Terminal Header -->
+                <div class="h-7 bg-git-card border-b border-git-border flex items-center justify-between px-3 text-xs text-git-muted">
+                    <div class="flex items-center space-x-2">
+                        <i class="fa-solid fa-terminal text-git-orange"></i>
+                        <span class="font-mono font-medium text-white">MiniGit CLI Console</span>
+                    </div>
+                    <div class="flex items-center space-x-3">
+                        <span class="text-[11px]">Type <code class="text-git-blue font-mono">minigit help</code> for commands</span>
+                        <button onclick="clearTerminalConsole()" title="Clear Output" class="hover:text-white"><i class="fa-solid fa-ban"></i></button>
+                        <button onclick="toggleTerminalConsole()" title="Hide Console" class="hover:text-white text-git-muted hover:text-red-400"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+                </div>
+
+                <!-- Terminal Output Area -->
+                <div id="terminalOutput" class="flex-1 p-3 font-mono text-xs overflow-y-auto space-y-1.5 text-git-text leading-relaxed">
+                    <div class="text-git-muted">Mini-Git Engine initialized. Enter terminal commands below.</div>
+                </div>
+
+                <!-- CLI Command Input Line -->
+                <div class="p-2 bg-git-dark border-t border-git-border flex items-center space-x-2 font-mono text-xs">
+                    <span class="text-git-accent font-bold">user@minigit:~$</span>
+                    <input id="cliInput" type="text" placeholder="minigit commit -m &quot;Updated files&quot;" onkeydown="handleCliKeyDown(event)" class="flex-1 bg-transparent text-white focus:outline-none">
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <!-- FILE COMMIT HISTORY DETAIL MODAL DIALOG -->
+    <div id="fileCommitModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+        <div class="bg-git-card border border-git-border w-full max-w-lg rounded-xl shadow-2xl p-5 space-y-4">
+            <div class="flex items-center justify-between border-b border-git-border pb-3">
+                <div class="flex items-center space-x-2">
+                    <i class="fa-solid fa-timeline text-git-purple"></i>
+                    <h3 class="font-semibold text-white text-sm">File Commit Provenance</h3>
+                </div>
+                <button onclick="closeFileCommitModal()" class="text-git-muted hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <div class="space-y-3 text-xs">
+                <!-- File & Folder Info Grid -->
+                <div class="bg-git-dark p-3 rounded-lg border border-git-border space-y-2">
+                    <div class="flex justify-between items-center">
+                        <span class="text-git-muted">File Name:</span>
+                        <span id="fcmFileName" class="text-white font-mono font-medium"></span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="text-git-muted">Folder Path:</span>
+                        <span id="fcmFolderPath" class="text-git-blue font-mono font-semibold"></span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="text-git-muted">Working Status:</span>
+                        <span id="fcmFileStatus" class="font-mono"></span>
+                    </div>
+                </div>
+
+                <!-- Commit History for this file -->
                 <div>
-                    <h3 class="text-base font-semibold text-white flex items-center space-x-2">
-                        <i class="fa-solid fa-clock-rotate-left text-[#2C67C5]"></i>
-                        <span>Commit Timeline</span>
-                    </h3>
-                    <p class="text-xs text-white/40 mt-0.5">Linear chronological log of commits</p>
-                </div>
-                <span id="logTotalCount" class="liquid-pill text-xs px-3 py-1 rounded-full text-white font-mono border border-[#2C67C5]/30 bg-[#2C67C5]/10">0 commits</span>
-            </div>
-
-            <div id="commitTimelineList" class="flex-1 overflow-y-auto space-y-3 pr-2">
-                <!-- Populated dynamically -->
-            </div>
-        </div>
-
-    </div>
-
-    <!-- ================================================================= -->
-    <!-- SLIDE-OVER DRAWER: CLI CHEATSHEET & REPO HELPER -->
-    <!-- ================================================================= -->
-    <div id="cliDrawer" class="fixed inset-0 bg-black/75 z-50 flex justify-end hidden transition-all" onclick="if(event.target === this) toggleCliDrawer()">
-        <div class="w-[420px] max-w-[95vw] h-full liquid-glass border-l border-white/20 p-5 flex flex-col space-y-4 shadow-2xl">
-            <div class="flex items-center justify-between pb-3 border-b border-white/10 shrink-0">
-                <div class="flex items-center space-x-2.5">
-                    <div class="w-8 h-8 rounded-full bg-[#2C67C5]/20 border border-[#2C67C5]/40 flex items-center justify-center text-[#2C67C5]">
-                        <i class="fa-solid fa-terminal text-sm"></i>
+                    <div class="flex items-center justify-between mb-2">
+                        <h4 class="text-git-muted font-semibold uppercase text-[11px] tracking-wider">Commit History for File</h4>
+                        <span id="fcmCommitCount" class="text-[10px] text-git-muted font-mono">0 commits</span>
                     </div>
-                    <div>
-                        <h4 class="text-sm font-semibold text-white">MiniGit CLI Commands</h4>
-                        <p class="text-[11px] text-white/50">Run commands in your terminal shell</p>
-                    </div>
-                </div>
-                <button onclick="toggleCliDrawer()" class="w-7 h-7 rounded-full liquid-pill flex items-center justify-center text-white/70 hover:text-white"><i class="fa-solid fa-xmark text-xs"></i></button>
-            </div>
-
-            <div class="flex-1 overflow-y-auto space-y-3 pr-1 text-xs">
-                <p class="text-white/60 text-xs">Mini-Git operates on your real filesystem via the terminal. After making changes, run <code class="text-white font-mono bg-white/10 px-1 py-0.5 rounded">minigit html</code> to update this view.</p>
-
-                <!-- Command Items -->
-                <div class="space-y-2 font-mono">
-                    <div class="p-3 bg-white/5 rounded-xl border border-white/10 space-y-1">
-                        <div class="flex items-center justify-between text-white font-semibold">
-                            <span><span class="text-[#2C67C5]">minigit</span> status</span>
-                            <button onclick="copyCommand('minigit status', this)" class="text-[11px] text-[#2C67C5] hover:underline font-sans font-medium">Copy</button>
-                        </div>
-                        <p class="text-[11px] font-sans text-white/40">View staged, modified, deleted, and untracked files</p>
-                    </div>
-
-                    <div class="p-3 bg-white/5 rounded-xl border border-white/10 space-y-1">
-                        <div class="flex items-center justify-between text-white font-semibold">
-                            <span><span class="text-[#2C67C5]">minigit</span> add .</span>
-                            <button onclick="copyCommand('minigit add .', this)" class="text-[11px] text-[#2C67C5] hover:underline font-sans font-medium">Copy</button>
-                        </div>
-                        <p class="text-[11px] font-sans text-white/40">Stage all working directory changes</p>
-                    </div>
-
-                    <div class="p-3 bg-white/5 rounded-xl border border-white/10 space-y-1">
-                        <div class="flex items-center justify-between text-white font-semibold">
-                            <span><span class="text-[#2C67C5]">minigit</span> commit -m "message"</span>
-                            <button onclick="copyCommand('minigit commit -m &quot;Updated files&quot;', this)" class="text-[11px] text-[#2C67C5] hover:underline font-sans font-medium">Copy</button>
-                        </div>
-                        <p class="text-[11px] font-sans text-white/40">Record a snapshot of staged changes</p>
-                    </div>
-
-                    <div class="p-3 bg-white/5 rounded-xl border border-white/10 space-y-1">
-                        <div class="flex items-center justify-between text-white font-semibold">
-                            <span><span class="text-[#2C67C5]">minigit</span> diff</span>
-                            <button onclick="copyCommand('minigit diff', this)" class="text-[11px] text-[#2C67C5] hover:underline font-sans font-medium">Copy</button>
-                        </div>
-                        <p class="text-[11px] font-sans text-white/40">Show differences between working files and index</p>
-                    </div>
-
-                    <div class="p-3 bg-white/5 rounded-xl border border-white/10 space-y-1">
-                        <div class="flex items-center justify-between text-white font-semibold">
-                            <span><span class="text-[#2C67C5]">minigit</span> branch &lt;name&gt;</span>
-                            <button onclick="copyCommand('minigit branch feature', this)" class="text-[11px] text-[#2C67C5] hover:underline font-sans font-medium">Copy</button>
-                        </div>
-                        <p class="text-[11px] font-sans text-white/40">Create a new branch at current commit</p>
-                    </div>
-
-                    <div class="p-3 bg-white/5 rounded-xl border border-white/10 space-y-1">
-                        <div class="flex items-center justify-between text-white font-semibold">
-                            <span><span class="text-[#2C67C5]">minigit</span> checkout &lt;branch&gt;</span>
-                            <button onclick="copyCommand('minigit checkout feature', this)" class="text-[11px] text-[#2C67C5] hover:underline font-sans font-medium">Copy</button>
-                        </div>
-                        <p class="text-[11px] font-sans text-white/40">Switch active branch or visit commit hash</p>
-                    </div>
-
-                    <div class="p-3 bg-white/5 rounded-xl border border-white/10 space-y-1">
-                        <div class="flex items-center justify-between text-white font-semibold">
-                            <span><span class="text-[#2C67C5]">minigit</span> merge &lt;branch&gt;</span>
-                            <button onclick="copyCommand('minigit merge feature', this)" class="text-[11px] text-[#2C67C5] hover:underline font-sans font-medium">Copy</button>
-                        </div>
-                        <p class="text-[11px] font-sans text-white/40">Fast-forward merge target branch into current</p>
-                    </div>
-
-                    <div class="p-3 bg-white/5 rounded-xl border border-white/10 space-y-1">
-                        <div class="flex items-center justify-between text-white font-semibold">
-                            <span><span class="text-[#2C67C5]">minigit</span> html</span>
-                            <button onclick="copyCommand('minigit html', this)" class="text-[11px] text-[#2C67C5] hover:underline font-sans font-medium">Copy</button>
-                        </div>
-                        <p class="text-[11px] font-sans text-white/40">Re-generate and refresh this report</p>
+                    <div id="fcmCommitHistoryList" class="space-y-2 max-h-56 overflow-y-auto pr-1">
+                        <!-- Populated dynamically -->
                     </div>
                 </div>
             </div>
 
-            <div class="pt-2 border-t border-white/10 shrink-0">
-                <button onclick="toggleCliDrawer()" class="w-full py-2 bg-[#2C67C5] hover:bg-[#2354a3] text-white font-semibold text-xs rounded-xl transition active:scale-95">Close Helper</button>
+            <div class="flex justify-end pt-2 border-t border-git-border">
+                <button onclick="closeFileCommitModal()" class="px-4 py-1.5 bg-git-border hover:bg-gray-700 text-white text-xs rounded transition">Close</button>
             </div>
         </div>
     </div>
 
-    <!-- ================================================================= -->
-    <!-- FILE COMMIT HISTORY MODAL -->
-    <!-- ================================================================= -->
-    <div id="fileHistoryModal" class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center hidden" onclick="if(event.target === this) closeFileHistoryModal()">
-        <div class="liquid-glass rounded-3xl p-6 w-[520px] max-w-[95vw] space-y-4 shadow-2xl border border-white/20">
-            <div class="flex items-center justify-between border-b border-white/10 pb-3">
-                <div class="flex items-center space-x-2.5">
-                    <div class="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white">
-                        <i class="fa-solid fa-code-commit text-sm"></i>
-                    </div>
-                    <div>
-                        <h3 class="text-sm font-semibold text-white">File Commit History</h3>
-                        <p id="fhmFilePath" class="text-xs text-white/50 font-mono"></p>
-                    </div>
-                </div>
-                <button onclick="closeFileHistoryModal()" class="w-7 h-7 rounded-full liquid-pill flex items-center justify-center text-white/60 hover:text-white"><i class="fa-solid fa-xmark text-xs"></i></button>
-            </div>
-
-            <div id="fhmList" class="space-y-2.5 max-h-64 overflow-y-auto pr-1 text-xs">
-                <!-- Populated dynamically -->
-            </div>
-
-            <div class="flex justify-end pt-2 border-t border-white/10">
-                <button onclick="closeFileHistoryModal()" class="px-5 py-2 liquid-pill text-white text-xs rounded-xl font-medium">Close</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- ================================================================= -->
-    <!-- CORE SCRIPT & DATA LOGIC -->
-    <!-- ================================================================= -->
-    <!-- Injected by C++ `minigit html`. Stays `null` when opened standalone. -->
+    <!-- Live Data Hook (Injected when generated by minigit html) -->
     <script>window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
 
     <script>
         /* ---------------------------------------------------------------------
-         * REPOSITORY STATE
+         * MINI-GIT CORE ENGINE STATE & DATA STRUCTURES
          * --------------------------------------------------------------------- */
-        let REPO_DATA = null;
-        let ACTIVE_FILE = null;
-        let ACTIVE_VIEW = 'workspace';
+        
+        let VFS = {};                // Virtual File System: { "filepath": "content" }
+        let STAGING_INDEX = {};      // Staging Area: { "filepath": "blobHash" }
+        let BRANCHES = { "main": null }; // { "branchName": "commitHash" }
+        let CURRENT_BRANCH = "main";
+        let OBJECTS = {};            // Git Object Store: { "hash": { type, content/data } }
+        let ACTIVE_FILE = "index.html";
 
-        // Sample data for standalone preview mode
-        const DEMO_REPO = {
-            repoName: "minigit-sample",
-            generated: new Date().toISOString(),
-            currentBranch: "main",
-            branches: {
-                "main": "c3f81e09a8bc4d1234567890abcdef1234567890",
-                "feature": "a1b2c3d4e5f678901234567890abcdef12345678"
-            },
-            objects: {
-                "b111111111111111111111111111111111111111": { type: "blob", content: "<!DOCTYPE html>\n<html>\n<head>\n  <title>Sample MiniGit App</title>\n</head>\n<body>\n  <h1>Welcome to MiniGit</h1>\n  <p>Clean, purposeful version control studio.</p>\n</body>\n</html>" },
-                "b222222222222222222222222222222222222222": { type: "blob", content: "// Main Application Entry\nexport function initApp() {\n  console.log('MiniGit engine loaded.');\n  return true;\n}\n" },
-                "b333333333333333333333333333333333333333": { type: "blob", content: "body {\n  margin: 0;\n  background: #000;\n  color: #fff;\n  font-family: sans-serif;\n}\n" },
-                "b444444444444444444444444444444444444444": { type: "blob", content: "# MiniGit Project\nA C++17 small version control system with high-precision visual studio.\n" },
-                "t111111111111111111111111111111111111111": { type: "tree", data: { "index.html": "b111111111111111111111111111111111111111", "src/app.js": "b222222222222222222222222222222222222222", "styles/app.css": "b333333333333333333333333333333333333333", "README.md": "b444444444444444444444444444444444444444" } },
-                "c00000000000000000000000000000000000000": { type: "commit", data: { tree: "t111111111111111111111111111111111111111", parent: null, message: "Initial repository commit", author: "Developer <dev@minigit.io>", timestamp: new Date(Date.now() - 86400000).toISOString() } },
-                "c3f81e09a8bc4d1234567890abcdef1234567890": { type: "commit", data: { tree: "t111111111111111111111111111111111111111", parent: "c00000000000000000000000000000000000000", message: "Update HTML title and app styling", author: "Developer <dev@minigit.io>", timestamp: new Date().toISOString() } }
-            },
-            files: {
-                "index.html": "<!DOCTYPE html>\n<html>\n<head>\n  <title>Sample MiniGit App</title>\n</head>\n<body>\n  <h1>Welcome to MiniGit</h1>\n  <p>Clean, purposeful version control studio.</p>\n  <p>Added local modifications here.</p>\n</body>\n</html>",
-                "src/app.js": "// Main Application Entry\nexport function initApp() {\n  console.log('MiniGit engine loaded.');\n  return true;\n}\n",
-                "styles/app.css": "body {\n  margin: 0;\n  background: #000;\n  color: #fff;\n  font-family: sans-serif;\n}\n",
-                "README.md": "# MiniGit Project\nA C++17 small version control system with high-precision visual studio.\n"
-            },
-            staged: {},
-            stagedDeleted: []
+        /* Initial Demo Files with Multi-Folder Structure */
+        const DEMO_FILES = {
+            "index.html": "<!DOCTYPE html>\n<html>\n<head>\n  <title>My MiniGit App</title>\n</head>\n<body>\n  <h1>Hello MiniGit!</h1>\n</body>\n</html>",
+            "src/app.js": "// MiniGit Application Entry\nconsole.log('App initialized from src folder');\n\nexport function getVersion() {\n    return 'v2.4';\n}",
+            "styles/style.css": "body {\n  background-color: #0d1117;\n  color: #c9d1d9;\n  font-family: sans-serif;\n}",
+            "README.md": "# Mini-Git Project\nAn interactive browser-based Git simulation engine with folder and commit tracking."
         };
 
         /* ---------------------------------------------------------------------
-         * INITIALIZATION & BOOTSTRAP
+         * CRYPTOGRAPHIC SHA-256 HASH GENERATOR (Real Web Crypto API)
          * --------------------------------------------------------------------- */
-        function initApp() {
-            REPO_DATA = (window.MINIGIT_LIVE && typeof window.MINIGIT_LIVE === 'object') ? window.MINIGIT_LIVE : DEMO_REPO;
-
-            // Header metadata
-            document.getElementById('repoNamePill').textContent = REPO_DATA.repoName || 'repository';
-            document.getElementById('currentBranchDisplay').textContent = REPO_DATA.currentBranch || 'main';
-
-            // Workspace and stats
-            const files = Object.keys(REPO_DATA.files || {}).sort();
-            document.getElementById('workspaceFileCount').textContent = `${files.length} file${files.length === 1 ? '' : 's'}`;
-            
-            const nCommits = Object.values(REPO_DATA.objects || {}).filter(o => o.type === 'commit').length;
-            const nBranches = Object.keys(REPO_DATA.branches || {}).length;
-            document.getElementById('totalCommitsCount').textContent = `${nCommits} commit${nCommits === 1 ? '' : 's'}`;
-            document.getElementById('totalBranchesCount').textContent = `${nBranches} branch${nBranches === 1 ? '' : 'es'}`;
-            document.getElementById('logTotalCount').textContent = `${nCommits} commit${nCommits === 1 ? '' : 's'}`;
-
-            // Render view components
-            renderFileTree();
-            renderSourceControlLists();
-            renderCommitDagGraph();
-            renderCommitsLog();
-
-            // Select initial file
-            if (files.length > 0) {
-                selectFile(files[0]);
-            }
+        async function sha256(message) {
+            const msgBuffer = new TextEncoder().encode(message);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
         }
 
         /* ---------------------------------------------------------------------
-         * VIEW SWITCHING
+         * DATE AND TIME FORMATTING UTILITY
          * --------------------------------------------------------------------- */
-        function switchMainView(viewName) {
-            ACTIVE_VIEW = viewName;
-            const views = {
-                workspace: document.getElementById('viewWorkspace'),
-                changes: document.getElementById('viewChanges'),
-                graph: document.getElementById('viewGraph'),
-                log: document.getElementById('viewLog'),
-            };
-
-            const buttons = {
-                workspace: document.getElementById('tabBtnWorkspace'),
-                changes: document.getElementById('tabBtnChanges'),
-                graph: document.getElementById('tabBtnGraph'),
-                log: document.getElementById('tabBtnLog'),
-            };
-
-            for (const key in views) {
-                if (key === viewName) {
-                    views[key].classList.remove('hidden');
-                    views[key].classList.add('flex');
-                    buttons[key].className = "px-4 py-1 rounded-full text-xs font-semibold bg-[#2C67C5] text-white flex items-center space-x-1.5 transition-all cursor-pointer relative";
-                } else {
-                    views[key].classList.add('hidden');
-                    views[key].classList.remove('flex');
-                    buttons[key].className = "px-4 py-1 rounded-full text-xs font-medium text-white/70 hover:text-white hover:bg-white/10 flex items-center space-x-1.5 transition-all cursor-pointer relative";
-                }
-            }
-
-            if (viewName === 'changes') renderSelectedDiff();
-            if (viewName === 'graph') renderCommitDagGraph();
+        function formatCommitDateTime(timestamp) {
+            if (!timestamp) return "";
+            const d = new Date(timestamp);
+            if (isNaN(d.getTime())) return String(timestamp);
+            const pad = (n) => String(n).padStart(2, '0');
+            const yyyy = d.getFullYear();
+            const mm = pad(d.getMonth() + 1);
+            const dd = pad(d.getDate());
+            const hh = pad(d.getHours());
+            const min = pad(d.getMinutes());
+            const ss = pad(d.getSeconds());
+            return `${yyyy}-${mm}-${dd} ${hh}:${min}:${ss}`;
         }
 
         /* ---------------------------------------------------------------------
-         * FILE TREE & CODE VIEWER
+         * FOLDER & COMMIT HELPER UTILITIES
          * --------------------------------------------------------------------- */
+        const FOLDER_COLLAPSED_STATE = {};
+
         function splitPath(filepath) {
             const parts = filepath.split('/');
             if (parts.length > 1) {
-                return { folder: parts.slice(0, -1).join('/'), filename: parts[parts.length - 1] };
+                const folder = parts.slice(0, -1).join('/');
+                const filename = parts[parts.length - 1];
+                return { folder, filename, fullPath: filepath };
             }
-            return { folder: 'root', filename: filepath };
+            return { folder: 'root', filename: filepath, fullPath: filepath };
+        }
+
+        function toggleFolderCollapse(folderName) {
+            FOLDER_COLLAPSED_STATE[folderName] = !FOLDER_COLLAPSED_STATE[folderName];
+            renderFileTree();
         }
 
         function getFileIcon(filename) {
-            if (filename.endsWith('.html') || filename.endsWith('.htm')) return '<i class="fa-brands fa-html5 text-[#2C67C5]"></i>';
-            if (filename.endsWith('.css')) return '<i class="fa-brands fa-css3-alt text-[#2C67C5]"></i>';
-            if (filename.endsWith('.js') || filename.endsWith('.jsx')) return '<i class="fa-brands fa-square-js text-zinc-300"></i>';
-            if (filename.endsWith('.json')) return '<i class="fa-solid fa-code text-[#2C67C5]"></i>';
-            if (filename.endsWith('.md')) return '<i class="fa-solid fa-file-lines text-zinc-300"></i>';
-            return '<i class="fa-regular fa-file-code text-[#2C67C5]"></i>';
+            if (filename.endsWith('.html') || filename.endsWith('.htm')) return '<i class="fa-brands fa-html5 text-orange-500"></i>';
+            if (filename.endsWith('.css')) return '<i class="fa-brands fa-css3-alt text-blue-400"></i>';
+            if (filename.endsWith('.js') || filename.endsWith('.jsx')) return '<i class="fa-brands fa-square-js text-yellow-400"></i>';
+            if (filename.endsWith('.json')) return '<i class="fa-solid fa-code text-yellow-200"></i>';
+            if (filename.endsWith('.md')) return '<i class="fa-solid fa-file-lines text-cyan-400"></i>';
+            return '<i class="fa-regular fa-file-code text-git-blue"></i>';
         }
 
         function getFileCommitHistory(filepath) {
             const history = [];
-            let currentHash = REPO_DATA.branches[REPO_DATA.currentBranch];
+            let currentHash = BRANCHES[CURRENT_BRANCH];
 
-            while (currentHash && REPO_DATA.objects[currentHash]) {
-                const commit = REPO_DATA.objects[currentHash].data;
+            while (currentHash && OBJECTS[currentHash]) {
+                const commit = OBJECTS[currentHash].data;
                 const treeHash = commit.tree;
-                const tree = REPO_DATA.objects[treeHash]?.data || {};
+                const tree = OBJECTS[treeHash]?.data || {};
                 const blobHash = tree[filepath];
 
                 if (blobHash) {
                     const parentHash = commit.parent;
                     let parentBlob = null;
-                    if (parentHash && REPO_DATA.objects[parentHash]) {
-                        const parentTreeHash = REPO_DATA.objects[parentHash].data.tree;
-                        parentBlob = REPO_DATA.objects[parentTreeHash]?.data?.[filepath];
+                    if (parentHash && OBJECTS[parentHash]) {
+                        const parentTreeHash = OBJECTS[parentHash].data.tree;
+                        parentBlob = OBJECTS[parentTreeHash]?.data?.[filepath];
                     }
 
                     if (!parentBlob || parentBlob !== blobHash) {
@@ -664,559 +604,1296 @@
                         });
                     }
                 }
+
                 currentHash = commit.parent;
             }
             return history;
         }
 
-        const FOLDER_COLLAPSED = {};
+        async function getFileStatus(filepath) {
+            const content = VFS[filepath] || "";
+            const currentBlobHash = await sha256(content);
+            const stagedBlobHash = STAGING_INDEX[filepath];
 
-        function renderFileTree() {
+            let headBlobHash = null;
+            const headCommitHash = BRANCHES[CURRENT_BRANCH];
+            if (headCommitHash && OBJECTS[headCommitHash]) {
+                const headTreeHash = OBJECTS[headCommitHash].data.tree;
+                headBlobHash = OBJECTS[headTreeHash]?.data?.[filepath];
+            }
+
+            if (!headBlobHash && !stagedBlobHash) {
+                return { code: 'untracked', label: 'Untracked file', color: 'text-git-purple' };
+            }
+            if (stagedBlobHash) {
+                return { code: 'staged', label: 'Staged for commit', color: 'text-git-blue' };
+            }
+            if (currentBlobHash !== headBlobHash) {
+                return { code: 'modified', label: 'Modified (Uncommitted)', color: 'text-git-orange' };
+            }
+            return { code: 'committed', label: 'Committed / Clean', color: 'text-green-400' };
+        }
+
+        async function updateEditorCommitDisplay(filepath) {
+            const commitBadge = document.getElementById('editorCommitHashBadge');
+            const msgBadge = document.getElementById('editorCommitMsgBadge');
+            if (!commitBadge) return;
+
+            const status = await getFileStatus(filepath);
+            const history = getFileCommitHistory(filepath);
+
+            if (status.code === 'modified') {
+                commitBadge.innerHTML = `<span class="text-git-orange font-bold">● Modified</span>`;
+                if (history[0]) {
+                    msgBadge.innerText = `(Base: ${history[0].commitHash.substring(0, 7)})`;
+                } else {
+                    msgBadge.innerText = `(Uncommitted)`;
+                }
+            } else if (status.code === 'staged') {
+                commitBadge.innerHTML = `<span class="text-git-blue font-bold">● Staged</span>`;
+                msgBadge.innerText = `Ready to commit`;
+            } else if (history.length > 0) {
+                const latest = history[0];
+                commitBadge.innerText = latest.commitHash.substring(0, 7);
+                msgBadge.innerText = latest.message;
+            } else {
+                commitBadge.innerHTML = `<span class="text-git-purple">Untracked</span>`;
+                msgBadge.innerText = `Not in repo`;
+            }
+        }
+
+        async function showFileCommitHistoryModal(filepath) {
+            const modal = document.getElementById('fileCommitModal');
+            if (!modal) return;
+            const { folder, filename } = splitPath(filepath);
+            const status = await getFileStatus(filepath);
+            const history = getFileCommitHistory(filepath);
+
+            document.getElementById('fcmFileName').innerText = filename;
+            document.getElementById('fcmFolderPath').innerText = (folder === 'root' ? '/ (root)' : `${folder}/`);
+            document.getElementById('fcmFileStatus').innerHTML = `<span class="${status.color} font-semibold">${status.label}</span>`;
+            document.getElementById('fcmCommitCount').innerText = `${history.length} commit${history.length === 1 ? '' : 's'}`;
+
+            const historyList = document.getElementById('fcmCommitHistoryList');
+            historyList.innerHTML = '';
+
+            if (history.length === 0) {
+                historyList.innerHTML = `<div class="text-git-muted italic p-3 bg-git-card rounded border border-git-border text-center">No commit history yet for this file.</div>`;
+            } else {
+                history.forEach((item) => {
+                    const commitCard = document.createElement('div');
+                    commitCard.className = "p-2.5 bg-git-card border border-git-border rounded hover:border-git-purple transition space-y-1";
+                    commitCard.innerHTML = `
+                        <div class="flex items-center justify-between">
+                            <span class="font-mono text-git-purple font-bold text-xs"><i class="fa-solid fa-code-commit mr-1"></i>${item.commitHash.substring(0, 7)}</span>
+                            <span class="text-[10px] text-git-muted font-mono"><i class="fa-regular fa-clock mr-1"></i>${formatCommitDateTime(item.timestamp)}</span>
+                        </div>
+                        <div class="text-white font-medium text-xs">${item.message}</div>
+                        <div class="flex justify-between items-center text-[10px] text-git-muted pt-1 border-t border-git-border/50">
+                            <span>${item.author}</span>
+                            <span class="font-mono text-git-blue">Blob: ${item.blobHash.substring(0, 8)}</span>
+                        </div>
+                    `;
+                    historyList.appendChild(commitCard);
+                });
+            }
+
+            modal.classList.remove('hidden');
+        }
+
+        function closeFileCommitModal() {
+            const modal = document.getElementById('fileCommitModal');
+            if (modal) modal.classList.add('hidden');
+        }
+
+        function openActiveFileCommitModal() {
+            if (ACTIVE_FILE) showFileCommitHistoryModal(ACTIVE_FILE);
+        }
+
+        /* ---------------------------------------------------------------------
+         * INITIALIZATION LOGIC
+         * --------------------------------------------------------------------- */
+        async function executeGitInit() {
+            VFS = { ...DEMO_FILES };
+            STAGING_INDEX = {};
+            OBJECTS = {};
+            BRANCHES = { "main": null };
+            CURRENT_BRANCH = "main";
+            ACTIVE_FILE = "index.html";
+
+            // Stage and commit initial baseline files
+            const initialFiles = {
+                "src/app.js": DEMO_FILES["src/app.js"],
+                "styles/style.css": DEMO_FILES["styles/style.css"],
+                "index.html": "<!DOCTYPE html>\n<html>\n<head>\n  <title>My MiniGit App</title>\n</head>\n<body>\n  <h1>Hello MiniGit!</h1>\n</body>\n</html>"
+            };
+
+            const initialTree = {};
+            for (const [filepath, content] of Object.entries(initialFiles)) {
+                const blobHash = await sha256(content);
+                OBJECTS[blobHash] = { type: 'blob', content };
+                initialTree[filepath] = blobHash;
+            }
+
+            const treeHash = await sha256(JSON.stringify(initialTree));
+            OBJECTS[treeHash] = { type: 'tree', data: initialTree };
+
+            const commitObj = {
+                tree: treeHash,
+                parent: null,
+                message: "Initial commit",
+                timestamp: new Date().toISOString(),
+                author: "MiniGit User <user@minigit.io>"
+            };
+
+            const commitHash = await sha256(JSON.stringify(commitObj));
+            OBJECTS[commitHash] = { type: 'commit', data: commitObj };
+            BRANCHES[CURRENT_BRANCH] = commitHash;
+
+            // Prepare staged modified index.html
+            VFS["index.html"] = "<!DOCTYPE html>\n<html>\n<head>\n  <title>My MiniGit App</title>\n</head>\n<body>\n  <h1>Hello MiniGit!</h1>\n  <p>Added hero section.</p>\n</body>\n</html>";
+            const stagedBlobHash = await sha256(VFS["index.html"]);
+            OBJECTS[stagedBlobHash] = { type: 'blob', content: VFS["index.html"] };
+            STAGING_INDEX["index.html"] = stagedBlobHash;
+
+            // README.md is in working directory but untracked
+            VFS["README.md"] = DEMO_FILES["README.md"];
+
+            await updateUI();
+            logTerminal("Initialized Mini-Git repository in /virtual-root/", "text-green-400");
+        }
+
+        function loadLiveRepo() {
+            if (!window.MINIGIT_LIVE) return;
+            const live = window.MINIGIT_LIVE;
+            VFS = { ...(live.files || {}) };
+            STAGING_INDEX = { ...(live.staged || {}) };
+            OBJECTS = { ...(live.objects || {}) };
+            BRANCHES = { ...(live.branches || {}) };
+            if (!Object.keys(BRANCHES).length) {
+                BRANCHES["main"] = null;
+            }
+            CURRENT_BRANCH = live.currentBranch || Object.keys(BRANCHES)[0] || "main";
+            ACTIVE_FILE = Object.keys(VFS)[0] || "index.html";
+            updateUI();
+            logTerminal(`Connected to live repository: ${live.repoName || 'minigit'}`, "text-green-400");
+        }
+
+        /* ---------------------------------------------------------------------
+         * FILE OPERATIONS & EDITING
+         * --------------------------------------------------------------------- */
+        async function openFileInEditor(filepath) {
+            ACTIVE_FILE = filepath;
+            const { folder, filename } = splitPath(filepath);
+            
+            const activeTabName = document.getElementById('activeEditorFileName');
+            if (activeTabName) activeTabName.innerText = filename;
+
+            const folderDisp = document.getElementById('editorFolderDisplay');
+            if (folderDisp) folderDisp.innerText = (folder === 'root' ? '/ (root)' : `${folder}/`);
+
+            const fileDisp = document.getElementById('editorFilePathDisplay');
+            if (fileDisp) fileDisp.innerText = filename;
+
+            document.getElementById('codeEditorArea').value = VFS[filepath] || "";
+            await updateEditorHashDisplay();
+            await updateEditorCommitDisplay(filepath);
+
+            const select = document.getElementById('diffFileSelect');
+            if (select) select.value = filepath;
+        }
+
+        async function updateEditorHashDisplay() {
+            if (!ACTIVE_FILE) return;
+            const content = VFS[ACTIVE_FILE] || "";
+            const h = await sha256(content);
+            const hashDisp = document.getElementById('editorFileHashDisplay');
+            if (hashDisp) hashDisp.innerText = `Blob: ${h.substring(0, 8)}`;
+        }
+
+        function markFileAsModified() {
+            if (!ACTIVE_FILE) return;
+            const newContent = document.getElementById('codeEditorArea').value;
+            VFS[ACTIVE_FILE] = newContent;
+            updateEditorHashDisplay();
+            updateUI();
+        }
+
+        function saveActiveFileFromEditor() {
+            if (!ACTIVE_FILE) return;
+            const newContent = document.getElementById('codeEditorArea').value;
+            VFS[ACTIVE_FILE] = newContent;
+            logTerminal(`Saved changes to ${ACTIVE_FILE}`, "text-green-400");
+            updateUI();
+        }
+
+        /* ---------------------------------------------------------------------
+         * GIT STAGING & COMMIT OPERATIONS
+         * --------------------------------------------------------------------- */
+        async function stageFile(filepath) {
+            const content = VFS[filepath] || "";
+            const blobHash = await sha256(content);
+            OBJECTS[blobHash] = { type: 'blob', content };
+            STAGING_INDEX[filepath] = blobHash;
+            logTerminal(`Staged file '${filepath}' [Blob: ${blobHash.substring(0, 8)}]`, "text-git-blue");
+            updateUI();
+        }
+
+        function unstageFile(filepath) {
+            delete STAGING_INDEX[filepath];
+            logTerminal(`Unstaged file '${filepath}'`, "text-git-orange");
+            updateUI();
+        }
+
+        async function executeGitStageAll() {
+            for (const filepath of Object.keys(VFS)) {
+                await stageFile(filepath);
+            }
+        }
+
+        function executeGitUnstageAll() {
+            STAGING_INDEX = {};
+            logTerminal("Unstaged all files.", "text-git-orange");
+            updateUI();
+        }
+
+        async function executeGitCommit(customMsg = null) {
+            const msgInput = document.getElementById('commitMsgInput');
+            const message = customMsg ? customMsg.trim() : (msgInput ? msgInput.value.trim() : '');
+
+            if (!message) {
+                logTerminal("Error: Please enter a commit message.", "text-red-400");
+                return;
+            }
+
+            if (Object.keys(STAGING_INDEX).length === 0) {
+                logTerminal("Nothing to commit: staging area is empty.", "text-yellow-400");
+                return;
+            }
+
+            // 1. Get HEAD commit tree or empty
+            const parentHash = BRANCHES[CURRENT_BRANCH];
+            let combinedTree = {};
+
+            if (parentHash && OBJECTS[parentHash]) {
+                const parentTreeHash = OBJECTS[parentHash].data.tree;
+                if (OBJECTS[parentTreeHash]) {
+                    combinedTree = { ...OBJECTS[parentTreeHash].data };
+                }
+            }
+            // Remove deleted files
+            for (const f of Object.keys(combinedTree)) {
+                if (VFS[f] === undefined) {
+                    delete combinedTree[f];
+                }
+            }
+            // Merge staged files
+            for (const [filepath, blobHash] of Object.entries(STAGING_INDEX)) {
+                combinedTree[filepath] = blobHash;
+            }
+
+            const treeContent = JSON.stringify(combinedTree);
+            const treeHash = await sha256(treeContent);
+            OBJECTS[treeHash] = { type: 'tree', data: combinedTree };
+
+            // 2. Create Commit Object with full Date and Time
+            const commitObj = {
+                tree: treeHash,
+                parent: parentHash,
+                message,
+                timestamp: new Date().toISOString(),
+                author: "Developer <dev@minigit.io>"
+            };
+
+            const commitHash = await sha256(JSON.stringify(commitObj));
+            OBJECTS[commitHash] = { type: 'commit', data: commitObj };
+
+            // 3. Update branch pointer
+            BRANCHES[CURRENT_BRANCH] = commitHash;
+
+            // Clear Staging
+            STAGING_INDEX = {};
+            if (msgInput) msgInput.value = '';
+
+            const dateStr = formatCommitDateTime(commitObj.timestamp);
+            logTerminal(`[${CURRENT_BRANCH} ${commitHash.substring(0, 7)}] ${message} • ${dateStr}`, "text-green-400");
+            updateUI();
+        }
+
+        /* ---------------------------------------------------------------------
+         * BRANCHING & CHECKOUT ENGINE
+         * --------------------------------------------------------------------- */
+        function createNewBranch(customBranchName = null) {
+            const input = document.getElementById('newBranchNameInput');
+            const rawName = customBranchName || (input ? input.value : '');
+            const branchName = rawName.trim().toLowerCase().replace(/\s+/g, '-');
+
+            if (!branchName) return;
+            if (BRANCHES[branchName]) {
+                logTerminal(`Branch '${branchName}' already exists.`, "text-red-400");
+                return;
+            }
+
+            BRANCHES[branchName] = BRANCHES[CURRENT_BRANCH];
+            if (input) input.value = '';
+            logTerminal(`Created branch '${branchName}' at HEAD`, "text-git-purple");
+            updateBranchDropdown();
+            renderCommitDagGraph();
+        }
+
+        function switchBranchUI(targetBranch) {
+            if (!BRANCHES[targetBranch] && BRANCHES[targetBranch] !== null) return;
+            if (CURRENT_BRANCH === targetBranch) return;
+
+            CURRENT_BRANCH = targetBranch;
+            const targetCommitHash = BRANCHES[targetBranch];
+
+            if (targetCommitHash && OBJECTS[targetCommitHash]) {
+                // Restore VFS files from target branch HEAD commit
+                const treeHash = OBJECTS[targetCommitHash].data.tree;
+                const treeData = OBJECTS[treeHash].data;
+
+                VFS = {};
+                for (const [filepath, blobHash] of Object.entries(treeData)) {
+                    if (OBJECTS[blobHash]) {
+                        VFS[filepath] = OBJECTS[blobHash].content;
+                    }
+                }
+            }
+
+            STAGING_INDEX = {}; // Reset staging on branch switch
+            if (VFS[ACTIVE_FILE]) {
+                openFileInEditor(ACTIVE_FILE);
+            } else if (Object.keys(VFS).length > 0) {
+                openFileInEditor(Object.keys(VFS)[0]);
+            }
+
+            logTerminal(`Switched to branch '${CURRENT_BRANCH}'`, "text-git-blue");
+            updateUI();
+        }
+
+        /* ---------------------------------------------------------------------
+         * UI RENDERERS & STATUS COMPUTATION
+         * --------------------------------------------------------------------- */
+        async function updateUI() {
+            await renderFileTree();
+            renderSourceControlLists();
+            updateBranchDropdown();
+            renderDiffView();
+            renderCommitDagGraph();
+            renderPreviewDashboard();
+            if (ACTIVE_FILE) {
+                await updateEditorCommitDisplay(ACTIVE_FILE);
+            }
+        }
+
+        let treeRenderGen = 0;
+        async function renderFileTree() {
             const container = document.getElementById('fileTreeContainer');
             if (!container) return;
-            container.innerHTML = '';
+            const currentGen = ++treeRenderGen;
 
+            // Group files by folder
             const groups = {};
-            for (const filepath of Object.keys(REPO_DATA.files || {})) {
+            for (const filepath of Object.keys(VFS)) {
                 const { folder } = splitPath(filepath);
                 if (!groups[folder]) groups[folder] = [];
                 groups[folder].push(filepath);
             }
 
+            // Sort folders: 'root' first, then alphabetical
             const folderKeys = Object.keys(groups).sort((a, b) => {
                 if (a === 'root') return -1;
                 if (b === 'root') return 1;
                 return a.localeCompare(b);
             });
 
-            folderKeys.forEach(folder => {
+            const fragment = document.createDocumentFragment();
+
+            for (const folder of folderKeys) {
                 const files = groups[folder];
-                const isCollapsed = !!FOLDER_COLLAPSED[folder];
+                const isCollapsed = !!FOLDER_COLLAPSED_STATE[folder];
 
                 const folderDiv = document.createElement('div');
                 folderDiv.className = "mb-2";
 
+                // Folder header
                 const folderHeader = document.createElement('div');
-                folderHeader.className = "flex items-center justify-between px-2.5 py-1.5 bg-white/5 hover:bg-white/10 rounded-xl cursor-pointer text-xs transition-all select-none border border-white/10";
-                folderHeader.onclick = () => { FOLDER_COLLAPSED[folder] = !FOLDER_COLLAPSED[folder]; renderFileTree(); };
+                folderHeader.className = "flex items-center justify-between px-2 py-1.5 bg-git-dark/80 hover:bg-git-card rounded cursor-pointer text-xs transition select-none border border-git-border/40";
+                folderHeader.onclick = () => toggleFolderCollapse(folder);
 
-                const folderName = (folder === 'root' ? '/ (root)' : `${folder}/`);
+                const folderDisplayName = (folder === 'root' ? '/ (root)' : `${folder}/`);
                 folderHeader.innerHTML = `
-                    <div class="flex items-center space-x-2 truncate">
-                        <i class="fa-solid ${isCollapsed ? 'fa-chevron-right' : 'fa-chevron-down'} text-[10px] text-white/50 w-3 text-center"></i>
-                        <i class="fa-solid ${isCollapsed ? 'fa-folder' : 'fa-folder-open'} text-[#2C67C5]"></i>
-                        <span class="font-semibold text-white truncate">${esc(folderName)}</span>
+                    <div class="flex items-center space-x-1.5 truncate">
+                        <i class="fa-solid ${isCollapsed ? 'fa-chevron-right' : 'fa-chevron-down'} text-[10px] text-git-muted w-3 text-center"></i>
+                        <i class="fa-solid ${isCollapsed ? 'fa-folder' : 'fa-folder-open'} text-git-orange"></i>
+                        <span class="font-semibold text-white truncate">${folderDisplayName}</span>
                     </div>
-                    <span class="text-[10px] bg-white/10 px-2 py-0.5 rounded-full text-white/60 font-mono">${files.length}</span>
+                    <span class="text-[10px] bg-git-card px-1.5 py-0.2 rounded text-git-muted border border-git-border font-mono">${files.length} file${files.length === 1 ? '' : 's'}</span>
                 `;
                 folderDiv.appendChild(folderHeader);
 
+                // Files list inside folder
                 if (!isCollapsed) {
                     const filesContainer = document.createElement('div');
-                    filesContainer.className = "space-y-1 mt-1 pl-2.5 border-l border-white/15 ml-2";
+                    filesContainer.className = "space-y-1 mt-1 pl-2.5 border-l border-git-border/60 ml-2";
 
-                    files.forEach(filepath => {
+                    for (const filepath of files) {
                         const { filename } = splitPath(filepath);
                         const isSelected = (filepath === ACTIVE_FILE);
                         const history = getFileCommitHistory(filepath);
-                        const latest = history[0];
+                        const latestCommit = history[0];
+                        const status = await getFileStatus(filepath);
+
+                        if (currentGen !== treeRenderGen) return;
 
                         const fileEl = document.createElement('div');
-                        fileEl.className = `p-2 rounded-xl cursor-pointer transition-all ${isSelected ? 'bg-[#2C67C5] text-white font-semibold' : 'hover:bg-white/10 text-zinc-300'}`;
-                        fileEl.onclick = () => selectFile(filepath);
+                        fileEl.className = `p-1.5 rounded cursor-pointer transition ${isSelected ? 'bg-git-border text-white shadow-sm' : 'hover:bg-git-card text-git-text'}`;
+                        fileEl.onclick = () => openFileInEditor(filepath);
+
+                        // Commit snippet / status
+                        let commitBadge = '';
+                        if (status.code === 'modified') {
+                            commitBadge = `
+                                <div onclick="event.stopPropagation(); showFileCommitHistoryModal('${filepath}')" class="flex items-center space-x-1 text-[10px] text-git-orange hover:underline mt-0.5" title="Modified working copy">
+                                    <span class="w-1.5 h-1.5 rounded-full bg-git-orange"></span>
+                                    <span>Modified</span>
+                                    ${latestCommit ? `<span class="text-git-muted font-mono">(${latestCommit.commitHash.substring(0, 7)})</span>` : ''}
+                                </div>
+                            `;
+                        } else if (status.code === 'staged') {
+                            commitBadge = `
+                                <div onclick="event.stopPropagation(); showFileCommitHistoryModal('${filepath}')" class="flex items-center space-x-1 text-[10px] text-git-blue hover:underline mt-0.5" title="Staged for commit">
+                                    <span class="w-1.5 h-1.5 rounded-full bg-git-blue"></span>
+                                    <span>Staged for commit</span>
+                                </div>
+                            `;
+                        } else if (latestCommit) {
+                            commitBadge = `
+                                <div onclick="event.stopPropagation(); showFileCommitHistoryModal('${filepath}')" title="Latest Commit: ${latestCommit.message} (${latestCommit.commitHash.substring(0, 7)}) • ${formatCommitDateTime(latestCommit.timestamp)}" class="flex items-center space-x-1 text-[10px] text-git-muted hover:text-git-purple mt-0.5 transition">
+                                    <i class="fa-solid fa-code-commit text-git-purple text-[9px]"></i>
+                                    <span class="font-mono text-git-purple font-semibold">${latestCommit.commitHash.substring(0, 7)}</span>
+                                    <span class="truncate max-w-[120px] text-git-muted">${latestCommit.message}</span>
+                                </div>
+                            `;
+                        } else {
+                            commitBadge = `
+                                <div onclick="event.stopPropagation(); showFileCommitHistoryModal('${filepath}')" class="text-[10px] text-git-purple italic mt-0.5">Untracked file</div>
+                            `;
+                        }
 
                         fileEl.innerHTML = `
                             <div class="flex items-center justify-between">
-                                <div class="flex items-center space-x-2 truncate">
+                                <div class="flex items-center space-x-1.5 truncate">
                                     ${getFileIcon(filename)}
-                                    <span class="truncate text-xs">${esc(filename)}</span>
+                                    <span class="truncate text-xs ${isSelected ? 'font-semibold text-white' : 'font-medium'}">${filename}</span>
                                 </div>
-                                ${latest ? `<span class="text-[10px] ${isSelected ? 'text-white/80 font-mono' : 'text-white/40 font-mono'}">(${latest.commitHash.substring(0, 7)})</span>` : ''}
+                                <button onclick="event.stopPropagation(); deleteFile('${filepath}')" title="Delete file" class="text-git-muted hover:text-red-400 px-1"><i class="fa-solid fa-trash-can text-xs"></i></button>
                             </div>
+                            ${commitBadge}
                         `;
                         filesContainer.appendChild(fileEl);
-                    });
+                    }
                     folderDiv.appendChild(filesContainer);
                 }
-                container.appendChild(folderDiv);
-            });
-        }
 
-        function selectFile(filepath) {
-            ACTIVE_FILE = filepath;
-            const content = REPO_DATA.files[filepath] || "";
-            const lines = content.split('\n');
-
-            document.getElementById('codeFilePath').textContent = filepath;
-            document.getElementById('codeLineCount').textContent = `${lines.length} lines`;
-
-            const history = getFileCommitHistory(filepath);
-            const commitPill = document.getElementById('fileCommitPill');
-            if (history.length > 0) {
-                commitPill.classList.remove('hidden');
-                commitPill.classList.add('flex');
-                document.getElementById('fileCommitHash').textContent = history[0].commitHash.substring(0, 7);
-                document.getElementById('fileCommitMsg').textContent = history[0].message;
-            } else {
-                commitPill.classList.add('hidden');
-                commitPill.classList.remove('flex');
+                fragment.appendChild(folderDiv);
             }
 
-            // Line numbers & code content
-            const lineNums = lines.map((_, i) => i + 1).join('\n');
-            document.getElementById('codeLineNumbers').textContent = lineNums;
-            document.getElementById('codeContent').textContent = content;
-
-            renderFileTree();
-        }
-
-        function copyCodeToClipboard() {
-            if (!ACTIVE_FILE) return;
-            const content = REPO_DATA.files[ACTIVE_FILE] || "";
-            navigator.clipboard.writeText(content).then(() => {
-                const btn = document.getElementById('copyBtnText');
-                btn.textContent = 'Copied!';
-                setTimeout(() => btn.textContent = 'Copy', 1500);
-            });
-        }
-
-        function showActiveFileCommitHistory() {
-            if (!ACTIVE_FILE) return;
-            const modal = document.getElementById('fileHistoryModal');
-            document.getElementById('fhmFilePath').textContent = ACTIVE_FILE;
-            const list = document.getElementById('fhmList');
-            list.innerHTML = '';
-
-            const history = getFileCommitHistory(ACTIVE_FILE);
-            if (history.length === 0) {
-                list.innerHTML = '<div class="p-3 text-center text-white/50 italic">No commits recorded for this file.</div>';
-            } else {
-                history.forEach(item => {
-                    const row = document.createElement('div');
-                    row.className = "p-3 bg-white/5 border border-white/10 rounded-xl space-y-1";
-                    row.innerHTML = `
-                        <div class="flex items-center justify-between">
-                            <span class="font-mono text-white font-bold">${item.commitHash.substring(0, 7)}</span>
-                            <span class="text-[10px] text-white/50">${new Date(item.timestamp).toLocaleString()}</span>
-                        </div>
-                        <div class="text-white text-xs font-medium">${esc(item.message)}</div>
-                        <div class="text-[10px] text-white/50 pt-1 border-t border-white/10 flex justify-between">
-                            <span>${esc(item.author)}</span>
-                            <span class="font-mono">Blob: ${item.blobHash.substring(0, 8)}</span>
-                        </div>
-                    `;
-                    list.appendChild(row);
-                });
+            if (currentGen === treeRenderGen) {
+                container.innerHTML = '';
+                container.appendChild(fragment);
             }
-            modal.classList.remove('hidden');
         }
 
-        function closeFileHistoryModal() {
-            document.getElementById('fileHistoryModal').classList.add('hidden');
-        }
-
-        /* ---------------------------------------------------------------------
-         * SOURCE CONTROL & DIFF ENGINE
-         * --------------------------------------------------------------------- */
-        function getHeadCommitTreeBlobs() {
-            const headCommitHash = REPO_DATA.branches[REPO_DATA.currentBranch];
-            if (headCommitHash && REPO_DATA.objects[headCommitHash]) {
-                const treeHash = REPO_DATA.objects[headCommitHash].data.tree;
-                return REPO_DATA.objects[treeHash]?.data || {};
+        function deleteFile(filepath) {
+            delete VFS[filepath];
+            delete STAGING_INDEX[filepath];
+            if (ACTIVE_FILE === filepath) {
+                ACTIVE_FILE = Object.keys(VFS)[0] || "";
+                if (ACTIVE_FILE) openFileInEditor(ACTIVE_FILE);
             }
-            return {};
+            logTerminal(`Deleted file: ${filepath}`, "text-red-400");
+            updateUI();
         }
 
-        function renderSourceControlLists() {
-            const stagedList = document.getElementById('stagedListContainer');
-            const unstagedList = document.getElementById('unstagedListContainer');
-            stagedList.innerHTML = '';
-            unstagedList.innerHTML = '';
+        async function renderSourceControlLists() {
+            const stagedList = document.getElementById('stagedList');
+            const unstagedList = document.getElementById('unstagedList');
+            if (stagedList) stagedList.innerHTML = '';
+            if (unstagedList) unstagedList.innerHTML = '';
 
-            const headTree = getHeadCommitTreeBlobs();
             let stagedCount = 0;
             let unstagedCount = 0;
 
-            const diffOptions = [];
-
-            // Staged items
-            for (const [filepath, hash] of Object.entries(REPO_DATA.staged || {})) {
-                stagedCount++;
-                diffOptions.push(filepath);
-                const item = document.createElement('div');
-                item.className = "flex items-center justify-between p-2 bg-[#2C67C5]/10 border border-[#2C67C5]/30 rounded-xl cursor-pointer hover:bg-[#2C67C5]/20 transition";
-                item.onclick = () => { switchMainView('changes'); selectDiffFile(filepath); };
-                item.innerHTML = `
-                    <div class="flex items-center space-x-2 truncate">
-                        <span class="text-xs bg-[#2C67C5] text-white font-bold px-1.5 rounded-full">A</span>
-                        <span class="truncate text-white text-xs">${esc(filepath)}</span>
-                    </div>
-                `;
-                stagedList.appendChild(item);
+            // Get HEAD commit tree blob hashes for comparison
+            let headTreeBlobs = {};
+            const headCommitHash = BRANCHES[CURRENT_BRANCH];
+            if (headCommitHash && OBJECTS[headCommitHash]) {
+                const treeHash = OBJECTS[headCommitHash].data.tree;
+                headTreeBlobs = OBJECTS[treeHash].data;
             }
 
-            // Staged deletions
-            for (const filepath of (REPO_DATA.stagedDeleted || [])) {
+            // Render Staged Files
+            for (const [filepath] of Object.entries(STAGING_INDEX)) {
                 stagedCount++;
-                const item = document.createElement('div');
-                item.className = "flex items-center justify-between p-2 bg-white/5 border border-white/10 rounded-xl";
-                item.innerHTML = `
-                    <div class="flex items-center space-x-2 truncate">
-                        <span class="text-xs bg-zinc-800 text-zinc-300 border border-zinc-600 font-bold px-1.5 rounded-full">D</span>
-                        <span class="truncate text-zinc-400 text-xs line-through">${esc(filepath)}</span>
-                    </div>
-                `;
-                stagedList.appendChild(item);
-            }
-
-            // Unstaged items: files in working copy vs headTree/staged
-            for (const [filepath, content] of Object.entries(REPO_DATA.files || {})) {
-                const headHash = headTree[filepath];
-                const stagedHash = REPO_DATA.staged?.[filepath];
-                const baseHash = stagedHash || headHash;
-
-                const baseBlob = baseHash && REPO_DATA.objects[baseHash]?.type === 'blob' ? REPO_DATA.objects[baseHash].content : null;
-                const isModified = baseBlob !== null && baseBlob !== content;
-                const isUntracked = !baseHash;
-
-                if (isModified || isUntracked) {
-                    unstagedCount++;
-                    if (!diffOptions.includes(filepath)) diffOptions.push(filepath);
-                    const letter = isUntracked ? 'U' : 'M';
-                    const badgeClass = isUntracked ? 'border border-dashed border-zinc-400 text-zinc-300' : 'border border-[#2C67C5]/60 text-[#2C67C5] bg-[#2C67C5]/10';
-
+                if (stagedList) {
                     const item = document.createElement('div');
-                    item.className = "flex items-center justify-between p-2 bg-white/5 border border-white/10 rounded-xl cursor-pointer hover:bg-white/10 transition";
-                    item.onclick = () => { switchMainView('changes'); selectDiffFile(filepath); };
+                    item.className = "flex items-center justify-between p-1.5 bg-git-dark border border-git-border rounded";
                     item.innerHTML = `
-                        <div class="flex items-center space-x-2 truncate">
-                            <span class="text-xs font-bold px-1.5 py-0.2 rounded-full ${badgeClass}">${letter}</span>
-                            <span class="truncate text-white text-xs">${esc(filepath)}</span>
+                        <div class="flex items-center space-x-1.5 truncate">
+                            <span class="text-xs text-green-400 font-bold">A</span>
+                            <span class="truncate">${filepath}</span>
                         </div>
+                        <button onclick="unstageFile('${filepath}')" class="text-git-muted hover:text-white" title="Unstage"><i class="fa-solid fa-minus text-xs"></i></button>
                     `;
-                    unstagedList.appendChild(item);
+                    stagedList.appendChild(item);
                 }
             }
 
-            // Deleted on disk
-            for (const filepath of Object.keys(headTree)) {
-                if (REPO_DATA.files[filepath] === undefined && !(REPO_DATA.stagedDeleted || []).includes(filepath)) {
+            // Render Modified / Untracked Files
+            for (const [filepath, content] of Object.entries(VFS)) {
+                const currentHash = await sha256(content);
+                const headHash = headTreeBlobs[filepath];
+                const stagedHash = STAGING_INDEX[filepath];
+
+                // If file is not staged AND differs from HEAD commit
+                if (!stagedHash && currentHash !== headHash) {
                     unstagedCount++;
-                    const item = document.createElement('div');
-                    item.className = "flex items-center justify-between p-2 bg-white/5 border border-white/10 rounded-xl";
-                    item.innerHTML = `
-                        <div class="flex items-center space-x-2 truncate">
-                            <span class="text-xs font-bold bg-zinc-800 text-zinc-300 border border-zinc-600 px-1.5 rounded-full">D</span>
-                            <span class="truncate text-zinc-400 text-xs line-through">${esc(filepath)}</span>
-                        </div>
-                    `;
-                    unstagedList.appendChild(item);
+                    if (unstagedList) {
+                        const statusLetter = !headHash ? 'U' : 'M';
+                        const statusColor = !headHash ? 'text-git-purple' : 'text-git-orange';
+
+                        const item = document.createElement('div');
+                        item.className = "flex items-center justify-between p-1.5 bg-git-dark border border-git-border rounded";
+                        item.innerHTML = `
+                            <div class="flex items-center space-x-1.5 truncate">
+                                <span class="text-xs font-bold ${statusColor}">${statusLetter}</span>
+                                <span class="truncate">${filepath}</span>
+                            </div>
+                            <button onclick="stageFile('${filepath}')" class="text-git-muted hover:text-white" title="Stage"><i class="fa-solid fa-plus text-xs"></i></button>
+                        `;
+                        unstagedList.appendChild(item);
+                    }
                 }
             }
 
-            document.getElementById('stagedCountDisplay').textContent = `(${stagedCount})`;
-            document.getElementById('unstagedCountDisplay').textContent = `(${unstagedCount})`;
-            document.getElementById('totalChangesPill').textContent = `${stagedCount + unstagedCount} changes`;
+            const stagedCountEl = document.getElementById('stagedCount');
+            if (stagedCountEl) stagedCountEl.innerText = `(${stagedCount})`;
+            const unstagedCountEl = document.getElementById('unstagedCount');
+            if (unstagedCountEl) unstagedCountEl.innerText = `(${unstagedCount})`;
 
-            const badge = document.getElementById('changesCountBadge');
-            if (stagedCount + unstagedCount > 0) {
-                badge.textContent = stagedCount + unstagedCount;
-                badge.classList.remove('hidden');
-            } else {
-                badge.classList.add('hidden');
+            const badge = document.getElementById('stagedBadgeCount');
+            if (badge) {
+                if (stagedCount > 0) {
+                    badge.innerText = stagedCount;
+                    badge.classList.remove('hidden');
+                } else {
+                    badge.classList.add('hidden');
+                }
             }
+        }
 
-            // Populate diff file selector
-            const select = document.getElementById('diffFileSelect');
+        function updateBranchDropdown() {
+            const select = document.getElementById('branchSelect');
             select.innerHTML = '';
-            const allFiles = diffOptions.length ? diffOptions : Object.keys(REPO_DATA.files || {});
-            allFiles.forEach(f => {
+            for (const b of Object.keys(BRANCHES)) {
+                const opt = document.createElement('option');
+                opt.value = b;
+                opt.innerText = b;
+                if (b === CURRENT_BRANCH) opt.selected = true;
+                select.appendChild(opt);
+            }
+        }
+
+        /* ---------------------------------------------------------------------
+         * DIFF VIEWER ENGINE (Side-by-Side Visual Diff)
+         * --------------------------------------------------------------------- */
+        function populateDiffFileSelect() {
+            const select = document.getElementById('diffFileSelect');
+            const prev = select.value;
+            select.innerHTML = '';
+
+            const allFiles = Array.from(new Set([...Object.keys(VFS), ...Object.keys(STAGING_INDEX)]));
+            for (const f of allFiles) {
                 const opt = document.createElement('option');
                 opt.value = f;
-                opt.textContent = f;
-                opt.className = "bg-black text-white font-mono";
+                opt.innerText = f;
+                if (f === (prev || ACTIVE_FILE)) opt.selected = true;
                 select.appendChild(opt);
-            });
+            }
         }
 
-        function selectDiffFile(filepath) {
+        function renderDiffView() {
+            populateDiffFileSelect();
             const select = document.getElementById('diffFileSelect');
-            select.value = filepath;
-            renderSelectedDiff();
-        }
-
-        function renderSelectedDiff() {
-            const select = document.getElementById('diffFileSelect');
-            const filepath = select.value || Object.keys(REPO_DATA.files || {})[0];
+            const filepath = select.value || ACTIVE_FILE;
             if (!filepath) return;
 
-            const headTree = getHeadCommitTreeBlobs();
-            const blobHash = headTree[filepath];
+            // Baseline content from HEAD commit
             let originalContent = "";
-            if (blobHash && REPO_DATA.objects[blobHash]) {
-                originalContent = REPO_DATA.objects[blobHash].content || "";
+            const headCommitHash = BRANCHES[CURRENT_BRANCH];
+            if (headCommitHash && OBJECTS[headCommitHash]) {
+                const treeHash = OBJECTS[headCommitHash].data.tree;
+                const treeBlobs = OBJECTS[treeHash].data;
+                const blobHash = treeBlobs[filepath];
+                if (blobHash && OBJECTS[blobHash]) {
+                    originalContent = OBJECTS[blobHash].content;
+                }
             }
 
-            const modifiedContent = REPO_DATA.files[filepath] || "";
+            // Working copy content
+            const modifiedContent = VFS[filepath] || "";
 
-            const toLines = (t) => {
-                if (t === "") return [];
-                const l = t.split('\n').map(x => x.replace(/\r$/, ''));
-                if (l.length && l[l.length - 1] === '') l.pop();
-                return l;
-            };
-
-            const rows = diffLines(toLines(originalContent), toLines(modifiedContent));
+            const origLines = originalContent.split('\n');
+            const modLines = modifiedContent.split('\n');
 
             const origContainer = document.getElementById('diffOriginalLines');
             const modContainer = document.getElementById('diffModifiedLines');
             origContainer.innerHTML = '';
             modContainer.innerHTML = '';
 
-            let io = 0, im = 0;
-            for (const r of rows) {
-                const elOrig = document.createElement('div');
-                const elMod = document.createElement('div');
-                if (r.kind === 'keep') {
-                    io++; im++;
-                    elOrig.className = 'diff-neutral px-2 py-0.5 font-mono';
-                    elOrig.innerText = `${io}  ${r.text}`;
-                    elMod.className = 'diff-neutral px-2 py-0.5 font-mono';
-                    elMod.innerText = `${im}  ${r.text}`;
-                } else if (r.kind === 'remove') {
-                    io++;
-                    elOrig.className = 'diff-removed px-2 py-0.5 font-mono rounded';
-                    elOrig.innerText = `${io} - ${r.text}`;
-                    elMod.className = 'px-2 py-0.5 font-mono';
-                    elMod.innerText = '\u00A0';
-                } else {
-                    im++;
-                    elMod.className = 'diff-added px-2 py-0.5 font-mono rounded';
-                    elMod.innerText = `${im} + ${r.text}`;
-                    elOrig.className = 'px-2 py-0.5 font-mono';
-                    elOrig.innerText = '\u00A0';
-                }
-                origContainer.appendChild(elOrig);
-                modContainer.appendChild(elMod);
-            }
-        }
+            const maxLines = Math.max(origLines.length, modLines.length);
 
-        function diffLines(a, b) {
-            const n = a.length, m = b.length;
-            const dp = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
-            for (let i = n - 1; i >= 0; i--)
-                for (let j = m - 1; j >= 0; j--)
-                    dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
-            const rows = [];
-            let i = 0, j = 0;
-            while (i < n && j < m) {
-                if (a[i] === b[j]) { rows.push({ kind: 'keep', text: a[i] }); i++; j++; }
-                else if (dp[i + 1][j] >= dp[i][j + 1]) rows.push({ kind: 'remove', text: a[i++] });
-                else rows.push({ kind: 'add', text: b[j++] });
+            for (let i = 0; i < maxLines; i++) {
+                const oLine = origLines[i];
+                const mLine = modLines[i];
+
+                const oDiv = document.createElement('div');
+                const mDiv = document.createElement('div');
+
+                const lineNum = i + 1;
+                const padNum = String(lineNum).padStart(3, ' ');
+
+                if (oLine === undefined) {
+                    oDiv.className = "diff-neutral opacity-30 select-none";
+                    oDiv.innerText = `${padNum} ~`;
+                } else if (mLine === undefined || oLine !== mLine) {
+                    oDiv.className = "diff-removed px-1 rounded";
+                    oDiv.innerText = `${padNum} - ${oLine}`;
+                } else {
+                    oDiv.className = "diff-neutral px-1";
+                    oDiv.innerText = `${padNum}   ${oLine}`;
+                }
+
+                if (mLine === undefined) {
+                    mDiv.className = "diff-neutral opacity-30 select-none";
+                    mDiv.innerText = `${padNum} ~`;
+                } else if (oLine === undefined || oLine !== mLine) {
+                    mDiv.className = "diff-added px-1 rounded";
+                    mDiv.innerText = `${padNum} + ${mLine}`;
+                } else {
+                    mDiv.className = "diff-neutral px-1";
+                    mDiv.innerText = `${padNum}   ${mLine}`;
+                }
+
+                origContainer.appendChild(oDiv);
+                modContainer.appendChild(mDiv);
             }
-            while (i < n) rows.push({ kind: 'remove', text: a[i++] });
-            while (j < m) rows.push({ kind: 'add', text: b[j++] });
-            return rows;
         }
 
         /* ---------------------------------------------------------------------
-         * COMMIT DAG GRAPH RENDERER
+         * COMMIT DAG GRAPH RENDERER WITH DATE & TIME
          * --------------------------------------------------------------------- */
         function renderCommitDagGraph() {
             const svg = document.getElementById('commitDagSvg');
             if (!svg) return;
             svg.innerHTML = '';
-            const NS = 'http://www.w3.org/2000/svg';
-            const mk = (tag, attrs, text) => {
-                const e = document.createElementNS(NS, tag);
-                for (const k in attrs) e.setAttribute(k, attrs[k]);
-                if (text !== undefined) e.textContent = text;
-                svg.appendChild(e);
-                return e;
-            };
 
-            const commits = {};
-            for (const [hash, obj] of Object.entries(REPO_DATA.objects || {})) {
-                if (obj.type === 'commit') commits[hash] = { hash, ...obj.data };
+            // Collect all commits
+            const commitNodes = [];
+            for (const [hash, obj] of Object.entries(OBJECTS)) {
+                if (obj.type === 'commit') {
+                    commitNodes.push({ hash, ...obj.data });
+                }
             }
 
-            const depthMemo = {};
-            const depthOf = (h) => {
-                const stack = [];
-                let cur = h;
-                while (cur && commits[cur] && depthMemo[cur] === undefined) { stack.push(cur); cur = commits[cur].parent; }
-                let d = (cur && commits[cur]) ? depthMemo[cur] : -1;
-                while (stack.length) depthMemo[stack.pop()] = ++d;
-                return depthMemo[h];
-            };
+            // Sort chronologically
+            commitNodes.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
-            const nodes = Object.values(commits).sort((a, b) =>
-                (new Date(a.timestamp) - new Date(b.timestamp)) || (depthOf(a.hash) - depthOf(b.hash)));
+            let y = 40;
+            const x = 60;
+            const nodeRadius = 12;
 
-            const order = [REPO_DATA.currentBranch, ...Object.keys(REPO_DATA.branches || {}).filter(b => b !== REPO_DATA.currentBranch)];
-            const lane = {};
-            order.forEach((b, idx) => {
-                let cur = REPO_DATA.branches[b];
-                while (cur && commits[cur] && lane[cur] === undefined) { lane[cur] = idx; cur = commits[cur].parent; }
-            });
-            const usedLanes = [...new Set(nodes.map(n => lane[n.hash] ?? 0))].sort((a, b) => a - b);
-            const laneX = (l) => 40 + usedLanes.indexOf(l) * 32;
-            const nodeX = (n) => laneX(lane[n.hash] ?? 0);
-            const textX = 40 + Math.max(0, usedLanes.length - 1) * 32 + 28;
+            const totalHeight = Math.max(320, y + commitNodes.length * 65 + 40);
+            svg.setAttribute('height', totalHeight);
+            svg.style.minHeight = `${totalHeight}px`;
 
-            const rowH = 60, top = 40;
-            const yOf = {};
-            nodes.forEach((n, i) => { yOf[n.hash] = top + i * rowH; });
-            svg.style.height = Math.max(300, top * 2 + nodes.length * rowH) + 'px';
+            commitNodes.forEach((node, index) => {
+                const nodeY = y + index * 65;
 
-            // Connector lines
-            nodes.forEach(n => {
-                if (n.parent && commits[n.parent]) {
-                    mk('line', { x1: nodeX(commits[n.parent]), y1: yOf[n.parent], x2: nodeX(n), y2: yOf[n.hash], stroke: '#2C67C5', 'stroke-width': 2.5, 'stroke-linecap': 'round', 'stroke-opacity': '0.7' });
-                }
-            });
-
-            // Commit Nodes
-            nodes.forEach(n => {
-                const x = nodeX(n), y = yOf[n.hash];
-                const isHead = (n.hash === REPO_DATA.branches[REPO_DATA.currentBranch]);
-
-                const circle = mk('circle', {
-                    cx: x, cy: y, r: isHead ? 11 : 9,
-                    fill: isHead ? '#2C67C5' : '#FFFFFF',
-                    stroke: isHead ? '#FFFFFF' : '#2C67C5',
-                    'stroke-width': 2.5,
-                    class: 'cursor-pointer hover:r-[13] transition-all'
-                });
-                circle.onclick = () => inspectCommit(n);
-
-                const firstLine = String(n.message || '').split('\n')[0];
-                const label = `[${n.hash.substring(0, 7)}] ${firstLine.length > 50 ? firstLine.slice(0, 47) + '...' : firstLine}`;
-                const textNode = mk('text', { x: textX, y: y + 4, fill: '#FFFFFF', 'font-size': '12px', 'font-family': 'JetBrains Mono, monospace', 'font-weight': isHead ? '600' : '500', class: 'cursor-pointer hover:fill-[#2C67C5]' }, label);
-                textNode.onclick = () => inspectCommit(n);
-
-                // Branch badges
-                let lx = textX + label.length * 7.3 + 14;
-                for (const [bName, bHash] of Object.entries(REPO_DATA.branches || {})) {
-                    if (bHash !== n.hash) continue;
-                    const w = bName.length * 7 + 22;
-                    const isCur = (bName === REPO_DATA.currentBranch);
-                    mk('rect', { x: lx, y: y - 11, width: w, height: 22, rx: 11, fill: isCur ? '#2C67C5' : '#111111', stroke: '#2C67C5', 'stroke-width': isCur ? 1.5 : 1, 'stroke-opacity': isCur ? '1' : '0.6' });
-                    mk('text', { x: lx + w / 2, y: y + 4, fill: '#FFFFFF', 'font-size': '10px', 'text-anchor': 'middle', 'font-weight': 'bold', 'font-family': 'Inter, sans-serif' }, bName);
-                    lx += w + 8;
-                }
-            });
-
-            if (nodes.length > 0) inspectCommit(nodes[nodes.length - 1]);
-        }
-
-        function inspectCommit(commit) {
-            const container = document.getElementById('inspectorContent');
-            if (!container) return;
-
-            const treeObj = REPO_DATA.objects[commit.tree];
-            const treeEntries = treeObj?.type === 'tree' ? Object.keys(treeObj.data) : [];
-
-            container.innerHTML = `
-                <div class="p-3 bg-[#2C67C5]/10 rounded-xl border border-[#2C67C5]/30 space-y-1.5 font-mono">
-                    <div class="text-[#2C67C5] font-bold text-xs truncate">[${commit.hash.substring(0, 7)}]</div>
-                    <div class="text-[10px] text-white/50 truncate">Full: ${commit.hash}</div>
-                </div>
-
-                <div class="space-y-1">
-                    <span class="text-[10px] uppercase font-semibold text-white/40 tracking-wider">Message</span>
-                    <div class="text-white font-medium text-xs bg-white/5 p-2.5 rounded-xl border border-white/10">${esc(commit.message)}</div>
-                </div>
-
-                <div class="space-y-1 text-xs">
-                    <div class="flex justify-between py-1 border-b border-white/10">
-                        <span class="text-white/40">Author:</span>
-                        <span class="text-white truncate max-w-[170px]">${esc(commit.author)}</span>
-                    </div>
-                    <div class="flex justify-between py-1 border-b border-white/10">
-                        <span class="text-white/40">Parent:</span>
-                        <span class="font-mono text-[#2C67C5]">${commit.parent ? commit.parent.substring(0, 7) : '(root commit)'}</span>
-                    </div>
-                    <div class="flex justify-between py-1 border-b border-white/10">
-                        <span class="text-white/40">Tree:</span>
-                        <span class="font-mono text-[#2C67C5]">${commit.tree.substring(0, 7)}</span>
-                    </div>
-                </div>
-
-                <div class="space-y-1.5 pt-1">
-                    <span class="text-[10px] uppercase font-semibold text-white/40 tracking-wider">Snapshot Files (${treeEntries.length})</span>
-                    <div class="space-y-1 max-h-40 overflow-y-auto pr-1 font-mono text-[11px]">
-                        ${treeEntries.map(f => `<div class="p-1.5 bg-black rounded border border-white/10 hover:border-[#2C67C5]/40 truncate flex items-center space-x-1.5"><i class="fa-regular fa-file-lines text-[#2C67C5] text-[10px]"></i><span>${esc(f)}</span></div>`).join('')}
-                    </div>
-                </div>
-            `;
-        }
-
-        /* ---------------------------------------------------------------------
-         * COMMITS LOG TIMELINE
-         * --------------------------------------------------------------------- */
-        function renderCommitsLog() {
-            const list = document.getElementById('commitTimelineList');
-            if (!list) return;
-            list.innerHTML = '';
-
-            const commits = [];
-            for (const [hash, obj] of Object.entries(REPO_DATA.objects || {})) {
-                if (obj.type === 'commit') commits.push({ hash, ...obj.data });
-            }
-
-            commits.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-
-            commits.forEach(c => {
-                const item = document.createElement('div');
-                item.className = "p-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl transition space-y-2";
-
-                const branchLabels = [];
-                for (const [bName, bHash] of Object.entries(REPO_DATA.branches || {})) {
-                    if (bHash === c.hash) {
-                        const isCur = (bName === REPO_DATA.currentBranch);
-                        branchLabels.push(`<span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${isCur ? 'bg-[#2C67C5] text-white' : 'bg-black text-white border border-[#2C67C5]/40'}">${esc(bName)}</span>`);
+                // Draw parent edge line
+                if (node.parent) {
+                    const parentIndex = commitNodes.findIndex(c => c.hash === node.parent);
+                    if (parentIndex !== -1) {
+                        const parentY = y + parentIndex * 65;
+                        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                        line.setAttribute('x1', x);
+                        line.setAttribute('y1', parentY);
+                        line.setAttribute('x2', x);
+                        line.setAttribute('y2', nodeY);
+                        line.setAttribute('stroke', '#30363D');
+                        line.setAttribute('stroke-width', '3');
+                        svg.appendChild(line);
                     }
                 }
 
-                item.innerHTML = `
-                    <div class="flex items-center justify-between">
-                        <div class="flex items-center space-x-2">
-                            <span class="font-mono text-[#2C67C5] font-bold text-xs bg-[#2C67C5]/10 px-2 py-0.5 rounded-md border border-[#2C67C5]/30">${c.hash.substring(0, 7)}</span>
-                            ${branchLabels.join(' ')}
-                        </div>
-                    </div>
-                    <div class="text-white text-sm font-semibold">${esc(c.message)}</div>
-                    <div class="flex items-center justify-between text-xs text-white/40 pt-2 border-t border-white/10">
-                        <span><i class="fa-regular fa-user mr-1.5 text-[#2C67C5]"></i>${esc(c.author)}</span>
-                        <span class="font-mono text-[11px]"><i class="fa-solid fa-tree mr-1 text-[#2C67C5]"></i>Tree: ${c.tree.substring(0, 7)}</span>
-                    </div>
-                `;
-                list.appendChild(item);
+                // Group for commit node elements
+                const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                group.style.cursor = 'pointer';
+
+                // Draw Commit Node Circle
+                const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                circle.setAttribute('cx', x);
+                circle.setAttribute('cy', nodeY);
+                circle.setAttribute('r', nodeRadius);
+                circle.setAttribute('fill', '#238636');
+                circle.setAttribute('stroke', '#58A6FF');
+                circle.setAttribute('stroke-width', '2');
+                group.appendChild(circle);
+
+                // Commit Message Text
+                const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                text.setAttribute('x', x + 25);
+                text.setAttribute('y', nodeY + 4);
+                text.setAttribute('fill', '#C9D1D9');
+                text.setAttribute('font-size', '12px');
+                text.setAttribute('font-family', 'JetBrains Mono, monospace');
+                text.textContent = `[${node.hash.substring(0, 7)}] ${node.message}`;
+                group.appendChild(text);
+                svg.appendChild(group);
+
+                // Dynamic width calculation
+                let textWidth = 0;
+                try {
+                    textWidth = text.getBBox().width;
+                } catch (e) {
+                    textWidth = 0;
+                }
+                if (!textWidth || textWidth <= 0) {
+                    textWidth = text.textContent.length * 7.5;
+                }
+
+                let currentX = x + 25 + textWidth + 14;
+
+                // Branch Labels
+                for (const [bName, bHash] of Object.entries(BRANCHES)) {
+                    if (bHash === node.hash) {
+                        const bWidth = Math.max(54, bName.length * 8 + 18);
+                        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                        rect.setAttribute('x', currentX);
+                        rect.setAttribute('y', nodeY - 10);
+                        rect.setAttribute('width', bWidth);
+                        rect.setAttribute('height', '20');
+                        rect.setAttribute('rx', '4');
+                        rect.setAttribute('fill', bName === CURRENT_BRANCH ? '#F05032' : '#A371F7');
+                        group.appendChild(rect);
+
+                        const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                        label.setAttribute('x', currentX + bWidth / 2);
+                        label.setAttribute('y', nodeY + 4);
+                        label.setAttribute('fill', '#FFFFFF');
+                        label.setAttribute('font-size', '10px');
+                        label.setAttribute('text-anchor', 'middle');
+                        label.setAttribute('font-weight', 'bold');
+                        label.setAttribute('font-family', 'JetBrains Mono, monospace');
+                        label.textContent = bName;
+                        group.appendChild(label);
+
+                        currentX += bWidth + 8;
+                    }
+                }
+
+                // Date & Time Display in Commit
+                const dateStr = formatCommitDateTime(node.timestamp);
+                if (dateStr) {
+                    const dateContent = `📅 ${dateStr}`;
+                    const datePillWidth = Math.max(165, dateContent.length * 7.2 + 20);
+
+                    const dateRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                    dateRect.setAttribute('x', currentX);
+                    dateRect.setAttribute('y', nodeY - 10);
+                    dateRect.setAttribute('width', datePillWidth);
+                    dateRect.setAttribute('height', '20');
+                    dateRect.setAttribute('rx', '4');
+                    dateRect.setAttribute('fill', '#161B22');
+                    dateRect.setAttribute('stroke', '#30363D');
+                    dateRect.setAttribute('stroke-width', '1');
+                    group.appendChild(dateRect);
+
+                    const dateLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    dateLabel.setAttribute('x', currentX + datePillWidth / 2);
+                    dateLabel.setAttribute('y', nodeY + 4);
+                    dateLabel.setAttribute('fill', '#8B949E');
+                    dateLabel.setAttribute('font-size', '11px');
+                    dateLabel.setAttribute('text-anchor', 'middle');
+                    dateLabel.setAttribute('font-family', 'JetBrains Mono, monospace');
+                    dateLabel.textContent = dateContent;
+                    group.appendChild(dateLabel);
+
+                    currentX += datePillWidth + 8;
+                }
+
+                // Hover Tooltip with Full Commit Metadata
+                const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+                title.textContent = `Commit: ${node.hash}\nMessage: ${node.message}\nDate & Time: ${dateStr}\nAuthor: ${node.author || 'User'}`;
+                group.appendChild(title);
+
+                group.onclick = () => {
+                    logTerminal(`Commit [${node.hash.substring(0, 7)}]: "${node.message}" • ${dateStr} by ${node.author || 'User'}`, 'text-git-purple');
+                };
             });
         }
 
         /* ---------------------------------------------------------------------
-         * UTILITIES & CLIPBOARD
+         * EMBEDDED CLI TERMINAL INTERPRETER
          * --------------------------------------------------------------------- */
-        function toggleCliDrawer() {
-            document.getElementById('cliDrawer').classList.toggle('hidden');
+        function logTerminal(text, colorClass = "text-git-text") {
+            const output = document.getElementById('terminalOutput');
+            if (!output) return;
+            const line = document.createElement('div');
+            line.className = colorClass;
+            line.innerText = text;
+            output.appendChild(line);
+            output.scrollTop = output.scrollHeight;
         }
 
-        function copyCommand(cmd, btn) {
-            navigator.clipboard.writeText(cmd).then(() => {
-                const orig = btn.textContent;
-                btn.textContent = 'Copied!';
-                setTimeout(() => btn.textContent = orig, 1500);
+        function clearTerminalConsole() {
+            const output = document.getElementById('terminalOutput');
+            if (output) output.innerHTML = '';
+        }
+
+        function toggleTerminalConsole() {
+            const term = document.getElementById('cliTerminalContainer');
+            const btn = document.getElementById('toggleTerminalBtn');
+            if (!term) return;
+            term.classList.toggle('hidden');
+            const isHidden = term.classList.contains('hidden');
+            if (btn) {
+                if (isHidden) {
+                    btn.classList.remove('text-white', 'bg-git-dark');
+                    btn.classList.add('text-git-muted');
+                } else {
+                    btn.classList.add('text-white', 'bg-git-dark');
+                    btn.classList.remove('text-git-muted');
+                    setTimeout(() => {
+                        const input = document.getElementById('cliInput');
+                        if (input) input.focus();
+                    }, 50);
+                }
+            }
+        }
+
+        async function handleCliKeyDown(event) {
+            if (event.key === 'Enter') {
+                const input = event.target;
+                const cmd = input.value.trim();
+                input.value = '';
+
+                if (!cmd) return;
+                logTerminal(`user@minigit:~$ ${cmd}`, "text-white font-bold");
+
+                const parts = cmd.split(' ');
+                if (parts[0] !== 'minigit') {
+                    logTerminal("Command not recognized. Type 'minigit help'", "text-red-400");
+                    return;
+                }
+
+                const action = parts[1];
+
+                switch (action) {
+                    case 'help':
+                        logTerminal("Available Mini-Git Commands:", "text-git-blue");
+                        logTerminal("  minigit add <filename|all>    - Stage file changes");
+                        logTerminal("  minigit commit -m \"msg\"       - Create commit snapshot");
+                        logTerminal("  minigit status                 - View staged and modified files");
+                        logTerminal("  minigit branch <name>          - Create new branch");
+                        logTerminal("  minigit checkout <branch>      - Switch active branch");
+                        logTerminal("  minigit log                    - Display commit history");
+                        break;
+
+                    case 'init':
+                        await executeGitInit();
+                        break;
+
+                    case 'add':
+                        if (parts[2] === 'all' || parts[2] === '.') {
+                            await executeGitStageAll();
+                        } else if (parts[2] && VFS[parts[2]]) {
+                            await stageFile(parts[2]);
+                        } else {
+                            logTerminal("File not found.", "text-red-400");
+                        }
+                        break;
+
+                    case 'commit':
+                        const msgIdx = cmd.indexOf('-m');
+                        if (msgIdx !== -1) {
+                            const msg = cmd.substring(msgIdx + 2).replace(/["']/g, '').trim();
+                            const msgInput = document.getElementById('commitMsgInput');
+                            if (msgInput) msgInput.value = msg;
+                            await executeGitCommit(msg);
+                        } else {
+                            logTerminal("Usage: minigit commit -m \"commit message\"", "text-red-400");
+                        }
+                        break;
+
+                    case 'status':
+                        logTerminal(`On branch ${CURRENT_BRANCH}`, "text-git-blue");
+                        logTerminal(`Staged files: ${Object.keys(STAGING_INDEX).join(', ') || 'None'}`);
+                        break;
+
+                    case 'branch':
+                        if (parts[2]) {
+                            const branchInp = document.getElementById('newBranchNameInput');
+                            if (branchInp) branchInp.value = parts[2];
+                            createNewBranch(parts[2]);
+                        } else {
+                            logTerminal("Branches: " + Object.keys(BRANCHES).join(', '));
+                        }
+                        break;
+
+                    case 'checkout':
+                        if (parts[2] && BRANCHES[parts[2]] !== undefined) {
+                            switchBranchUI(parts[2]);
+                        } else {
+                            logTerminal(`Branch '${parts[2]}' does not exist.`, "text-red-400");
+                        }
+                        break;
+
+                    case 'log':
+                        let curr = BRANCHES[CURRENT_BRANCH];
+                        while (curr && OBJECTS[curr]) {
+                            const c = OBJECTS[curr].data;
+                            logTerminal(`* [${curr.substring(0, 7)}] ${c.message} (${c.author}) • ${formatCommitDateTime(c.timestamp)}`, "text-git-purple");
+                            curr = c.parent;
+                        }
+                        break;
+
+                    default:
+                        logTerminal(`Unknown minigit command: '${action}'`, "text-red-400");
+                }
+            }
+        }
+
+        /* ---------------------------------------------------------------------
+         * TAB & LAYOUT SWITCHERS
+         * --------------------------------------------------------------------- */
+        function switchSidebarTab(tab) {
+            const filesPanel = document.getElementById('tabFilesPanel');
+            const gitPanel = document.getElementById('tabGitPanel');
+            const btnFiles = document.getElementById('btnNavFiles');
+            const btnGit = document.getElementById('btnNavGit');
+
+            if (tab === 'files') {
+                if (filesPanel) filesPanel.classList.remove('hidden');
+                if (gitPanel) gitPanel.classList.add('hidden');
+                if (btnFiles) btnFiles.className = "flex-1 py-2.5 text-center border-b-2 border-git-orange text-white flex items-center justify-center space-x-1.5";
+                if (btnGit) btnGit.className = "flex-1 py-2.5 text-center border-b-2 border-transparent hover:text-white flex items-center justify-center space-x-1.5 relative text-git-muted";
+            } else {
+                if (filesPanel) filesPanel.classList.add('hidden');
+                if (gitPanel) gitPanel.classList.remove('hidden');
+                if (btnGit) btnGit.className = "flex-1 py-2.5 text-center border-b-2 border-git-orange text-white flex items-center justify-center space-x-1.5 relative";
+                if (btnFiles) btnFiles.className = "flex-1 py-2.5 text-center border-b-2 border-transparent hover:text-white flex items-center justify-center space-x-1.5 text-git-muted";
+            }
+        }
+
+        /* ---------------------------------------------------------------------
+         * PREVIEW HUB: DASHBOARD & USER FEEDBACK ENGINE
+         * --------------------------------------------------------------------- */
+        let CURRENT_FEEDBACK_RATING = 5;
+        let CURRENT_FEEDBACK_CATEGORY = 'General';
+        let ACTIVE_PREVIEW_SUBTAB = 'dashboard';
+        const FEEDBACK_STORE = [
+            {
+                rating: 5,
+                category: 'General',
+                comment: 'The interactive commit graph and side-by-side diff viewer are super responsive and clean!',
+                author: 'Frontend Lead',
+                timestamp: new Date(Date.now() - 3600000 * 2).toISOString()
+            },
+            {
+                rating: 5,
+                category: 'UI/UX',
+                comment: 'Love the dark studio theme and instant file tree navigation. Feels just like VS Code.',
+                author: 'DevOps Engineer',
+                timestamp: new Date(Date.now() - 3600000 * 24).toISOString()
+            }
+        ];
+
+        function switchPreviewSubTab(subTab) {
+            ACTIVE_PREVIEW_SUBTAB = subTab;
+            const viewDash = document.getElementById('previewSubViewDashboard');
+            const viewFeed = document.getElementById('previewSubViewFeedback');
+            const btnDash = document.getElementById('previewSubBtnDashboard');
+            const btnFeed = document.getElementById('previewSubBtnFeedback');
+
+            if (subTab === 'dashboard') {
+                if (viewDash) viewDash.classList.remove('hidden');
+                if (viewFeed) viewFeed.classList.add('hidden');
+                if (btnDash) btnDash.className = "px-3 py-1 rounded-md text-xs font-medium bg-git-orange text-white flex items-center space-x-1.5 transition";
+                if (btnFeed) btnFeed.className = "px-3 py-1 rounded-md text-xs font-medium text-git-muted hover:text-white flex items-center space-x-1.5 transition";
+                renderPreviewDashboard();
+            } else {
+                if (viewDash) viewDash.classList.add('hidden');
+                if (viewFeed) viewFeed.classList.remove('hidden');
+                if (btnFeed) btnFeed.className = "px-3 py-1 rounded-md text-xs font-medium bg-git-orange text-white flex items-center space-x-1.5 transition";
+                if (btnDash) btnDash.className = "px-3 py-1 rounded-md text-xs font-medium text-git-muted hover:text-white flex items-center space-x-1.5 transition";
+                renderFeedbackList();
+            }
+        }
+
+        function renderPreviewDashboard() {
+            // 1. Metric: Total Commits
+            let commitCount = 0;
+            const commitsList = [];
+            for (const [hash, obj] of Object.entries(OBJECTS)) {
+                if (obj.type === 'commit') {
+                    commitCount++;
+                    commitsList.push({ hash, ...obj.data });
+                }
+            }
+            const elTotalCommits = document.getElementById('metricTotalCommits');
+            if (elTotalCommits) elTotalCommits.innerText = commitCount;
+
+            // 2. Metric: Branches
+            const branchKeys = Object.keys(BRANCHES);
+            const elTotalBranches = document.getElementById('metricTotalBranches');
+            if (elTotalBranches) elTotalBranches.innerText = branchKeys.length;
+            const elBranchNames = document.getElementById('metricBranchNames');
+            if (elBranchNames) elBranchNames.innerText = branchKeys.join(', ');
+
+            // 3. Metric: Project Files
+            const fileKeys = Object.keys(VFS);
+            const elTotalFiles = document.getElementById('metricTotalFiles');
+            if (elTotalFiles) elTotalFiles.innerText = fileKeys.length;
+
+            // 4. Metric: Current HEAD
+            const headHash = BRANCHES[CURRENT_BRANCH];
+            const elHead = document.getElementById('metricCurrentHead');
+            if (elHead) elHead.innerText = headHash ? headHash.substring(0, 7) : '(root)';
+            const elActiveBranch = document.getElementById('metricActiveBranchDisplay');
+            if (elActiveBranch) elActiveBranch.innerText = `branch: ${CURRENT_BRANCH}`;
+
+            // 5. Populate HTML file selector for live preview
+            const fileSelect = document.getElementById('previewFileSelect');
+            if (fileSelect) {
+                const prevVal = fileSelect.value;
+                fileSelect.innerHTML = '';
+                const htmlFiles = fileKeys.filter(f => f.endsWith('.html') || f.endsWith('.htm'));
+                if (htmlFiles.length === 0) {
+                    const opt = document.createElement('option');
+                    opt.value = '';
+                    opt.innerText = 'No HTML files';
+                    fileSelect.appendChild(opt);
+                } else {
+                    for (const f of htmlFiles) {
+                        const opt = document.createElement('option');
+                        opt.value = f;
+                        opt.innerText = f;
+                        if (f === prevVal || (!prevVal && f === 'index.html')) {
+                            opt.selected = true;
+                        }
+                        fileSelect.appendChild(opt);
+                    }
+                }
+                updateLivePreviewIframe();
+            }
+
+            // 6. Recent Activity Stream
+            const stream = document.getElementById('previewActivityStream');
+            if (stream) {
+                stream.innerHTML = '';
+                commitsList.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                if (commitsList.length === 0) {
+                    stream.innerHTML = '<div class="text-git-muted italic p-2">No commit history yet. Stage and commit files to see activity.</div>';
+                } else {
+                    for (const c of commitsList) {
+                        const row = document.createElement('div');
+                        row.className = "p-2 bg-git-dark border border-git-border rounded hover:border-git-purple/50 transition";
+                        const branchTags = [];
+                        for (const [bName, bHash] of Object.entries(BRANCHES)) {
+                            if (bHash === c.hash) {
+                                branchTags.push(`<span class="px-1.5 py-0.2 rounded text-[10px] bg-git-purple/20 text-git-purple font-semibold border border-git-purple/30">${esc(bName)}</span>`);
+                            }
+                        }
+                        row.innerHTML = `
+                            <div class="flex items-center justify-between mb-1">
+                                <span class="font-mono text-git-purple font-semibold">[${c.hash.substring(0, 7)}]</span>
+                                <span class="text-[10px] text-git-muted">${formatCommitDateTime(c.timestamp)}</span>
+                            </div>
+                            <div class="text-white font-medium text-xs truncate">${esc(c.message)}</div>
+                            <div class="flex items-center justify-between mt-1 text-[11px] text-git-muted">
+                                <span><i class="fa-regular fa-user mr-1 text-git-blue"></i>${esc(c.author || 'dev')}</span>
+                                <div class="flex space-x-1">${branchTags.join(' ')}</div>
+                            </div>
+                        `;
+                        stream.appendChild(row);
+                    }
+                }
+            }
+
+            renderFeedbackList();
+        }
+
+        function updateLivePreviewIframe() {
+            const fileSelect = document.getElementById('previewFileSelect');
+            const iframe = document.getElementById('projectLiveIframe');
+            if (!iframe) return;
+
+            const selectedFile = fileSelect ? fileSelect.value : 'index.html';
+            const content = VFS[selectedFile] || '<!DOCTYPE html><html><body style="font-family:sans-serif;padding:2rem;text-align:center;color:#666;"><h3>No content available</h3><p>Select or create an HTML file in Workspace to preview it live.</p></body></html>';
+            iframe.srcdoc = content;
+        }
+
+        function setFeedbackRating(score) {
+            CURRENT_FEEDBACK_RATING = score;
+            const container = document.getElementById('feedbackRatingStars');
+            if (!container) return;
+            const buttons = container.querySelectorAll('.star-btn');
+            buttons.forEach((btn, idx) => {
+                if (idx < score) {
+                    btn.className = "star-btn text-yellow-400 text-base focus:outline-none transition-transform hover:scale-110";
+                } else {
+                    btn.className = "star-btn text-git-border text-base focus:outline-none transition-transform hover:scale-110";
+                }
             });
+            const label = document.getElementById('feedbackRatingLabel');
+            if (label) label.innerText = `${score} of 5 Stars`;
         }
 
-        function esc(s) {
-            return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        function selectFeedbackCategory(cat, btn) {
+            CURRENT_FEEDBACK_CATEGORY = cat;
+            const container = document.getElementById('feedbackCategoryContainer');
+            if (!container) return;
+            const buttons = container.querySelectorAll('.category-btn');
+            buttons.forEach(b => {
+                b.className = "category-btn px-2.5 py-1 rounded text-xs border border-git-border text-git-muted hover:text-white transition";
+            });
+            if (btn) {
+                btn.className = "category-btn px-2.5 py-1 rounded text-xs border border-git-orange bg-git-orange text-white font-medium transition";
+            }
         }
 
-        window.onload = function() {
-            initApp();
+        function submitUserFeedback() {
+            const commentInput = document.getElementById('feedbackCommentInput');
+            const authorInput = document.getElementById('feedbackAuthorInput');
+            const alertBox = document.getElementById('feedbackSuccessAlert');
+
+            const comment = commentInput ? commentInput.value.trim() : '';
+            if (!comment) {
+                alert("Please enter a short comment before submitting feedback.");
+                return;
+            }
+
+            const author = (authorInput && authorInput.value.trim()) ? authorInput.value.trim() : 'Anonymous Developer';
+            FEEDBACK_STORE.unshift({
+                rating: CURRENT_FEEDBACK_RATING,
+                category: CURRENT_FEEDBACK_CATEGORY,
+                comment,
+                author,
+                timestamp: new Date().toISOString()
+            });
+
+            if (commentInput) commentInput.value = '';
+            if (authorInput) authorInput.value = '';
+
+            if (alertBox) {
+                alertBox.classList.remove('hidden');
+                setTimeout(() => alertBox.classList.add('hidden'), 3500);
+            }
+
+            renderFeedbackList();
+        }
+
+        function renderFeedbackList() {
+            const list = document.getElementById('feedbackListContainer');
+            const badge = document.getElementById('feedbackBadgeCount');
+            const totalLabel = document.getElementById('feedbackTotalCountLabel');
+
+            if (badge) badge.innerText = FEEDBACK_STORE.length;
+            if (totalLabel) totalLabel.innerText = `${FEEDBACK_STORE.length} entr${FEEDBACK_STORE.length === 1 ? 'y' : 'ies'}`;
+
+            if (!list) return;
+            list.innerHTML = '';
+
+            for (const fb of FEEDBACK_STORE) {
+                const card = document.createElement('div');
+                card.className = "p-3 bg-git-card border border-git-border rounded-lg space-y-1.5 transition";
+
+                let starsHtml = '';
+                for (let i = 1; i <= 5; i++) {
+                    starsHtml += `<i class="fa-solid fa-star ${i <= fb.rating ? 'text-yellow-400' : 'text-git-border'} text-[11px]"></i>`;
+                }
+
+                card.innerHTML = `
+                    <div class="flex items-center justify-between text-xs">
+                        <div class="flex items-center space-x-2">
+                            <span class="font-medium text-white">${esc(fb.author)}</span>
+                            <span class="text-[10px] px-2 py-0.5 rounded-full bg-git-dark border border-git-border text-git-blue font-mono">${esc(fb.category)}</span>
+                        </div>
+                        <span class="text-[10px] text-git-muted font-mono">${formatCommitDateTime(fb.timestamp)}</span>
+                    </div>
+                    <p class="text-xs text-git-text leading-relaxed">${esc(fb.comment)}</p>
+                    <div class="flex items-center space-x-1 pt-1">
+                        ${starsHtml}
+                        <span class="text-[10px] text-git-muted ml-1.5 font-mono">${fb.rating}/5</span>
+                    </div>
+                `;
+                list.appendChild(card);
+            }
+        }
+
+        function switchViewTab(view) {
+            const editorView = document.getElementById('viewContainerEditor');
+            const diffView = document.getElementById('viewContainerDiff');
+            const graphView = document.getElementById('viewContainerGraph');
+            const previewView = document.getElementById('viewContainerPreview');
+
+            const tabEditor = document.getElementById('viewTabEditor');
+            const tabDiff = document.getElementById('viewTabDiff');
+            const tabGraph = document.getElementById('viewTabGraph');
+            const tabPreview = document.getElementById('viewTabPreview');
+
+            if (editorView) editorView.classList.add('hidden');
+            if (diffView) diffView.classList.add('hidden');
+            if (graphView) graphView.classList.add('hidden');
+            if (previewView) previewView.classList.add('hidden');
+
+            if (tabEditor) tabEditor.className = "px-3 py-1.5 rounded-t-md text-git-muted hover:text-white flex items-center space-x-2";
+            if (tabDiff) tabDiff.className = "px-3 py-1.5 rounded-t-md text-git-muted hover:text-white flex items-center space-x-2";
+            if (tabGraph) tabGraph.className = "px-3 py-1.5 rounded-t-md text-git-muted hover:text-white flex items-center space-x-2";
+            if (tabPreview) tabPreview.className = "px-3 py-1 rounded text-git-muted hover:text-white hover:bg-git-dark flex items-center space-x-1.5 transition cursor-pointer border border-git-border hover:border-git-orange";
+
+            if (view === 'editor') {
+                if (editorView) editorView.classList.remove('hidden');
+                if (tabEditor) tabEditor.className = "px-3 py-1.5 rounded-t-md bg-git-dark text-white font-medium flex items-center space-x-2 border-t-2 border-git-orange";
+            } else if (view === 'diff') {
+                if (diffView) diffView.classList.remove('hidden');
+                if (tabDiff) tabDiff.className = "px-3 py-1.5 rounded-t-md bg-git-dark text-white font-medium flex items-center space-x-2 border-t-2 border-git-orange";
+                renderDiffView();
+            } else if (view === 'graph') {
+                if (graphView) graphView.classList.remove('hidden');
+                if (tabGraph) tabGraph.className = "px-3 py-1.5 rounded-t-md bg-git-dark text-white font-medium flex items-center space-x-2 border-t-2 border-git-orange";
+                renderCommitDagGraph();
+            } else if (view === 'preview') {
+                if (previewView) previewView.classList.remove('hidden');
+                if (tabPreview) tabPreview.className = "px-3 py-1 rounded bg-git-dark text-white font-medium flex items-center space-x-1.5 transition cursor-pointer border border-git-orange shadow-sm";
+                renderPreviewDashboard();
+            }
+        }
+
+        /* ---------------------------------------------------------------------
+         * WINDOW LOAD BOOTSTRAP
+         * --------------------------------------------------------------------- */
+        window.onload = async function() {
+            if (window.MINIGIT_LIVE && typeof window.MINIGIT_LIVE === 'object') {
+                loadLiveRepo();
+            } else {
+                await executeGitInit();
+            }
+            openFileInEditor('index.html');
+            switchViewTab('graph');
         };
     </script>
 </body>
