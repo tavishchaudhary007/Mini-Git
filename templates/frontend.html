@@ -85,11 +85,19 @@
             </div>
         </div>
         <!-- Repository Controls Header Info -->
-        <div class="flex items-center space-x-4">
+        <div class="flex items-center space-x-3">
+            <button onclick="resetToDefaultRepo()" title="Reset workspace back to original demo state" class="bg-git-card border border-git-border hover:border-git-orange text-xs text-git-muted hover:text-white px-2.5 py-1.5 rounded-md transition flex items-center space-x-1.5 shadow-sm">
+                <i class="fa-solid fa-rotate-left text-git-orange"></i>
+                <span class="hidden sm:inline">Reset Demo</span>
+            </button>
+            <button onclick="openNewFileModal()" class="bg-git-accent hover:bg-green-700 text-xs text-white font-medium px-2.5 py-1.5 rounded-md transition flex items-center space-x-1.5 shadow-sm">
+                <i class="fa-solid fa-plus"></i>
+                <span>New File</span>
+            </button>
             <!-- Active Branch Dropdown / Indicator -->
             <div class="flex items-center bg-git-dark border border-git-border rounded-md px-3 py-1 text-xs">
                 <i class="fa-solid fa-code-branch text-git-purple mr-2"></i>
-                <span class="text-git-muted mr-1.5">Branch:</span>
+                <span class="text-git-muted mr-1.5 hidden sm:inline">Branch:</span>
                 <select id="branchSelect" onchange="switchBranchUI(this.value)" class="bg-transparent text-white font-mono font-medium focus:outline-none cursor-pointer">
                     <!-- Populated dynamically -->
                 </select>
@@ -103,31 +111,24 @@
         <!-- LEFT SIDEBAR: EXPLORER & GIT CONTROL -->
         <aside class="w-80 bg-git-card border-r border-git-border flex flex-col shrink-0">
             
-            <!-- Sidebar Header: Workspace -->
-            <div class="h-10 px-4 border-b border-git-border text-xs font-semibold text-white flex items-center space-x-2 shrink-0 bg-git-card">
-                <!-- Laptop + Gear + Orbit Network Workspace Icon -->
-                <svg class="w-4 h-4 text-git-orange shrink-0" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                    <!-- Orbital Rings & Nodes -->
-                    <circle cx="32" cy="32" r="28" stroke="currentColor" stroke-width="2" stroke-opacity="0.4"/>
-                    <circle cx="12" cy="12" r="3" fill="currentColor"/>
-                    <circle cx="52" cy="12" r="3" fill="currentColor"/>
-                    <circle cx="60" cy="32" r="3" fill="currentColor"/>
-                    <circle cx="32" cy="60" r="3" fill="currentColor"/>
-                    <!-- Laptop Screen & Base -->
-                    <rect x="17" y="21" width="30" height="20" rx="2" stroke="currentColor" stroke-width="3" fill="#161B22"/>
-                    <path d="M12 46 L17 41 H47 L52 46 H12 Z" stroke="currentColor" stroke-width="3" fill="#161B22"/>
-                    <line x1="29" y1="44" x2="35" y2="44" stroke="currentColor" stroke-width="1.8"/>
-                    <!-- Gear with Checkmark -->
-                    <circle cx="32" cy="31" r="4" stroke="currentColor" stroke-width="2"/>
-                    <path d="M30.5 31.2 L31.8 32.5 L34 29.8" stroke="#FFFFFF" stroke-width="2"/>
-                </svg>
-                <span class="tracking-wide">Workspace</span>
+            <!-- Sidebar Tab Switches -->
+            <div class="flex border-b border-git-border text-xs font-medium text-git-muted bg-git-card shrink-0">
+                <button id="btnNavFiles" onclick="switchSidebarTab('files')" class="flex-1 py-2.5 text-center border-b-2 border-git-orange text-white flex items-center justify-center space-x-1.5 transition">
+                    <i class="fa-solid fa-folder-tree text-git-orange"></i>
+                    <span>Workspace</span>
+                </button>
+                <button id="btnNavGit" onclick="switchSidebarTab('git')" class="flex-1 py-2.5 text-center border-b-2 border-transparent hover:text-white flex items-center justify-center space-x-1.5 relative text-git-muted transition">
+                    <i class="fa-solid fa-code-branch text-git-purple"></i>
+                    <span>Source Control</span>
+                    <span id="stagedBadgeCount" class="hidden ml-1.5 bg-git-orange text-white text-[10px] px-1.5 py-0.2 rounded-full font-bold">0</span>
+                </button>
             </div>
 
-            <!-- FILE EXPLORER PANEL -->
+            <!-- TAB 1: FILE EXPLORER PANEL -->
             <div id="tabFilesPanel" class="flex-1 flex flex-col overflow-y-auto p-3">
                 <div class="flex items-center justify-between text-xs text-git-muted uppercase font-semibold tracking-wider mb-2">
                     <span>Working Directory</span>
+                    <button onclick="openNewFileModal()" title="Create New File" class="hover:text-white p-1 rounded hover:bg-git-dark transition"><i class="fa-solid fa-file-circle-plus text-git-accent text-sm"></i></button>
                 </div>
                 <!-- File Tree List -->
                 <div id="fileTreeContainer" class="space-y-1 font-mono text-sm">
@@ -135,10 +136,67 @@
                 </div>
             </div>
 
-            <!-- Storage Quick Footer (Hidden) -->
-            <div id="storageQuickFooter" style="display: none;" class="p-2.5 border-t border-git-border bg-git-dark text-[11px] text-git-muted flex justify-between items-center">
-                <span class="flex items-center"><i class="fa-solid fa-database mr-1.5 text-git-blue"></i> Web VFS Engine</span>
-                <span id="repoStatusIndicator" class="text-green-400 font-mono">● Active</span>
+            <!-- TAB 2: SOURCE CONTROL & STAGING PANEL -->
+            <div id="tabGitPanel" class="flex-1 flex flex-col overflow-y-auto p-3 hidden space-y-4">
+                <!-- Commit Form -->
+                <div class="space-y-2 bg-git-dark p-3 rounded-lg border border-git-border">
+                    <label class="text-xs font-semibold text-git-muted uppercase tracking-wider block">Commit Changes</label>
+                    <textarea id="commitMsgInput" rows="2" placeholder="Message (e.g., Update preview layout)..." class="w-full bg-git-card border border-git-border rounded p-2 text-xs text-white focus:border-git-blue focus:outline-none resize-none font-mono"></textarea>
+                    <div class="flex space-x-2">
+                        <button onclick="executeGitCommit()" class="flex-1 bg-git-accent hover:bg-green-700 text-white font-medium text-xs py-1.5 rounded transition flex items-center justify-center space-x-1.5">
+                            <i class="fa-solid fa-check"></i>
+                            <span>Commit</span>
+                        </button>
+                        <button onclick="executeGitStageAll()" class="bg-git-border hover:bg-gray-700 text-white text-xs px-2.5 py-1.5 rounded transition" title="Stage All Files">
+                            <span>Stage All</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Changes & Staging Area -->
+                <div class="space-y-3">
+                    <!-- Staged Changes Section -->
+                    <div>
+                        <div class="flex items-center justify-between text-xs font-semibold text-git-muted uppercase tracking-wider mb-1.5">
+                            <span class="flex items-center space-x-1">
+                                <span>Staged Changes</span>
+                                <span id="stagedCount" class="text-git-blue">(0)</span>
+                            </span>
+                            <button onclick="executeGitUnstageAll()" class="text-[11px] text-git-muted hover:text-white underline">Unstage All</button>
+                        </div>
+                        <div id="stagedList" class="space-y-1 font-mono text-xs">
+                            <!-- Staged Items -->
+                        </div>
+                    </div>
+
+                    <!-- Unstaged / Modified Changes Section -->
+                    <div>
+                        <div class="flex items-center justify-between text-xs font-semibold text-git-muted uppercase tracking-wider mb-1.5">
+                            <span class="flex items-center space-x-1">
+                                <span>Changes</span>
+                                <span id="unstagedCount" class="text-git-orange">(0)</span>
+                            </span>
+                        </div>
+                        <div id="unstagedList" class="space-y-1 font-mono text-xs">
+                            <!-- Unstaged Items -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Branch Management Section -->
+                <div class="border-t border-git-border pt-3 space-y-2">
+                    <label class="text-xs font-semibold text-git-muted uppercase tracking-wider block">Branch Management</label>
+                    <div class="flex space-x-2">
+                        <input id="newBranchNameInput" type="text" placeholder="new-branch-name" class="flex-1 bg-git-dark border border-git-border rounded px-2 py-1 text-xs text-white focus:outline-none font-mono">
+                        <button onclick="createNewBranch()" class="bg-git-border hover:bg-gray-700 text-xs px-3 py-1 rounded text-white font-medium">Create</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Storage Quick Footer -->
+            <div id="storageQuickFooter" class="p-2.5 border-t border-git-border bg-git-dark text-[11px] text-git-muted flex justify-between items-center shrink-0">
+                <span class="flex items-center"><i class="fa-solid fa-database mr-1.5 text-git-blue"></i> Local Storage VFS</span>
+                <span id="repoStatusIndicator" class="text-green-400 font-mono">● Auto-Saved</span>
             </div>
 
         </aside>
@@ -189,9 +247,12 @@
                             <span id="editorCommitMsgBadge" class="text-git-muted max-w-[130px] truncate hidden sm:inline">msg</span>
                         </div>
                         <span id="editorFileHashDisplay" class="text-[11px] text-git-blue hidden md:inline">Hash: e3b0c442...</span>
-                        <button onclick="saveActiveFileFromEditor()" class="text-git-accent hover:text-green-400 flex items-center space-x-1 font-sans">
-                            <i class="fa-solid fa-floppy-disk"></i>
-                            <span>Save Changes</span>
+                        <button id="saveChangesBtn" onclick="saveActiveFileFromEditor()" class="bg-git-accent hover:bg-green-700 text-white px-2.5 py-1 rounded text-xs flex items-center space-x-1.5 font-sans transition shadow-sm">
+                            <i id="saveBtnIcon" class="fa-solid fa-floppy-disk"></i>
+                            <span id="saveBtnText">Save Changes</span>
+                        </button>
+                        <button onclick="downloadActiveFile()" title="Download active file to computer" class="bg-git-card border border-git-border hover:border-git-blue text-git-muted hover:text-white px-2 py-1 rounded text-xs flex items-center space-x-1 transition">
+                            <i class="fa-solid fa-download"></i>
                         </button>
                     </div>
                 </div>
@@ -308,22 +369,36 @@
                     <!-- Live App Sandbox Preview + Recent Activity Grid -->
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
                         <!-- Live Web Output Card -->
-                        <div class="bg-git-card border border-git-border rounded-lg flex flex-col h-[380px] overflow-hidden">
-                            <div class="px-3 py-2 border-b border-git-border flex items-center justify-between bg-git-dark text-xs">
+                        <div class="bg-git-card border border-git-border rounded-lg flex flex-col h-[400px] overflow-hidden">
+                            <div class="px-3 py-2 border-b border-git-border flex items-center justify-between bg-git-dark text-xs flex-wrap gap-2">
                                 <div class="flex items-center space-x-2">
                                     <i class="fa-solid fa-window-maximize text-git-blue"></i>
                                     <span class="font-medium text-white">Live Web Preview</span>
-                                    <select id="previewFileSelect" onchange="updateLivePreviewIframe()" class="bg-git-card border border-git-border text-white text-[11px] rounded px-1.5 py-0.5 focus:outline-none">
+                                    <select id="previewFileSelect" onchange="onPreviewFileChange(this.value)" class="bg-git-card border border-git-border text-white text-[11px] rounded px-1.5 py-0.5 focus:outline-none cursor-pointer">
                                         <!-- HTML files from VFS -->
                                     </select>
                                 </div>
-                                <button onclick="updateLivePreviewIframe()" class="text-git-muted hover:text-white px-2 py-0.5 rounded text-[11px] flex items-center space-x-1" title="Reload Sandbox">
-                                    <i class="fa-solid fa-arrow-rotate-right"></i>
-                                    <span>Reload</span>
-                                </button>
+                                <div class="flex items-center space-x-2">
+                                    <button id="btnTogglePreviewCode" onclick="togglePreviewCodeSplit()" class="text-git-muted hover:text-white px-2 py-0.5 rounded text-[11px] border border-git-border hover:border-git-blue flex items-center space-x-1 transition" title="Toggle Side-by-Side HTML Source">
+                                        <i class="fa-solid fa-code text-git-blue"></i>
+                                        <span id="previewCodeToggleText">HTML Code</span>
+                                    </button>
+                                    <button onclick="updateLivePreviewIframe(true)" class="text-git-muted hover:text-white px-2 py-0.5 rounded text-[11px] border border-git-border hover:border-git-orange flex items-center space-x-1 transition" title="Hard Reload Sandbox">
+                                        <i id="previewReloadIcon" class="fa-solid fa-arrow-rotate-right"></i>
+                                        <span>Reload</span>
+                                    </button>
+                                </div>
                             </div>
-                            <div class="flex-1 bg-white relative">
-                                <iframe id="projectLiveIframe" sandbox="allow-scripts allow-modals" class="w-full h-full border-none bg-white"></iframe>
+                            <div class="flex-1 flex overflow-hidden bg-white relative">
+                                <!-- Optional Live HTML quick-edit panel -->
+                                <div id="previewCodePanel" class="w-1/2 h-full bg-git-dark border-r border-git-border flex-col hidden">
+                                    <div class="px-2 py-1 bg-git-card border-b border-git-border text-[11px] text-git-muted flex justify-between items-center">
+                                        <span id="previewCodePanelTitle" class="font-mono text-white">HTML Source</span>
+                                        <span class="text-[10px] text-git-orange">Syncs live to preview & file</span>
+                                    </div>
+                                    <textarea id="previewCodeTextarea" oninput="onPreviewCodeInput(this.value)" class="flex-1 bg-git-dark p-2.5 text-xs font-mono text-white resize-none focus:outline-none leading-relaxed" spellcheck="false" placeholder="Type or paste HTML code here..."></textarea>
+                                </div>
+                                <iframe id="projectLiveIframe" sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups" class="flex-1 h-full border-none bg-white"></iframe>
                             </div>
                         </div>
 
@@ -449,6 +524,25 @@
             </div>
 
         </main>
+    </div>
+
+    <!-- NEW FILE CREATION MODAL DIALOG -->
+    <div id="newFileModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 hidden">
+        <div class="bg-git-card border border-git-border rounded-lg p-5 w-96 space-y-4 shadow-2xl">
+            <div class="flex items-center justify-between border-b border-git-border pb-2">
+                <h3 class="text-sm font-semibold text-white flex items-center space-x-2">
+                    <i class="fa-solid fa-file-circle-plus text-git-accent"></i>
+                    <span>Create New File</span>
+                </h3>
+                <button onclick="closeNewFileModal()" class="text-git-muted hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <p class="text-xs text-git-muted">Enter path name. Nested folders will be created automatically.</p>
+            <input id="modalFileNameInput" type="text" placeholder="e.g., app.html, styles/theme.css" onkeydown="if(event.key==='Enter')confirmCreateNewFile()" class="w-full bg-git-dark border border-git-border rounded p-2 text-xs text-white font-mono focus:border-git-blue focus:outline-none">
+            <div class="flex justify-end space-x-2 pt-1">
+                <button onclick="closeNewFileModal()" class="px-3 py-1.5 bg-git-border text-white text-xs rounded hover:bg-gray-700 transition">Cancel</button>
+                <button onclick="confirmCreateNewFile()" class="px-3 py-1.5 bg-git-accent text-white text-xs rounded hover:bg-green-700 font-medium transition">Create File</button>
+            </div>
+        </div>
     </div>
 
     <!-- FILE COMMIT HISTORY DETAIL MODAL DIALOG -->
@@ -625,6 +719,9 @@
             if (!headBlobHash && !stagedBlobHash) {
                 return { code: 'untracked', label: 'Untracked file', color: 'text-git-purple' };
             }
+            if (stagedBlobHash && currentBlobHash !== stagedBlobHash) {
+                return { code: 'modified', label: 'Modified after stage', color: 'text-git-orange' };
+            }
             if (stagedBlobHash) {
                 return { code: 'staged', label: 'Staged for commit', color: 'text-git-blue' };
             }
@@ -780,9 +877,128 @@
         }
 
         /* ---------------------------------------------------------------------
+         * PERSISTENCE & LOCAL STORAGE ENGINE
+         * --------------------------------------------------------------------- */
+        const STORAGE_KEY = 'minigit_studio_session_v2';
+
+        function saveToLocalStorage() {
+            try {
+                const payload = {
+                    vfs: VFS,
+                    staging: STAGING_INDEX,
+                    objects: OBJECTS,
+                    branches: BRANCHES,
+                    currentBranch: CURRENT_BRANCH,
+                    activeFile: ACTIVE_FILE,
+                    feedback: FEEDBACK_STORE
+                };
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+                const indicator = document.getElementById('repoStatusIndicator');
+                if (indicator) {
+                    indicator.innerText = "● Auto-Saved";
+                    indicator.className = "text-green-400 font-mono";
+                }
+            } catch (e) {
+                console.warn("localStorage save failed:", e);
+            }
+        }
+
+        function loadFromLocalStorage() {
+            try {
+                const raw = localStorage.getItem(STORAGE_KEY);
+                if (!raw) return false;
+                const state = JSON.parse(raw);
+                if (state && state.vfs && Object.keys(state.vfs).length > 0) {
+                    VFS = state.vfs;
+                    STAGING_INDEX = state.staging || {};
+                    OBJECTS = state.objects || {};
+                    BRANCHES = state.branches || { "main": null };
+                    CURRENT_BRANCH = state.currentBranch || "main";
+                    ACTIVE_FILE = state.activeFile || Object.keys(VFS)[0] || "index.html";
+                    if (Array.isArray(state.feedback)) {
+                        FEEDBACK_STORE.length = 0;
+                        FEEDBACK_STORE.push(...state.feedback);
+                    }
+                    return true;
+                }
+            } catch (e) {
+                console.warn("localStorage load failed:", e);
+            }
+            return false;
+        }
+
+        function resetToDefaultRepo() {
+            if (confirm("Reset workspace back to original demo repository? All uncommitted local changes will be replaced.")) {
+                localStorage.removeItem(STORAGE_KEY);
+                location.reload();
+            }
+        }
+
+        /* ---------------------------------------------------------------------
          * FILE OPERATIONS & EDITING
          * --------------------------------------------------------------------- */
+        function openNewFileModal() {
+            const modal = document.getElementById('newFileModal');
+            if (modal) modal.classList.remove('hidden');
+            const input = document.getElementById('modalFileNameInput');
+            if (input) {
+                input.value = '';
+                setTimeout(() => input.focus(), 60);
+            }
+        }
+
+        function closeNewFileModal() {
+            const modal = document.getElementById('newFileModal');
+            if (modal) modal.classList.add('hidden');
+        }
+
+        function confirmCreateNewFile() {
+            const input = document.getElementById('modalFileNameInput');
+            if (!input) return;
+            const rawVal = input.value.trim();
+            if (!rawVal) return;
+            const cleanPath = rawVal.replace(/^\/+|\/+$/g, '');
+            if (!cleanPath) return;
+
+            if (VFS[cleanPath] !== undefined) {
+                alert(`File '${cleanPath}' already exists.`);
+                return;
+            }
+
+            const defaultContent = cleanPath.endsWith('.html') || cleanPath.endsWith('.htm')
+                ? `<!DOCTYPE html>\n<html>\n<head>\n  <title>${cleanPath}</title>\n  <style>\n    body { font-family: sans-serif; padding: 2rem; background: #0d1117; color: #c9d1d9; }\n    h1 { color: #58a6ff; }\n  </style>\n</head>\n<body>\n  <h1>${cleanPath}</h1>\n  <p>Live preview ready!</p>\n</body>\n</html>\n`
+                : `// ${cleanPath}\n`;
+
+            VFS[cleanPath] = defaultContent;
+            closeNewFileModal();
+            saveToLocalStorage();
+            openFileInEditor(cleanPath);
+            logTerminal(`Created new file '${cleanPath}'`, "text-green-400");
+            updateUI();
+        }
+
+        function downloadActiveFile() {
+            if (!ACTIVE_FILE) return;
+            const content = VFS[ACTIVE_FILE] || "";
+            const { filename } = splitPath(ACTIVE_FILE);
+            const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            logTerminal(`Downloaded file '${filename}'`, "text-git-blue");
+        }
+
         async function openFileInEditor(filepath) {
+            if (!filepath || VFS[filepath] === undefined) {
+                const keys = Object.keys(VFS);
+                if (keys.length > 0) filepath = keys[0];
+                else return;
+            }
             ACTIVE_FILE = filepath;
             const { folder, filename } = splitPath(filepath);
             
@@ -795,12 +1011,18 @@
             const fileDisp = document.getElementById('editorFilePathDisplay');
             if (fileDisp) fileDisp.innerText = filename;
 
-            document.getElementById('codeEditorArea').value = VFS[filepath] || "";
+            const editorArea = document.getElementById('codeEditorArea');
+            if (editorArea) {
+                editorArea.value = VFS[filepath] !== undefined ? VFS[filepath] : "";
+            }
             await updateEditorHashDisplay();
             await updateEditorCommitDisplay(filepath);
 
             const select = document.getElementById('diffFileSelect');
             if (select) select.value = filepath;
+
+            // Automatically make Editor view active so clicking any file shows it immediately!
+            switchViewTab('editor');
         }
 
         async function updateEditorHashDisplay() {
@@ -811,20 +1033,49 @@
             if (hashDisp) hashDisp.innerText = `Blob: ${h.substring(0, 8)}`;
         }
 
+        let previewDebounceTimer = null;
+
         function markFileAsModified() {
             if (!ACTIVE_FILE) return;
             const newContent = document.getElementById('codeEditorArea').value;
             VFS[ACTIVE_FILE] = newContent;
             updateEditorHashDisplay();
-            updateUI();
+            updateEditorCommitDisplay(ACTIVE_FILE);
+
+            // Debounce tree re-render and preview iframe update by 400ms
+            clearTimeout(previewDebounceTimer);
+            previewDebounceTimer = setTimeout(() => {
+                renderFileTree();
+                renderSourceControlLists();
+                renderDiffView();
+                const previewView = document.getElementById('viewContainerPreview');
+                if (previewView && !previewView.classList.contains('hidden') && ACTIVE_PREVIEW_SUBTAB === 'dashboard') {
+                    updateLivePreviewIframe(false);
+                }
+            }, 400);
         }
 
         function saveActiveFileFromEditor() {
             if (!ACTIVE_FILE) return;
             const newContent = document.getElementById('codeEditorArea').value;
             VFS[ACTIVE_FILE] = newContent;
+            saveToLocalStorage();
+
+            // Visual feedback on save button
+            const btnText = document.getElementById('saveBtnText');
+            const btnIcon = document.getElementById('saveBtnIcon');
+            if (btnText && btnIcon) {
+                btnText.innerText = "Saved!";
+                btnIcon.className = "fa-solid fa-check text-green-300";
+                setTimeout(() => {
+                    btnText.innerText = "Save Changes";
+                    btnIcon.className = "fa-solid fa-floppy-disk";
+                }, 1500);
+            }
+
             logTerminal(`Saved changes to ${ACTIVE_FILE}`, "text-green-400");
             updateUI();
+            updateLivePreviewIframe(true);
         }
 
         /* ---------------------------------------------------------------------
@@ -917,6 +1168,7 @@
 
             const dateStr = formatCommitDateTime(commitObj.timestamp);
             logTerminal(`[${CURRENT_BRANCH} ${commitHash.substring(0, 7)}] ${message} • ${dateStr}`, "text-green-400");
+            saveToLocalStorage();
             updateUI();
         }
 
@@ -937,6 +1189,7 @@
             BRANCHES[branchName] = BRANCHES[CURRENT_BRANCH];
             if (input) input.value = '';
             logTerminal(`Created branch '${branchName}' at HEAD`, "text-git-purple");
+            saveToLocalStorage();
             updateBranchDropdown();
             renderCommitDagGraph();
         }
@@ -1109,6 +1362,7 @@
         function deleteFile(filepath) {
             delete VFS[filepath];
             delete STAGING_INDEX[filepath];
+            saveToLocalStorage();
             if (ACTIVE_FILE === filepath) {
                 ACTIVE_FILE = Object.keys(VFS)[0] || "";
                 if (ACTIVE_FILE) openFileInEditor(ACTIVE_FILE);
@@ -1157,21 +1411,24 @@
                 const headHash = headTreeBlobs[filepath];
                 const stagedHash = STAGING_INDEX[filepath];
 
-                // If file is not staged AND differs from HEAD commit
-                if (!stagedHash && currentHash !== headHash) {
+                const isModifiedAfterStage = stagedHash && currentHash !== stagedHash;
+                const isUnstagedModifiedOrUntracked = !stagedHash && currentHash !== headHash;
+
+                if (isModifiedAfterStage || isUnstagedModifiedOrUntracked) {
                     unstagedCount++;
                     if (unstagedList) {
                         const statusLetter = !headHash ? 'U' : 'M';
                         const statusColor = !headHash ? 'text-git-purple' : 'text-git-orange';
+                        const statusTitle = isModifiedAfterStage ? 'Modified after staging' : (!headHash ? 'Untracked' : 'Modified');
 
                         const item = document.createElement('div');
-                        item.className = "flex items-center justify-between p-1.5 bg-git-dark border border-git-border rounded";
+                        item.className = "flex items-center justify-between p-1.5 bg-git-dark border border-git-border rounded hover:border-git-orange/50 transition";
                         item.innerHTML = `
-                            <div class="flex items-center space-x-1.5 truncate">
+                            <div class="flex items-center space-x-1.5 truncate" title="${statusTitle}">
                                 <span class="text-xs font-bold ${statusColor}">${statusLetter}</span>
-                                <span class="truncate">${filepath}</span>
+                                <span class="truncate cursor-pointer hover:underline" onclick="openFileInEditor('${filepath}')">${filepath}</span>
                             </div>
-                            <button onclick="stageFile('${filepath}')" class="text-git-muted hover:text-white" title="Stage"><i class="fa-solid fa-plus text-xs"></i></button>
+                            <button onclick="stageFile('${filepath}')" class="text-git-muted hover:text-white px-1.5 py-0.5 rounded hover:bg-git-card transition" title="Stage"><i class="fa-solid fa-plus text-xs"></i></button>
                         `;
                         unstagedList.appendChild(item);
                     }
@@ -1678,26 +1935,30 @@
             // 5. Populate HTML file selector for live preview
             const fileSelect = document.getElementById('previewFileSelect');
             if (fileSelect) {
-                const prevVal = fileSelect.value;
-                fileSelect.innerHTML = '';
                 const htmlFiles = fileKeys.filter(f => f.endsWith('.html') || f.endsWith('.htm'));
-                if (htmlFiles.length === 0) {
-                    const opt = document.createElement('option');
-                    opt.value = '';
-                    opt.innerText = 'No HTML files';
-                    fileSelect.appendChild(opt);
-                } else {
-                    for (const f of htmlFiles) {
+                const currentVal = fileSelect.value || (htmlFiles.includes('index.html') ? 'index.html' : (htmlFiles[0] || ''));
+                
+                const existingOptions = Array.from(fileSelect.options).map(o => o.value);
+                const isDifferent = existingOptions.length !== htmlFiles.length || !htmlFiles.every(f => existingOptions.includes(f));
+                
+                if (isDifferent || fileSelect.options.length === 0) {
+                    fileSelect.innerHTML = '';
+                    if (htmlFiles.length === 0) {
                         const opt = document.createElement('option');
-                        opt.value = f;
-                        opt.innerText = f;
-                        if (f === prevVal || (!prevVal && f === 'index.html')) {
-                            opt.selected = true;
-                        }
+                        opt.value = '';
+                        opt.innerText = 'No HTML files';
                         fileSelect.appendChild(opt);
+                    } else {
+                        for (const f of htmlFiles) {
+                            const opt = document.createElement('option');
+                            opt.value = f;
+                            opt.innerText = f;
+                            if (f === currentVal) opt.selected = true;
+                            fileSelect.appendChild(opt);
+                        }
                     }
                 }
-                updateLivePreviewIframe();
+                updateLivePreviewIframe(false);
             }
 
             // 6. Recent Activity Stream
@@ -1736,14 +1997,113 @@
             renderFeedbackList();
         }
 
-        function updateLivePreviewIframe() {
+        function bundlePreviewHtml(rawHtml) {
+            let bundled = rawHtml || '';
+            // Inline CSS links: <link rel="stylesheet" href="...">
+            bundled = bundled.replace(/<link\s+[^>]*rel=["']stylesheet["'][^>]*href=["']([^"']+)["'][^>]*>/gi, (match, href) => {
+                const cleanHref = href.replace(/^\.?\/+/, '');
+                if (VFS[cleanHref]) {
+                    return `<style>/* inlined from ${cleanHref} */\n${VFS[cleanHref]}\n</style>`;
+                }
+                const matched = Object.keys(VFS).find(k => k.endsWith(cleanHref) || cleanHref.endsWith(k));
+                if (matched && VFS[matched]) {
+                    return `<style>/* inlined from ${matched} */\n${VFS[matched]}\n</style>`;
+                }
+                return match;
+            });
+            // Inline JS scripts: <script src="..."></script>
+            bundled = bundled.replace(/<script\s+[^>]*src=["']([^"']+)["'][^>]*>\s*<\/script>/gi, (match, src) => {
+                const cleanSrc = src.replace(/^\.?\/+/, '');
+                if (VFS[cleanSrc]) {
+                    return `<script>/* inlined from ${cleanSrc} */\n${VFS[cleanSrc]}\n<\/script>`;
+                }
+                const matched = Object.keys(VFS).find(k => k.endsWith(cleanSrc) || cleanSrc.endsWith(k));
+                if (matched && VFS[matched]) {
+                    return `<script>/* inlined from ${matched} */\n${VFS[matched]}\n<\/script>`;
+                }
+                return match;
+            });
+            return bundled;
+        }
+
+        let IS_PREVIEW_CODE_SPLIT = false;
+        function togglePreviewCodeSplit() {
+            IS_PREVIEW_CODE_SPLIT = !IS_PREVIEW_CODE_SPLIT;
+            const panel = document.getElementById('previewCodePanel');
+            const toggleBtn = document.getElementById('btnTogglePreviewCode');
+            const toggleText = document.getElementById('previewCodeToggleText');
+            if (panel) {
+                if (IS_PREVIEW_CODE_SPLIT) {
+                    panel.classList.remove('hidden');
+                    panel.classList.add('flex');
+                    if (toggleBtn) toggleBtn.className = "text-white bg-git-blue/30 border border-git-blue px-2 py-0.5 rounded text-[11px] flex items-center space-x-1";
+                    if (toggleText) toggleText.innerText = "Hide Code";
+                } else {
+                    panel.classList.add('hidden');
+                    panel.classList.remove('flex');
+                    if (toggleBtn) toggleBtn.className = "text-git-muted hover:text-white px-2 py-0.5 rounded text-[11px] border border-git-border hover:border-git-blue flex items-center space-x-1";
+                    if (toggleText) toggleText.innerText = "HTML Code";
+                }
+            }
+            updateLivePreviewIframe(false);
+        }
+
+        function onPreviewCodeInput(val) {
+            const fileSelect = document.getElementById('previewFileSelect');
+            const selectedFile = (fileSelect && fileSelect.value) ? fileSelect.value : 'index.html';
+            VFS[selectedFile] = val;
+            clearTimeout(previewDebounceTimer);
+            previewDebounceTimer = setTimeout(() => {
+                const iframe = document.getElementById('projectLiveIframe');
+                if (iframe) {
+                    iframe.srcdoc = bundlePreviewHtml(val);
+                }
+                saveToLocalStorage();
+                updateEditorCommitDisplay(selectedFile);
+            }, 300);
+        }
+
+        function onPreviewFileChange(filePath) {
+            updateLivePreviewIframe(true);
+        }
+
+        function updateLivePreviewIframe(forceReload = false) {
             const fileSelect = document.getElementById('previewFileSelect');
             const iframe = document.getElementById('projectLiveIframe');
             if (!iframe) return;
 
-            const selectedFile = fileSelect ? fileSelect.value : 'index.html';
-            const content = VFS[selectedFile] || '<!DOCTYPE html><html><body style="font-family:sans-serif;padding:2rem;text-align:center;color:#666;"><h3>No content available</h3><p>Select or create an HTML file in Workspace to preview it live.</p></body></html>';
-            iframe.srcdoc = content;
+            const htmlFiles = Object.keys(VFS).filter(f => f.endsWith('.html') || f.endsWith('.htm'));
+            let selectedFile = (fileSelect && fileSelect.value) ? fileSelect.value : '';
+            if (!selectedFile || !VFS[selectedFile]) {
+                selectedFile = htmlFiles.includes('index.html') ? 'index.html' : (htmlFiles[0] || Object.keys(VFS)[0] || 'index.html');
+                if (fileSelect) fileSelect.value = selectedFile;
+            }
+
+            const rawContent = VFS[selectedFile] || '<!DOCTYPE html><html><body style="font-family:sans-serif;padding:2rem;text-align:center;color:#666;"><h3>No content available</h3><p>Select or create an HTML file in Workspace to preview it live.</p></body></html>';
+            const bundledContent = bundlePreviewHtml(rawContent);
+
+            const codeArea = document.getElementById('previewCodeTextarea');
+            if (codeArea && document.activeElement !== codeArea) {
+                codeArea.value = rawContent;
+            }
+            const codeTitle = document.getElementById('previewCodePanelTitle');
+            if (codeTitle) {
+                codeTitle.innerText = `${selectedFile} (Source)`;
+            }
+
+            if (forceReload) {
+                const reloadIcon = document.getElementById('previewReloadIcon');
+                if (reloadIcon) {
+                    reloadIcon.classList.add('fa-spin');
+                    setTimeout(() => reloadIcon.classList.remove('fa-spin'), 600);
+                }
+                iframe.srcdoc = '';
+                setTimeout(() => {
+                    iframe.srcdoc = bundledContent;
+                }, 30);
+            } else {
+                iframe.srcdoc = bundledContent;
+            }
         }
 
         function setFeedbackRating(score) {
@@ -1890,10 +2250,15 @@
             if (window.MINIGIT_LIVE && typeof window.MINIGIT_LIVE === 'object') {
                 loadLiveRepo();
             } else {
-                await executeGitInit();
+                const restored = loadFromLocalStorage();
+                if (!restored) {
+                    await executeGitInit();
+                } else {
+                    logTerminal("Restored workspace session from local storage.", "text-git-blue");
+                }
             }
-            openFileInEditor('index.html');
-            switchViewTab('graph');
+            openFileInEditor(ACTIVE_FILE || 'index.html');
+            switchViewTab('editor');
         };
     </script>
 </body>
