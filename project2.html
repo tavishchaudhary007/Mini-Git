@@ -45,14 +45,14 @@
             height: 6px;
         }
         ::-webkit-scrollbar-track {
-            background: #c0c4bc;
+            background: #161b22;
         }
         ::-webkit-scrollbar-thumb {
-            background: #232422;
+            background: #30363d;
             border-radius: 4px;
         }
         ::-webkit-scrollbar-thumb:hover {
-            background: #c1dbbd;
+            background: #8b949e;
         }
         .diff-added { background-color: rgba(46, 160, 67, 0.15); color: #7ee787; }
         .diff-removed { background-color: rgba(248, 81, 73, 0.15); color: #ff7b72; }
@@ -63,7 +63,7 @@
 
     <!-- TOP NAVBAR -->
     <header class="h-14 bg-git-card border-b border-git-border flex items-center justify-between px-4 z-20 shrink-0">
-            <div class="flex items-center space-x-3">
+        <div class="flex items-center space-x-3">
             <div class="flex items-center space-x-2.5">
                 <!-- Bespoke M-Branch Icon -->
                 <svg class="w-7 h-7 drop-shadow-[0_0_8px_rgba(240,80,50,0.5)] hover:scale-110 transition-transform shrink-0" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -83,7 +83,6 @@
                 <span class="tracking-wide text-white font-bold text-lg">MiniGit</span>
                 <span class="bg-gradient-to-r from-git-orange to-[#FF7A45] text-white text-[11px] font-bold px-2 py-0.5 rounded-md shadow-sm">STUDIO</span>
             </div>
-            <span class="bg-git-border text-git-muted text-xs px-2 py-0.5 rounded-full font-mono">v2.4-web</span>
         </div>
         <!-- Repository Controls Header Info -->
         <div class="flex items-center space-x-4">
@@ -95,16 +94,6 @@
                     <!-- Populated dynamically -->
                 </select>
             </div>
-
-            <!-- Global Quick Buttons -->
-            <button onclick="executeGitInit()" title="Re-initialize repository" class="bg-git-border hover:bg-gray-700 text-xs text-white px-3 py-1.5 rounded-md transition flex items-center space-x-1.5">
-                <i class="fa-solid fa-rotate-left text-git-muted"></i>
-                <span>Reset Repo</span>
-            </button>
-            <button onclick="openNewFileModal()" class="bg-git-accent hover:bg-green-700 text-xs text-white font-medium px-3 py-1.5 rounded-md transition flex items-center space-x-1.5 shadow-sm">
-                <i class="fa-solid fa-plus"></i>
-                <span>New File</span>
-            </button>
         </div>
     </header>
 
@@ -114,42 +103,31 @@
         <!-- LEFT SIDEBAR: EXPLORER & GIT CONTROL -->
         <aside class="w-80 bg-git-card border-r border-git-border flex flex-col shrink-0">
             
-            <!-- Sidebar Tab Switches -->
-            <div class="flex border-b border-git-border text-xs font-medium text-git-muted">
-                <button id="btnNavFiles" onclick="switchSidebarTab('files')" class="flex-1 py-2.5 text-center border-b-2 border-git-orange text-white flex items-center justify-center space-x-1.5">
-                    <!-- Laptop + Gear + Orbit Network Workspace Icon -->
-                    <svg class="w-4 h-4 text-git-orange shrink-0" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                        <!-- Orbital Rings & Nodes -->
-                        <circle cx="32" cy="32" r="28" stroke="currentColor" stroke-width="2" stroke-opacity="0.4"/>
-                        <circle cx="12" cy="12" r="3" fill="currentColor"/>
-                        <circle cx="52" cy="12" r="3" fill="currentColor"/>
-                        <circle cx="60" cy="32" r="3" fill="currentColor"/>
-                        <circle cx="32" cy="60" r="3" fill="currentColor"/>
-                        <!-- Laptop Screen & Base -->
-                        <rect x="17" y="21" width="30" height="20" rx="2" stroke="currentColor" stroke-width="3" fill="#161B22"/>
-                        <path d="M12 46 L17 41 H47 L52 46 H12 Z" stroke="currentColor" stroke-width="3" fill="#161B22"/>
-                        <line x1="29" y1="44" x2="35" y2="44" stroke="currentColor" stroke-width="1.8"/>
-                        <!-- Gear with Checkmark -->
-                        <circle cx="32" cy="31" r="4" stroke="currentColor" stroke-width="2"/>
-                        <path d="M30.5 31.2 L31.8 32.5 L34 29.8" stroke="#FFFFFF" stroke-width="2"/>
-                    </svg>
-                    <span>Workspace</span>
-                </button>
-                <button id="btnNavGit" onclick="switchSidebarTab('git')" class="flex-1 py-2.5 text-center border-b-2 border-transparent hover:text-white flex items-center justify-center space-x-1.5 relative">
-                    <!-- Hand Holding Gear / Control Icon -->
-                    <svg class="w-4 h-4 shrink-0" viewBox="0 0 64 64" fill="currentColor" fill-rule="evenodd">
-                        <path d="M 38.1 3.4 L 41.4 3.4 L 42.1 4.0 L 42.4 7.4 L 44.5 8.4 L 45.5 8.4 L 48.2 5.4 L 48.8 5.4 L 51.2 6.7 L 51.9 7.7 L 50.5 11.5 L 52.5 13.5 L 56.6 12.1 L 58.6 15.2 L 58.6 15.8 L 55.6 18.5 L 55.9 20.9 L 56.6 21.6 L 59.6 21.9 L 60.6 22.6 L 60.6 25.9 L 60.0 26.6 L 56.9 26.9 L 55.9 28.0 L 55.6 29.0 L 55.6 30.0 L 58.6 32.7 L 58.6 33.3 L 56.6 36.4 L 53.6 35.4 L 52.2 35.4 L 50.5 37.1 L 51.9 40.8 L 50.5 42.1 L 46.5 39.7 L 43.5 39.1 L 36.0 38.4 L 33.7 37.7 L 31.7 36.4 L 28.0 35.0 L 21.6 34.4 L 20.9 33.3 L 20.9 32.7 L 23.9 30.0 L 23.6 28.0 L 22.6 26.9 L 19.5 26.6 L 18.9 25.9 L 18.9 22.6 L 19.5 21.9 L 22.9 21.6 L 23.6 20.9 L 23.9 18.5 L 20.9 15.8 L 20.9 15.2 L 22.2 12.8 L 22.9 12.1 L 23.6 12.1 L 26.9 13.5 L 29.0 11.5 L 27.6 7.4 L 30.7 5.4 L 31.3 5.4 L 34.0 8.4 L 36.4 8.1 L 37.1 7.1 L 37.4 4.0 L 38.1 3.4 Z M 40.4 14.5 L 40.1 14.1 L 37.1 14.5 L 33.3 16.5 L 31.0 19.2 L 29.6 22.9 L 30.0 26.9 L 31.7 30.3 L 34.7 33.0 L 38.4 34.4 L 42.8 34.0 L 45.8 32.3 L 48.5 29.3 L 49.9 24.9 L 49.5 21.6 L 47.5 17.9 L 44.1 15.2 L 42.1 14.5 L 40.4 14.5 Z M 4.0 35.0 L 8.1 35.0 L 9.1 35.7 L 9.1 53.6 L 8.8 53.9 L 3.4 53.9 L 3.0 53.6 L 3.0 35.7 L 4.0 35.0 Z M 21.9 36.0 L 27.6 36.7 L 35.4 40.1 L 41.1 40.4 L 46.1 41.4 L 47.8 42.1 L 49.2 43.8 L 48.8 46.1 L 46.8 47.8 L 38.4 47.5 L 38.1 47.2 L 33.3 47.2 L 33.0 47.5 L 33.3 48.2 L 35.7 49.2 L 38.1 49.9 L 46.8 49.5 L 49.2 48.8 L 54.2 45.1 L 57.3 44.8 L 58.6 45.5 L 58.9 46.1 L 58.9 47.2 L 58.3 48.2 L 58.9 49.2 L 58.9 50.2 L 57.3 52.2 L 54.6 54.2 L 50.5 56.9 L 48.8 57.6 L 41.4 58.6 L 41.1 58.9 L 39.1 58.9 L 38.7 59.3 L 36.7 59.3 L 36.4 59.6 L 32.0 59.6 L 31.0 59.3 L 16.2 52.2 L 14.1 51.5 L 12.5 51.5 L 11.1 50.9 L 11.1 38.4 L 12.1 37.7 L 16.2 36.7 L 21.6 36.4 L 21.9 36.0 Z" />
-                    </svg>
-                    <span>Source Control</span>
-                    <span id="stagedBadgeCount" class="hidden absolute top-1.5 right-3 bg-git-orange text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center font-bold">0</span>
-                </button>
+            <!-- Sidebar Header: Workspace -->
+            <div class="h-10 px-4 border-b border-git-border text-xs font-semibold text-white flex items-center space-x-2 shrink-0 bg-git-card">
+                <!-- Laptop + Gear + Orbit Network Workspace Icon -->
+                <svg class="w-4 h-4 text-git-orange shrink-0" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <!-- Orbital Rings & Nodes -->
+                    <circle cx="32" cy="32" r="28" stroke="currentColor" stroke-width="2" stroke-opacity="0.4"/>
+                    <circle cx="12" cy="12" r="3" fill="currentColor"/>
+                    <circle cx="52" cy="12" r="3" fill="currentColor"/>
+                    <circle cx="60" cy="32" r="3" fill="currentColor"/>
+                    <circle cx="32" cy="60" r="3" fill="currentColor"/>
+                    <!-- Laptop Screen & Base -->
+                    <rect x="17" y="21" width="30" height="20" rx="2" stroke="currentColor" stroke-width="3" fill="#161B22"/>
+                    <path d="M12 46 L17 41 H47 L52 46 H12 Z" stroke="currentColor" stroke-width="3" fill="#161B22"/>
+                    <line x1="29" y1="44" x2="35" y2="44" stroke="currentColor" stroke-width="1.8"/>
+                    <!-- Gear with Checkmark -->
+                    <circle cx="32" cy="31" r="4" stroke="currentColor" stroke-width="2"/>
+                    <path d="M30.5 31.2 L31.8 32.5 L34 29.8" stroke="#FFFFFF" stroke-width="2"/>
+                </svg>
+                <span class="tracking-wide">Workspace</span>
             </div>
 
-            <!-- TAB 1: FILE EXPLORER PANEL -->
+            <!-- FILE EXPLORER PANEL -->
             <div id="tabFilesPanel" class="flex-1 flex flex-col overflow-y-auto p-3">
                 <div class="flex items-center justify-between text-xs text-git-muted uppercase font-semibold tracking-wider mb-2">
                     <span>Working Directory</span>
-                    <button onclick="openNewFileModal()" class="hover:text-white"><i class="fa-solid fa-file-circle-plus"></i></button>
                 </div>
                 <!-- File Tree List -->
                 <div id="fileTreeContainer" class="space-y-1 font-mono text-sm">
@@ -157,69 +135,8 @@
                 </div>
             </div>
 
-            <!-- TAB 2: SOURCE CONTROL & STAGING PANEL -->
-            <div id="tabGitPanel" class="flex-1 flex flex-col overflow-y-auto p-3 hidden space-y-4">
-                
-                <!-- Commit Form -->
-                <div class="space-y-2 bg-git-dark p-3 rounded-lg border border-git-border">
-                    <label class="text-xs font-semibold text-git-muted uppercase tracking-wider block">Commit Changes</label>
-                    <textarea id="commitMsgInput" rows="2" placeholder="Message (e.g., Add main UI styles)..." class="w-full bg-git-card border border-git-border rounded p-2 text-xs text-white focus:border-git-blue focus:outline-none resize-none font-mono"></textarea>
-                    <div class="flex space-x-2">
-                        <button onclick="executeGitCommit()" class="flex-1 bg-git-accent hover:bg-green-700 text-white font-medium text-xs py-1.5 rounded transition flex items-center justify-center space-x-1.5">
-                            <i class="fa-solid fa-check"></i>
-                            <span>Commit</span>
-                        </button>
-                        <button onclick="executeGitStageAll()" class="bg-git-border hover:bg-gray-700 text-white text-xs px-2.5 py-1.5 rounded transition" title="Stage All Files">
-                            <span>Stage All</span>
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Changes & Staging Area -->
-                <div class="space-y-3">
-                    
-                    <!-- Staged Changes Section -->
-                    <div>
-                        <div class="flex items-center justify-between text-xs font-semibold text-git-muted uppercase tracking-wider mb-1.5">
-                            <span class="flex items-center space-x-1">
-                                <span>Staged Changes</span>
-                                <span id="stagedCount" class="text-git-blue">(0)</span>
-                            </span>
-                            <button onclick="executeGitUnstageAll()" class="text-[11px] text-git-muted hover:text-white underline">Unstage All</button>
-                        </div>
-                        <div id="stagedList" class="space-y-1 font-mono text-xs">
-                            <!-- Staged Items -->
-                        </div>
-                    </div>
-
-                    <!-- Unstaged / Modified Changes Section -->
-                    <div>
-                        <div class="flex items-center justify-between text-xs font-semibold text-git-muted uppercase tracking-wider mb-1.5">
-                            <span class="flex items-center space-x-1">
-                                <span>Changes</span>
-                                <span id="unstagedCount" class="text-git-orange">(0)</span>
-                            </span>
-                        </div>
-                        <div id="unstagedList" class="space-y-1 font-mono text-xs">
-                            <!-- Unstaged Items -->
-                        </div>
-                    </div>
-
-                </div>
-
-                <!-- Branch Management Section -->
-                <div class="border-t border-git-border pt-3 space-y-2">
-                    <label class="text-xs font-semibold text-git-muted uppercase tracking-wider block">Branch Management</label>
-                    <div class="flex space-x-2">
-                        <input id="newBranchNameInput" type="text" placeholder="new-branch-name" class="flex-1 bg-git-dark border border-git-border rounded px-2 py-1 text-xs text-white focus:outline-none font-mono">
-                        <button onclick="createNewBranch()" class="bg-git-border hover:bg-gray-700 text-xs px-3 py-1 rounded text-white font-medium">Create</button>
-                    </div>
-                </div>
-
-            </div>
-
-            <!-- Storage Quick Footer -->
-            <div class="p-2.5 border-t border-git-border bg-git-dark text-[11px] text-git-muted flex justify-between items-center">
+            <!-- Storage Quick Footer (Hidden) -->
+            <div id="storageQuickFooter" style="display: none;" class="p-2.5 border-t border-git-border bg-git-dark text-[11px] text-git-muted flex justify-between items-center">
                 <span class="flex items-center"><i class="fa-solid fa-database mr-1.5 text-git-blue"></i> Web VFS Engine</span>
                 <span id="repoStatusIndicator" class="text-green-400 font-mono">● Active</span>
             </div>
@@ -232,7 +149,7 @@
             <!-- Workspace Top View Tabs -->
             <div class="h-10 bg-git-card border-b border-git-border flex items-center justify-between px-2 shrink-0 text-xs">
                 <div class="flex items-center space-x-1 overflow-x-auto">
-                    <button id="viewTabEditor" onclick="switchViewTab('editor')" class="px-3 py-1.5 rounded-t-md bg-git-dark text-white font-medium flex items-center space-x-2 border-t-2 border-git-orange">
+                    <button id="viewTabEditor" onclick="switchViewTab('editor')" class="px-3 py-1.5 rounded-t-md text-git-muted hover:text-white flex items-center space-x-2">
                         <i class="fa-solid fa-code text-git-blue"></i>
                         <span id="activeEditorFileName">File Editor</span>
                     </button>
@@ -240,19 +157,19 @@
                         <i class="fa-solid fa-file-code text-git-orange"></i>
                         <span>Side-by-Side Diff</span>
                     </button>
-                    <button id="viewTabGraph" onclick="switchViewTab('graph')" class="px-3 py-1.5 rounded-t-md text-git-muted hover:text-white flex items-center space-x-2">
+                    <button id="viewTabGraph" onclick="switchViewTab('graph')" class="px-3 py-1.5 rounded-t-md bg-git-dark text-white font-medium flex items-center space-x-2 border-t-2 border-git-orange">
                         <i class="fa-solid fa-diagram-project text-git-purple"></i>
                         <span>Commit Graph (DAG)</span>
                     </button>
                 </div>
-                <button id="toggleTerminalBtn" onclick="toggleTerminalConsole()" title="Toggle Console" class="px-2.5 py-1 rounded text-git-muted hover:text-white hover:bg-git-dark flex items-center space-x-1.5 transition">
-                    <i class="fa-solid fa-terminal text-git-orange"></i>
-                    <span>Console</span>
+                <button id="viewTabPreview" onclick="switchViewTab('preview')" title="Preview Dashboard & Feedback" class="px-3 py-1 rounded text-git-muted hover:text-white hover:bg-git-dark flex items-center space-x-1.5 transition cursor-pointer border border-git-border hover:border-git-orange">
+                    <i class="fa-solid fa-display text-git-orange"></i>
+                    <span>Preview</span>
                 </button>
             </div>
 
             <!-- VIEW 1: CODE EDITOR -->
-            <div id="viewContainerEditor" class="flex-1 flex flex-col overflow-hidden relative">
+            <div id="viewContainerEditor" class="flex-1 flex flex-col overflow-hidden relative hidden">
                 <!-- Editor Info Bar: Folder Breadcrumb & Commit Details -->
                 <div class="min-h-8 py-1.5 bg-git-dark/80 border-b border-git-border flex items-center justify-between px-3 text-xs font-mono text-git-muted gap-2">
                     <!-- Folder Breadcrumb -->
@@ -313,7 +230,7 @@
             </div>
 
             <!-- VIEW 3: COMMIT DAG GRAPH VISUALIZER -->
-            <div id="viewContainerGraph" class="flex-1 flex flex-col bg-git-dark overflow-hidden hidden p-4">
+            <div id="viewContainerGraph" class="flex-1 flex flex-col bg-git-dark overflow-hidden p-4">
                 <div class="flex justify-between items-center mb-3">
                     <h3 class="text-sm font-semibold text-white flex items-center space-x-2">
                         <i class="fa-solid fa-diagram-project text-git-purple"></i>
@@ -322,10 +239,185 @@
                     <span class="text-xs text-git-muted">Interactive Directed Acyclic Graph (DAG)</span>
                 </div>
                 <!-- Interactive Canvas Container -->
-                <div class="flex-1 bg-git-card border border-git-border rounded-lg relative overflow-y-auto p-4">
+                <div class="flex-1 bg-git-card border border-git-border rounded-lg relative overflow-auto p-4">
                     <svg id="commitDagSvg" class="w-full h-full min-h-[300px]">
                         <!-- Rendered lines & nodes dynamically -->
                     </svg>
+                </div>
+            </div>
+
+            <!-- VIEW 4: PREVIEW WITH DASHBOARD & FEEDBACK -->
+            <div id="viewContainerPreview" class="flex-1 flex flex-col bg-git-dark overflow-y-auto hidden">
+                <!-- Preview Navigation Sub-bar -->
+                <div class="h-10 bg-git-card/60 border-b border-git-border flex items-center justify-between px-4 shrink-0 text-xs">
+                    <div class="flex items-center space-x-2">
+                        <i class="fa-solid fa-gauge-high text-git-orange"></i>
+                        <span class="font-semibold text-white">Project Preview Hub</span>
+                    </div>
+                    <div class="flex items-center bg-git-dark p-0.5 rounded-lg border border-git-border">
+                        <button id="previewSubBtnDashboard" onclick="switchPreviewSubTab('dashboard')" class="px-3 py-1 rounded-md text-xs font-medium bg-git-orange text-white flex items-center space-x-1.5 transition">
+                            <i class="fa-solid fa-chart-line text-[11px]"></i>
+                            <span>Dashboard</span>
+                        </button>
+                        <button id="previewSubBtnFeedback" onclick="switchPreviewSubTab('feedback')" class="px-3 py-1 rounded-md text-xs font-medium text-git-muted hover:text-white flex items-center space-x-1.5 transition">
+                            <i class="fa-solid fa-comment-dots text-[11px]"></i>
+                            <span>Feedback</span>
+                            <span id="feedbackBadgeCount" class="bg-git-border text-white text-[10px] px-1.5 py-0.2 rounded-full font-bold">2</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- SUB-VIEW 1: DASHBOARD -->
+                <div id="previewSubViewDashboard" class="flex-1 p-4 space-y-4 overflow-y-auto">
+                    <!-- Metrics Summary Grid -->
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div class="bg-git-card border border-git-border rounded-lg p-3 flex flex-col justify-between">
+                            <div class="flex items-center justify-between text-git-muted text-xs">
+                                <span>Total Commits</span>
+                                <i class="fa-solid fa-code-commit text-git-purple"></i>
+                            </div>
+                            <div id="metricTotalCommits" class="text-xl font-bold text-white mt-1">0</div>
+                            <span class="text-[10px] text-git-muted">In commit history</span>
+                        </div>
+                        <div class="bg-git-card border border-git-border rounded-lg p-3 flex flex-col justify-between">
+                            <div class="flex items-center justify-between text-git-muted text-xs">
+                                <span>Active Branches</span>
+                                <i class="fa-solid fa-code-branch text-git-blue"></i>
+                            </div>
+                            <div id="metricTotalBranches" class="text-xl font-bold text-white mt-1">1</div>
+                            <span id="metricBranchNames" class="text-[10px] text-git-blue truncate">main</span>
+                        </div>
+                        <div class="bg-git-card border border-git-border rounded-lg p-3 flex flex-col justify-between">
+                            <div class="flex items-center justify-between text-git-muted text-xs">
+                                <span>Project Files</span>
+                                <i class="fa-solid fa-folder-tree text-git-orange"></i>
+                            </div>
+                            <div id="metricTotalFiles" class="text-xl font-bold text-white mt-1">0</div>
+                            <span class="text-[10px] text-git-muted">In Virtual FS</span>
+                        </div>
+                        <div class="bg-git-card border border-git-border rounded-lg p-3 flex flex-col justify-between">
+                            <div class="flex items-center justify-between text-git-muted text-xs">
+                                <span>Current HEAD</span>
+                                <i class="fa-solid fa-circle-dot text-green-400"></i>
+                            </div>
+                            <div id="metricCurrentHead" class="text-xs font-mono font-bold text-git-purple mt-1 truncate">root</div>
+                            <span id="metricActiveBranchDisplay" class="text-[10px] text-green-400">branch: main</span>
+                        </div>
+                    </div>
+
+                    <!-- Live App Sandbox Preview + Recent Activity Grid -->
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        <!-- Live Web Output Card -->
+                        <div class="bg-git-card border border-git-border rounded-lg flex flex-col h-[380px] overflow-hidden">
+                            <div class="px-3 py-2 border-b border-git-border flex items-center justify-between bg-git-dark text-xs">
+                                <div class="flex items-center space-x-2">
+                                    <i class="fa-solid fa-window-maximize text-git-blue"></i>
+                                    <span class="font-medium text-white">Live Web Preview</span>
+                                    <select id="previewFileSelect" onchange="updateLivePreviewIframe()" class="bg-git-card border border-git-border text-white text-[11px] rounded px-1.5 py-0.5 focus:outline-none">
+                                        <!-- HTML files from VFS -->
+                                    </select>
+                                </div>
+                                <button onclick="updateLivePreviewIframe()" class="text-git-muted hover:text-white px-2 py-0.5 rounded text-[11px] flex items-center space-x-1" title="Reload Sandbox">
+                                    <i class="fa-solid fa-arrow-rotate-right"></i>
+                                    <span>Reload</span>
+                                </button>
+                            </div>
+                            <div class="flex-1 bg-white relative">
+                                <iframe id="projectLiveIframe" sandbox="allow-scripts allow-modals" class="w-full h-full border-none bg-white"></iframe>
+                            </div>
+                        </div>
+
+                        <!-- Activity Stream & Commit Log -->
+                        <div class="bg-git-card border border-git-border rounded-lg flex flex-col h-[380px] overflow-hidden">
+                            <div class="px-3 py-2 border-b border-git-border flex items-center justify-between bg-git-dark text-xs">
+                                <div class="flex items-center space-x-2">
+                                    <i class="fa-solid fa-clock-rotate-left text-git-purple"></i>
+                                    <span class="font-medium text-white">Recent Commit Activity</span>
+                                </div>
+                                <span class="text-[10px] text-git-muted">Audit Trail</span>
+                            </div>
+                            <div id="previewActivityStream" class="flex-1 p-3 overflow-y-auto space-y-2 font-mono text-xs">
+                                <!-- Populated dynamically -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SUB-VIEW 2: FEEDBACK -->
+                <div id="previewSubViewFeedback" class="flex-1 p-4 space-y-4 overflow-y-auto hidden">
+                    <div class="max-w-2xl mx-auto space-y-4">
+                        <!-- Feedback Input Card -->
+                        <div class="bg-git-card border border-git-border rounded-lg p-4 space-y-3">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <h4 class="text-sm font-semibold text-white">User Feedback &amp; Suggestions</h4>
+                                    <p class="text-xs text-git-muted">Share your thoughts on MiniGit Studio experience</p>
+                                </div>
+                                <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-git-orange/20 text-git-orange border border-git-orange/30">Community</span>
+                            </div>
+
+                            <!-- Rating Stars -->
+                            <div>
+                                <label class="block text-xs font-medium text-git-muted mb-1">Your Rating</label>
+                                <div class="flex items-center space-x-2" id="feedbackRatingStars">
+                                    <button type="button" onclick="setFeedbackRating(1)" class="star-btn text-yellow-400 text-base focus:outline-none"><i class="fa-solid fa-star"></i></button>
+                                    <button type="button" onclick="setFeedbackRating(2)" class="star-btn text-yellow-400 text-base focus:outline-none"><i class="fa-solid fa-star"></i></button>
+                                    <button type="button" onclick="setFeedbackRating(3)" class="star-btn text-yellow-400 text-base focus:outline-none"><i class="fa-solid fa-star"></i></button>
+                                    <button type="button" onclick="setFeedbackRating(4)" class="star-btn text-yellow-400 text-base focus:outline-none"><i class="fa-solid fa-star"></i></button>
+                                    <button type="button" onclick="setFeedbackRating(5)" class="star-btn text-yellow-400 text-base focus:outline-none"><i class="fa-solid fa-star"></i></button>
+                                    <span id="feedbackRatingLabel" class="text-xs text-git-muted font-medium ml-2">5 of 5 Stars</span>
+                                </div>
+                            </div>
+
+                            <!-- Category Selection -->
+                            <div>
+                                <label class="block text-xs font-medium text-git-muted mb-1">Category</label>
+                                <div class="flex flex-wrap gap-1.5" id="feedbackCategoryContainer">
+                                    <button type="button" onclick="selectFeedbackCategory('General', this)" class="category-btn px-2.5 py-1 rounded text-xs border border-git-orange bg-git-orange text-white">General Experience</button>
+                                    <button type="button" onclick="selectFeedbackCategory('Feature', this)" class="category-btn px-2.5 py-1 rounded text-xs border border-git-border text-git-muted hover:text-white">Feature Request</button>
+                                    <button type="button" onclick="selectFeedbackCategory('Bug', this)" class="category-btn px-2.5 py-1 rounded text-xs border border-git-border text-git-muted hover:text-white">Bug Report</button>
+                                    <button type="button" onclick="selectFeedbackCategory('UI/UX', this)" class="category-btn px-2.5 py-1 rounded text-xs border border-git-border text-git-muted hover:text-white">UI / Design</button>
+                                </div>
+                            </div>
+
+                            <!-- Comment Input -->
+                            <div>
+                                <label class="block text-xs font-medium text-git-muted mb-1">Comments</label>
+                                <textarea id="feedbackCommentInput" rows="3" placeholder="Tell us what you liked, what can be improved, or bugs you encountered..." class="w-full bg-git-dark border border-git-border rounded-lg p-2.5 text-xs text-white placeholder-git-muted focus:outline-none focus:border-git-orange resize-none"></textarea>
+                            </div>
+
+                            <!-- Author Name / Handle (Optional) -->
+                            <div class="grid grid-cols-2 gap-2">
+                                <div>
+                                    <label class="block text-xs font-medium text-git-muted mb-1">Your Name / Handle</label>
+                                    <input id="feedbackAuthorInput" type="text" placeholder="e.g., Alex (dev)" class="w-full bg-git-dark border border-git-border rounded-md px-2.5 py-1.5 text-xs text-white focus:outline-none font-mono">
+                                </div>
+                                <div class="flex items-end">
+                                    <button onclick="submitUserFeedback()" class="w-full bg-git-accent hover:bg-green-700 text-white font-medium text-xs py-1.5 rounded-md transition flex items-center justify-center space-x-1.5">
+                                        <i class="fa-solid fa-paper-plane"></i>
+                                        <span>Submit Feedback</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Confirmation Notification (Hidden by default) -->
+                            <div id="feedbackSuccessAlert" class="hidden p-2.5 rounded-md bg-green-950/60 border border-green-700/60 text-green-300 text-xs flex items-center space-x-2">
+                                <i class="fa-solid fa-circle-check text-green-400"></i>
+                                <span>Thank you! Your feedback has been submitted successfully.</span>
+                            </div>
+                        </div>
+
+                        <!-- Feedback History / Wall -->
+                        <div class="space-y-2">
+                            <div class="flex items-center justify-between text-xs text-git-muted">
+                                <span class="font-semibold uppercase tracking-wider">Submitted Feedback</span>
+                                <span id="feedbackTotalCountLabel" class="text-git-muted">2 entries</span>
+                            </div>
+                            <div id="feedbackListContainer" class="space-y-2">
+                                <!-- Populated dynamically -->
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -357,35 +449,19 @@
             </div>
 
         </main>
-
     </div>
 
-    <!-- NEW FILE MODAL DIALOG -->
-    <div id="newFileModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 hidden">
-        <div class="bg-git-card border border-git-border rounded-lg p-5 w-96 space-y-4 shadow-2xl">
-            <h3 class="text-sm font-semibold text-white flex items-center space-x-2">
-                <i class="fa-solid fa-file-circle-plus text-git-accent"></i>
-                <span>Create New File</span>
-            </h3>
-            <input id="modalFileNameInput" type="text" placeholder="e.g., app.js or utils/helpers.js" class="w-full bg-git-dark border border-git-border rounded p-2 text-xs text-white font-mono focus:border-git-blue focus:outline-none">
-            <div class="flex justify-end space-x-2">
-                <button onclick="closeNewFileModal()" class="px-3 py-1.5 bg-git-border text-white text-xs rounded hover:bg-gray-700">Cancel</button>
-                <button onclick="confirmCreateNewFile()" class="px-3 py-1.5 bg-git-accent text-white text-xs rounded hover:bg-green-700 font-medium">Create File</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- FILE & COMMIT DETAILS MODAL -->
-    <div id="fileCommitModal" class="fixed inset-0 bg-black/75 flex items-center justify-center z-50 hidden">
-        <div class="bg-git-card border border-git-border rounded-lg p-5 w-[500px] max-w-[95vw] space-y-4 shadow-2xl">
+    <!-- FILE COMMIT HISTORY DETAIL MODAL DIALOG -->
+    <div id="fileCommitModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+        <div class="bg-git-card border border-git-border w-full max-w-lg rounded-xl shadow-2xl p-5 space-y-4">
             <div class="flex items-center justify-between border-b border-git-border pb-3">
                 <div class="flex items-center space-x-2">
-                    <i class="fa-solid fa-code-commit text-git-purple text-base"></i>
-                    <h3 class="text-sm font-semibold text-white">File & Commit Information</h3>
+                    <i class="fa-solid fa-timeline text-git-purple"></i>
+                    <h3 class="font-semibold text-white text-sm">File Commit Provenance</h3>
                 </div>
                 <button onclick="closeFileCommitModal()" class="text-git-muted hover:text-white"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            
+
             <div class="space-y-3 text-xs">
                 <!-- File & Folder Info Grid -->
                 <div class="bg-git-dark p-3 rounded-lg border border-git-border space-y-2">
@@ -421,6 +497,9 @@
         </div>
     </div>
 
+    <!-- Live Data Hook (Injected when generated by minigit html) -->
+    <script>window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
+
     <script>
         /* ---------------------------------------------------------------------
          * MINI-GIT CORE ENGINE STATE & DATA STRUCTURES
@@ -449,6 +528,23 @@
             const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
             const hashArray = Array.from(new Uint8Array(hashBuffer));
             return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        /* ---------------------------------------------------------------------
+         * DATE AND TIME FORMATTING UTILITY
+         * --------------------------------------------------------------------- */
+        function formatCommitDateTime(timestamp) {
+            if (!timestamp) return "";
+            const d = new Date(timestamp);
+            if (isNaN(d.getTime())) return String(timestamp);
+            const pad = (n) => String(n).padStart(2, '0');
+            const yyyy = d.getFullYear();
+            const mm = pad(d.getMonth() + 1);
+            const dd = pad(d.getDate());
+            const hh = pad(d.getHours());
+            const min = pad(d.getMinutes());
+            const ss = pad(d.getSeconds());
+            return `${yyyy}-${mm}-${dd} ${hh}:${min}:${ss}`;
         }
 
         /* ---------------------------------------------------------------------
@@ -527,10 +623,10 @@
             }
 
             if (!headBlobHash && !stagedBlobHash) {
-                return { code: 'untracked', label: 'Untracked (New File)', color: 'text-git-purple' };
+                return { code: 'untracked', label: 'Untracked file', color: 'text-git-purple' };
             }
             if (stagedBlobHash) {
-                return { code: 'staged', label: 'Staged for Commit', color: 'text-git-blue' };
+                return { code: 'staged', label: 'Staged for commit', color: 'text-git-blue' };
             }
             if (currentBlobHash !== headBlobHash) {
                 return { code: 'modified', label: 'Modified (Uncommitted)', color: 'text-git-orange' };
@@ -584,13 +680,13 @@
             if (history.length === 0) {
                 historyList.innerHTML = `<div class="text-git-muted italic p-3 bg-git-card rounded border border-git-border text-center">No commit history yet for this file.</div>`;
             } else {
-                history.forEach((item, idx) => {
+                history.forEach((item) => {
                     const commitCard = document.createElement('div');
                     commitCard.className = "p-2.5 bg-git-card border border-git-border rounded hover:border-git-purple transition space-y-1";
                     commitCard.innerHTML = `
                         <div class="flex items-center justify-between">
                             <span class="font-mono text-git-purple font-bold text-xs"><i class="fa-solid fa-code-commit mr-1"></i>${item.commitHash.substring(0, 7)}</span>
-                            <span class="text-[10px] text-git-muted">${new Date(item.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'})}</span>
+                            <span class="text-[10px] text-git-muted font-mono"><i class="fa-regular fa-clock mr-1"></i>${formatCommitDateTime(item.timestamp)}</span>
                         </div>
                         <div class="text-white font-medium text-xs">${item.message}</div>
                         <div class="flex justify-between items-center text-[10px] text-git-muted pt-1 border-t border-git-border/50">
@@ -625,26 +721,23 @@
             CURRENT_BRANCH = "main";
             ACTIVE_FILE = "index.html";
 
-            // Create initial root commit
-            await createInitialCommit();
-            updateUI();
-            logTerminal("Initialized empty Mini-Git repository in /virtual-root/", "text-green-400");
-        }
+            // Stage and commit initial baseline files
+            const initialFiles = {
+                "src/app.js": DEMO_FILES["src/app.js"],
+                "styles/style.css": DEMO_FILES["styles/style.css"],
+                "index.html": "<!DOCTYPE html>\n<html>\n<head>\n  <title>My MiniGit App</title>\n</head>\n<body>\n  <h1>Hello MiniGit!</h1>\n</body>\n</html>"
+            };
 
-        async function createInitialCommit() {
-            // Stage all demo files
-            for (const [filepath, content] of Object.entries(VFS)) {
+            const initialTree = {};
+            for (const [filepath, content] of Object.entries(initialFiles)) {
                 const blobHash = await sha256(content);
                 OBJECTS[blobHash] = { type: 'blob', content };
-                STAGING_INDEX[filepath] = blobHash;
+                initialTree[filepath] = blobHash;
             }
 
-            // Create Tree Object
-            const treeContent = JSON.stringify(STAGING_INDEX);
-            const treeHash = await sha256(treeContent);
-            OBJECTS[treeHash] = { type: 'tree', data: { ...STAGING_INDEX } };
+            const treeHash = await sha256(JSON.stringify(initialTree));
+            OBJECTS[treeHash] = { type: 'tree', data: initialTree };
 
-            // Create Initial Commit
             const commitObj = {
                 tree: treeHash,
                 parent: null,
@@ -657,8 +750,33 @@
             OBJECTS[commitHash] = { type: 'commit', data: commitObj };
             BRANCHES[CURRENT_BRANCH] = commitHash;
 
-            // Clear Staging index post commit
-            STAGING_INDEX = {};
+            // Prepare staged modified index.html
+            VFS["index.html"] = "<!DOCTYPE html>\n<html>\n<head>\n  <title>My MiniGit App</title>\n</head>\n<body>\n  <h1>Hello MiniGit!</h1>\n  <p>Added hero section.</p>\n</body>\n</html>";
+            const stagedBlobHash = await sha256(VFS["index.html"]);
+            OBJECTS[stagedBlobHash] = { type: 'blob', content: VFS["index.html"] };
+            STAGING_INDEX["index.html"] = stagedBlobHash;
+
+            // README.md is in working directory but untracked
+            VFS["README.md"] = DEMO_FILES["README.md"];
+
+            await updateUI();
+            logTerminal("Initialized Mini-Git repository in /virtual-root/", "text-green-400");
+        }
+
+        function loadLiveRepo() {
+            if (!window.MINIGIT_LIVE) return;
+            const live = window.MINIGIT_LIVE;
+            VFS = { ...(live.files || {}) };
+            STAGING_INDEX = { ...(live.staged || {}) };
+            OBJECTS = { ...(live.objects || {}) };
+            BRANCHES = { ...(live.branches || {}) };
+            if (!Object.keys(BRANCHES).length) {
+                BRANCHES["main"] = null;
+            }
+            CURRENT_BRANCH = live.currentBranch || Object.keys(BRANCHES)[0] || "main";
+            ACTIVE_FILE = Object.keys(VFS)[0] || "index.html";
+            updateUI();
+            logTerminal(`Connected to live repository: ${live.repoName || 'minigit'}`, "text-green-400");
         }
 
         /* ---------------------------------------------------------------------
@@ -680,51 +798,32 @@
             document.getElementById('codeEditorArea').value = VFS[filepath] || "";
             await updateEditorHashDisplay();
             await updateEditorCommitDisplay(filepath);
-            switchViewTab('editor');
-            renderFileTree();
+
+            const select = document.getElementById('diffFileSelect');
+            if (select) select.value = filepath;
         }
 
         async function updateEditorHashDisplay() {
-            const content = document.getElementById('codeEditorArea').value;
-            const hash = await sha256(content);
-            document.getElementById('editorFileHashDisplay').innerText = `Hash: ${hash.substring(0, 10)}...`;
-        }
-
-        async function markFileAsModified() {
             if (!ACTIVE_FILE) return;
-            VFS[ACTIVE_FILE] = document.getElementById('codeEditorArea').value;
-            await updateEditorHashDisplay();
-            await updateEditorCommitDisplay(ACTIVE_FILE);
-            renderSourceControlLists();
-            renderFileTree();
+            const content = VFS[ACTIVE_FILE] || "";
+            const h = await sha256(content);
+            const hashDisp = document.getElementById('editorFileHashDisplay');
+            if (hashDisp) hashDisp.innerText = `Blob: ${h.substring(0, 8)}`;
         }
 
-        async function saveActiveFileFromEditor() {
-            logTerminal(`Saved changes to working copy: ${ACTIVE_FILE}`, "text-git-blue");
-            await updateEditorCommitDisplay(ACTIVE_FILE);
+        function markFileAsModified() {
+            if (!ACTIVE_FILE) return;
+            const newContent = document.getElementById('codeEditorArea').value;
+            VFS[ACTIVE_FILE] = newContent;
+            updateEditorHashDisplay();
             updateUI();
         }
 
-        function openNewFileModal() {
-            document.getElementById('newFileModal').classList.remove('hidden');
-            setTimeout(() => document.getElementById('modalFileNameInput')?.focus(), 50);
-        }
-
-        function closeNewFileModal() {
-            document.getElementById('newFileModal').classList.add('hidden');
-        }
-
-        function confirmCreateNewFile() {
-            const inputVal = document.getElementById('modalFileNameInput').value.trim();
-            if (!inputVal) return;
-            const cleanPath = inputVal.replace(/^\/+|\/+$/g, '');
-            if (!cleanPath) return;
-
-            VFS[cleanPath] = `// File: ${cleanPath}\n`;
-            closeNewFileModal();
-            document.getElementById('modalFileNameInput').value = '';
-            openFileInEditor(cleanPath);
-            logTerminal(`Created new file: ${cleanPath}`, "text-green-400");
+        function saveActiveFileFromEditor() {
+            if (!ACTIVE_FILE) return;
+            const newContent = document.getElementById('codeEditorArea').value;
+            VFS[ACTIVE_FILE] = newContent;
+            logTerminal(`Saved changes to ${ACTIVE_FILE}`, "text-green-400");
             updateUI();
         }
 
@@ -758,9 +857,9 @@
             updateUI();
         }
 
-        async function executeGitCommit() {
+        async function executeGitCommit(customMsg = null) {
             const msgInput = document.getElementById('commitMsgInput');
-            const message = msgInput.value.trim();
+            const message = customMsg ? customMsg.trim() : (msgInput ? msgInput.value.trim() : '');
 
             if (!message) {
                 logTerminal("Error: Please enter a commit message.", "text-red-400");
@@ -768,13 +867,14 @@
             }
 
             if (Object.keys(STAGING_INDEX).length === 0) {
-                logTerminal("Nothing to commit (staging area is empty).", "text-git-orange");
+                logTerminal("Nothing to commit: staging area is empty.", "text-yellow-400");
                 return;
             }
 
-            // 1. Create Tree Object: Combine parent tree with staged changes
+            // 1. Get HEAD commit tree or empty
             const parentHash = BRANCHES[CURRENT_BRANCH];
             let combinedTree = {};
+
             if (parentHash && OBJECTS[parentHash]) {
                 const parentTreeHash = OBJECTS[parentHash].data.tree;
                 if (OBJECTS[parentTreeHash]) {
@@ -796,7 +896,7 @@
             const treeHash = await sha256(treeContent);
             OBJECTS[treeHash] = { type: 'tree', data: combinedTree };
 
-            // 3. Create Commit Object
+            // 2. Create Commit Object with full Date and Time
             const commitObj = {
                 tree: treeHash,
                 parent: parentHash,
@@ -808,38 +908,42 @@
             const commitHash = await sha256(JSON.stringify(commitObj));
             OBJECTS[commitHash] = { type: 'commit', data: commitObj };
 
-            // 4. Update branch pointer
+            // 3. Update branch pointer
             BRANCHES[CURRENT_BRANCH] = commitHash;
 
             // Clear Staging
             STAGING_INDEX = {};
-            msgInput.value = '';
+            if (msgInput) msgInput.value = '';
 
-            logTerminal(`[${CURRENT_BRANCH} ${commitHash.substring(0, 7)}] ${message}`, "text-green-400");
+            const dateStr = formatCommitDateTime(commitObj.timestamp);
+            logTerminal(`[${CURRENT_BRANCH} ${commitHash.substring(0, 7)}] ${message} • ${dateStr}`, "text-green-400");
             updateUI();
         }
 
         /* ---------------------------------------------------------------------
          * BRANCHING & CHECKOUT ENGINE
          * --------------------------------------------------------------------- */
-        function createNewBranch() {
+        function createNewBranch(customBranchName = null) {
             const input = document.getElementById('newBranchNameInput');
-            const branchName = input.value.trim().toLowerCase().replace(/\s+/g, '-');
+            const rawName = customBranchName || (input ? input.value : '');
+            const branchName = rawName.trim().toLowerCase().replace(/\s+/g, '-');
 
             if (!branchName) return;
             if (BRANCHES[branchName]) {
-                logTerminal(`Error: Branch '${branchName}' already exists.`, "text-red-400");
+                logTerminal(`Branch '${branchName}' already exists.`, "text-red-400");
                 return;
             }
 
             BRANCHES[branchName] = BRANCHES[CURRENT_BRANCH];
-            input.value = '';
-            logTerminal(`Created branch '${branchName}' at commit [${(BRANCHES[branchName]||'').substring(0, 7)}]`, "text-git-purple");
+            if (input) input.value = '';
+            logTerminal(`Created branch '${branchName}' at HEAD`, "text-git-purple");
             updateBranchDropdown();
+            renderCommitDagGraph();
         }
 
-        async function switchBranchUI(targetBranch) {
-            if (targetBranch === CURRENT_BRANCH) return;
+        function switchBranchUI(targetBranch) {
+            if (!BRANCHES[targetBranch] && BRANCHES[targetBranch] !== null) return;
+            if (CURRENT_BRANCH === targetBranch) return;
 
             CURRENT_BRANCH = targetBranch;
             const targetCommitHash = BRANCHES[targetBranch];
@@ -877,15 +981,17 @@
             updateBranchDropdown();
             renderDiffView();
             renderCommitDagGraph();
+            renderPreviewDashboard();
             if (ACTIVE_FILE) {
                 await updateEditorCommitDisplay(ACTIVE_FILE);
             }
         }
 
+        let treeRenderGen = 0;
         async function renderFileTree() {
             const container = document.getElementById('fileTreeContainer');
             if (!container) return;
-            container.innerHTML = '';
+            const currentGen = ++treeRenderGen;
 
             // Group files by folder
             const groups = {};
@@ -901,6 +1007,8 @@
                 if (b === 'root') return 1;
                 return a.localeCompare(b);
             });
+
+            const fragment = document.createDocumentFragment();
 
             for (const folder of folderKeys) {
                 const files = groups[folder];
@@ -937,6 +1045,8 @@
                         const latestCommit = history[0];
                         const status = await getFileStatus(filepath);
 
+                        if (currentGen !== treeRenderGen) return;
+
                         const fileEl = document.createElement('div');
                         fileEl.className = `p-1.5 rounded cursor-pointer transition ${isSelected ? 'bg-git-border text-white shadow-sm' : 'hover:bg-git-card text-git-text'}`;
                         fileEl.onclick = () => openFileInEditor(filepath);
@@ -953,14 +1063,14 @@
                             `;
                         } else if (status.code === 'staged') {
                             commitBadge = `
-                                <div onclick="event.stopPropagation(); showFileCommitHistoryModal('${filepath}')" class="flex items-center space-x-1 text-[10px] text-git-blue hover:underline mt-0.5" title="Staged changes">
+                                <div onclick="event.stopPropagation(); showFileCommitHistoryModal('${filepath}')" class="flex items-center space-x-1 text-[10px] text-git-blue hover:underline mt-0.5" title="Staged for commit">
                                     <span class="w-1.5 h-1.5 rounded-full bg-git-blue"></span>
                                     <span>Staged for commit</span>
                                 </div>
                             `;
                         } else if (latestCommit) {
                             commitBadge = `
-                                <div onclick="event.stopPropagation(); showFileCommitHistoryModal('${filepath}')" title="Latest Commit: ${latestCommit.message} (${latestCommit.commitHash.substring(0, 7)})" class="flex items-center space-x-1 text-[10px] text-git-muted hover:text-git-purple mt-0.5 transition">
+                                <div onclick="event.stopPropagation(); showFileCommitHistoryModal('${filepath}')" title="Latest Commit: ${latestCommit.message} (${latestCommit.commitHash.substring(0, 7)}) • ${formatCommitDateTime(latestCommit.timestamp)}" class="flex items-center space-x-1 text-[10px] text-git-muted hover:text-git-purple mt-0.5 transition">
                                     <i class="fa-solid fa-code-commit text-git-purple text-[9px]"></i>
                                     <span class="font-mono text-git-purple font-semibold">${latestCommit.commitHash.substring(0, 7)}</span>
                                     <span class="truncate max-w-[120px] text-git-muted">${latestCommit.message}</span>
@@ -987,7 +1097,12 @@
                     folderDiv.appendChild(filesContainer);
                 }
 
-                container.appendChild(folderDiv);
+                fragment.appendChild(folderDiv);
+            }
+
+            if (currentGen === treeRenderGen) {
+                container.innerHTML = '';
+                container.appendChild(fragment);
             }
         }
 
@@ -1005,8 +1120,8 @@
         async function renderSourceControlLists() {
             const stagedList = document.getElementById('stagedList');
             const unstagedList = document.getElementById('unstagedList');
-            stagedList.innerHTML = '';
-            unstagedList.innerHTML = '';
+            if (stagedList) stagedList.innerHTML = '';
+            if (unstagedList) unstagedList.innerHTML = '';
 
             let stagedCount = 0;
             let unstagedCount = 0;
@@ -1020,18 +1135,20 @@
             }
 
             // Render Staged Files
-            for (const [filepath, stagedHash] of Object.entries(STAGING_INDEX)) {
+            for (const [filepath] of Object.entries(STAGING_INDEX)) {
                 stagedCount++;
-                const item = document.createElement('div');
-                item.className = "flex items-center justify-between p-1.5 bg-git-dark border border-git-border rounded";
-                item.innerHTML = `
-                    <div class="flex items-center space-x-1.5 truncate">
-                        <span class="text-xs text-green-400 font-bold">A</span>
-                        <span class="truncate">${filepath}</span>
-                    </div>
-                    <button onclick="unstageFile('${filepath}')" class="text-git-muted hover:text-white" title="Unstage"><i class="fa-solid fa-minus text-xs"></i></button>
-                `;
-                stagedList.appendChild(item);
+                if (stagedList) {
+                    const item = document.createElement('div');
+                    item.className = "flex items-center justify-between p-1.5 bg-git-dark border border-git-border rounded";
+                    item.innerHTML = `
+                        <div class="flex items-center space-x-1.5 truncate">
+                            <span class="text-xs text-green-400 font-bold">A</span>
+                            <span class="truncate">${filepath}</span>
+                        </div>
+                        <button onclick="unstageFile('${filepath}')" class="text-git-muted hover:text-white" title="Unstage"><i class="fa-solid fa-minus text-xs"></i></button>
+                    `;
+                    stagedList.appendChild(item);
+                }
             }
 
             // Render Modified / Untracked Files
@@ -1043,31 +1160,37 @@
                 // If file is not staged AND differs from HEAD commit
                 if (!stagedHash && currentHash !== headHash) {
                     unstagedCount++;
-                    const statusLetter = !headHash ? 'U' : 'M';
-                    const statusColor = !headHash ? 'text-git-purple' : 'text-git-orange';
+                    if (unstagedList) {
+                        const statusLetter = !headHash ? 'U' : 'M';
+                        const statusColor = !headHash ? 'text-git-purple' : 'text-git-orange';
 
-                    const item = document.createElement('div');
-                    item.className = "flex items-center justify-between p-1.5 bg-git-dark border border-git-border rounded";
-                    item.innerHTML = `
-                        <div class="flex items-center space-x-1.5 truncate">
-                            <span class="text-xs font-bold ${statusColor}">${statusLetter}</span>
-                            <span class="truncate">${filepath}</span>
-                        </div>
-                        <button onclick="stageFile('${filepath}')" class="text-git-muted hover:text-white" title="Stage"><i class="fa-solid fa-plus text-xs"></i></button>
-                    `;
-                    unstagedList.appendChild(item);
+                        const item = document.createElement('div');
+                        item.className = "flex items-center justify-between p-1.5 bg-git-dark border border-git-border rounded";
+                        item.innerHTML = `
+                            <div class="flex items-center space-x-1.5 truncate">
+                                <span class="text-xs font-bold ${statusColor}">${statusLetter}</span>
+                                <span class="truncate">${filepath}</span>
+                            </div>
+                            <button onclick="stageFile('${filepath}')" class="text-git-muted hover:text-white" title="Stage"><i class="fa-solid fa-plus text-xs"></i></button>
+                        `;
+                        unstagedList.appendChild(item);
+                    }
                 }
             }
 
-            document.getElementById('stagedCount').innerText = `(${stagedCount})`;
-            document.getElementById('unstagedCount').innerText = `(${unstagedCount})`;
+            const stagedCountEl = document.getElementById('stagedCount');
+            if (stagedCountEl) stagedCountEl.innerText = `(${stagedCount})`;
+            const unstagedCountEl = document.getElementById('unstagedCount');
+            if (unstagedCountEl) unstagedCountEl.innerText = `(${unstagedCount})`;
 
             const badge = document.getElementById('stagedBadgeCount');
-            if (stagedCount > 0) {
-                badge.innerText = stagedCount;
-                badge.classList.remove('hidden');
-            } else {
-                badge.classList.add('hidden');
+            if (badge) {
+                if (stagedCount > 0) {
+                    badge.innerText = stagedCount;
+                    badge.classList.remove('hidden');
+                } else {
+                    badge.classList.add('hidden');
+                }
             }
         }
 
@@ -1078,27 +1201,32 @@
                 const opt = document.createElement('option');
                 opt.value = b;
                 opt.innerText = b;
-                opt.selected = (b === CURRENT_BRANCH);
+                if (b === CURRENT_BRANCH) opt.selected = true;
                 select.appendChild(opt);
             }
         }
 
         /* ---------------------------------------------------------------------
-         * LINE-BY-LINE DIFF ENGINE
+         * DIFF VIEWER ENGINE (Side-by-Side Visual Diff)
          * --------------------------------------------------------------------- */
-        function renderDiffView() {
+        function populateDiffFileSelect() {
             const select = document.getElementById('diffFileSelect');
-            const currentSelected = select.value || ACTIVE_FILE;
+            const prev = select.value;
             select.innerHTML = '';
 
-            for (const f of Object.keys(VFS)) {
+            const allFiles = Array.from(new Set([...Object.keys(VFS), ...Object.keys(STAGING_INDEX)]));
+            for (const f of allFiles) {
                 const opt = document.createElement('option');
                 opt.value = f;
                 opt.innerText = f;
-                opt.selected = (f === currentSelected);
+                if (f === (prev || ACTIVE_FILE)) opt.selected = true;
                 select.appendChild(opt);
             }
+        }
 
+        function renderDiffView() {
+            populateDiffFileSelect();
+            const select = document.getElementById('diffFileSelect');
             const filepath = select.value || ACTIVE_FILE;
             if (!filepath) return;
 
@@ -1114,6 +1242,7 @@
                 }
             }
 
+            // Working copy content
             const modifiedContent = VFS[filepath] || "";
 
             const origLines = originalContent.split('\n');
@@ -1127,38 +1256,48 @@
             const maxLines = Math.max(origLines.length, modLines.length);
 
             for (let i = 0; i < maxLines; i++) {
-                const lOrig = origLines[i];
-                const lMod = modLines[i];
+                const oLine = origLines[i];
+                const mLine = modLines[i];
 
-                const elOrig = document.createElement('div');
-                const elMod = document.createElement('div');
+                const oDiv = document.createElement('div');
+                const mDiv = document.createElement('div');
 
-                if (lOrig !== undefined && lMod !== undefined && lOrig === lMod) {
-                    elOrig.className = 'diff-neutral px-1 font-mono';
-                    elOrig.innerText = `${i + 1}  ${lOrig}`;
-                    elMod.className = 'diff-neutral px-1 font-mono';
-                    elMod.innerText = `${i + 1}  ${lMod}`;
+                const lineNum = i + 1;
+                const padNum = String(lineNum).padStart(3, ' ');
+
+                if (oLine === undefined) {
+                    oDiv.className = "diff-neutral opacity-30 select-none";
+                    oDiv.innerText = `${padNum} ~`;
+                } else if (mLine === undefined || oLine !== mLine) {
+                    oDiv.className = "diff-removed px-1 rounded";
+                    oDiv.innerText = `${padNum} - ${oLine}`;
                 } else {
-                    if (lOrig !== undefined) {
-                        elOrig.className = 'diff-removed px-1 font-mono';
-                        elOrig.innerText = `${i + 1} - ${lOrig}`;
-                    }
-                    if (lMod !== undefined) {
-                        elMod.className = 'diff-added px-1 font-mono';
-                        elMod.innerText = `${i + 1} + ${lMod}`;
-                    }
+                    oDiv.className = "diff-neutral px-1";
+                    oDiv.innerText = `${padNum}   ${oLine}`;
                 }
 
-                origContainer.appendChild(elOrig);
-                modContainer.appendChild(elMod);
+                if (mLine === undefined) {
+                    mDiv.className = "diff-neutral opacity-30 select-none";
+                    mDiv.innerText = `${padNum} ~`;
+                } else if (oLine === undefined || oLine !== mLine) {
+                    mDiv.className = "diff-added px-1 rounded";
+                    mDiv.innerText = `${padNum} + ${mLine}`;
+                } else {
+                    mDiv.className = "diff-neutral px-1";
+                    mDiv.innerText = `${padNum}   ${mLine}`;
+                }
+
+                origContainer.appendChild(oDiv);
+                modContainer.appendChild(mDiv);
             }
         }
 
         /* ---------------------------------------------------------------------
-         * COMMIT DAG GRAPH RENDERER
+         * COMMIT DAG GRAPH RENDERER WITH DATE & TIME
          * --------------------------------------------------------------------- */
         function renderCommitDagGraph() {
             const svg = document.getElementById('commitDagSvg');
+            if (!svg) return;
             svg.innerHTML = '';
 
             // Collect all commits
@@ -1175,6 +1314,10 @@
             let y = 40;
             const x = 60;
             const nodeRadius = 12;
+
+            const totalHeight = Math.max(320, y + commitNodes.length * 65 + 40);
+            svg.setAttribute('height', totalHeight);
+            svg.style.minHeight = `${totalHeight}px`;
 
             commitNodes.forEach((node, index) => {
                 const nodeY = y + index * 65;
@@ -1195,6 +1338,10 @@
                     }
                 }
 
+                // Group for commit node elements
+                const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                group.style.cursor = 'pointer';
+
                 // Draw Commit Node Circle
                 const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
                 circle.setAttribute('cx', x);
@@ -1203,7 +1350,7 @@
                 circle.setAttribute('fill', '#238636');
                 circle.setAttribute('stroke', '#58A6FF');
                 circle.setAttribute('stroke-width', '2');
-                svg.appendChild(circle);
+                group.appendChild(circle);
 
                 // Commit Message Text
                 const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
@@ -1213,31 +1360,88 @@
                 text.setAttribute('font-size', '12px');
                 text.setAttribute('font-family', 'JetBrains Mono, monospace');
                 text.textContent = `[${node.hash.substring(0, 7)}] ${node.message}`;
-                svg.appendChild(text);
+                group.appendChild(text);
+                svg.appendChild(group);
+
+                // Dynamic width calculation
+                let textWidth = 0;
+                try {
+                    textWidth = text.getBBox().width;
+                } catch (e) {
+                    textWidth = 0;
+                }
+                if (!textWidth || textWidth <= 0) {
+                    textWidth = text.textContent.length * 7.5;
+                }
+
+                let currentX = x + 25 + textWidth + 14;
 
                 // Branch Labels
                 for (const [bName, bHash] of Object.entries(BRANCHES)) {
                     if (bHash === node.hash) {
+                        const bWidth = Math.max(54, bName.length * 8 + 18);
                         const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-                        rect.setAttribute('x', x + 250);
+                        rect.setAttribute('x', currentX);
                         rect.setAttribute('y', nodeY - 10);
-                        rect.setAttribute('width', '70');
+                        rect.setAttribute('width', bWidth);
                         rect.setAttribute('height', '20');
                         rect.setAttribute('rx', '4');
                         rect.setAttribute('fill', bName === CURRENT_BRANCH ? '#F05032' : '#A371F7');
-                        svg.appendChild(rect);
+                        group.appendChild(rect);
 
                         const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                        label.setAttribute('x', x + 285);
+                        label.setAttribute('x', currentX + bWidth / 2);
                         label.setAttribute('y', nodeY + 4);
                         label.setAttribute('fill', '#FFFFFF');
                         label.setAttribute('font-size', '10px');
                         label.setAttribute('text-anchor', 'middle');
                         label.setAttribute('font-weight', 'bold');
+                        label.setAttribute('font-family', 'JetBrains Mono, monospace');
                         label.textContent = bName;
-                        svg.appendChild(label);
+                        group.appendChild(label);
+
+                        currentX += bWidth + 8;
                     }
                 }
+
+                // Date & Time Display in Commit
+                const dateStr = formatCommitDateTime(node.timestamp);
+                if (dateStr) {
+                    const dateContent = `📅 ${dateStr}`;
+                    const datePillWidth = Math.max(165, dateContent.length * 7.2 + 20);
+
+                    const dateRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                    dateRect.setAttribute('x', currentX);
+                    dateRect.setAttribute('y', nodeY - 10);
+                    dateRect.setAttribute('width', datePillWidth);
+                    dateRect.setAttribute('height', '20');
+                    dateRect.setAttribute('rx', '4');
+                    dateRect.setAttribute('fill', '#161B22');
+                    dateRect.setAttribute('stroke', '#30363D');
+                    dateRect.setAttribute('stroke-width', '1');
+                    group.appendChild(dateRect);
+
+                    const dateLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    dateLabel.setAttribute('x', currentX + datePillWidth / 2);
+                    dateLabel.setAttribute('y', nodeY + 4);
+                    dateLabel.setAttribute('fill', '#8B949E');
+                    dateLabel.setAttribute('font-size', '11px');
+                    dateLabel.setAttribute('text-anchor', 'middle');
+                    dateLabel.setAttribute('font-family', 'JetBrains Mono, monospace');
+                    dateLabel.textContent = dateContent;
+                    group.appendChild(dateLabel);
+
+                    currentX += datePillWidth + 8;
+                }
+
+                // Hover Tooltip with Full Commit Metadata
+                const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+                title.textContent = `Commit: ${node.hash}\nMessage: ${node.message}\nDate & Time: ${dateStr}\nAuthor: ${node.author || 'User'}`;
+                group.appendChild(title);
+
+                group.onclick = () => {
+                    logTerminal(`Commit [${node.hash.substring(0, 7)}]: "${node.message}" • ${dateStr} by ${node.author || 'User'}`, 'text-git-purple');
+                };
             });
         }
 
@@ -1246,6 +1450,7 @@
          * --------------------------------------------------------------------- */
         function logTerminal(text, colorClass = "text-git-text") {
             const output = document.getElementById('terminalOutput');
+            if (!output) return;
             const line = document.createElement('div');
             line.className = colorClass;
             line.innerText = text;
@@ -1254,7 +1459,8 @@
         }
 
         function clearTerminalConsole() {
-            document.getElementById('terminalOutput').innerHTML = '';
+            const output = document.getElementById('terminalOutput');
+            if (output) output.innerHTML = '';
         }
 
         function toggleTerminalConsole() {
@@ -1298,7 +1504,6 @@
                 switch (action) {
                     case 'help':
                         logTerminal("Available Mini-Git Commands:", "text-git-blue");
-                        logTerminal("  minigit init                   - Re-initialize repo");
                         logTerminal("  minigit add <filename|all>    - Stage file changes");
                         logTerminal("  minigit commit -m \"msg\"       - Create commit snapshot");
                         logTerminal("  minigit status                 - View staged and modified files");
@@ -1325,8 +1530,9 @@
                         const msgIdx = cmd.indexOf('-m');
                         if (msgIdx !== -1) {
                             const msg = cmd.substring(msgIdx + 2).replace(/["']/g, '').trim();
-                            document.getElementById('commitMsgInput').value = msg;
-                            await executeGitCommit();
+                            const msgInput = document.getElementById('commitMsgInput');
+                            if (msgInput) msgInput.value = msg;
+                            await executeGitCommit(msg);
                         } else {
                             logTerminal("Usage: minigit commit -m \"commit message\"", "text-red-400");
                         }
@@ -1339,8 +1545,9 @@
 
                     case 'branch':
                         if (parts[2]) {
-                            document.getElementById('newBranchNameInput').value = parts[2];
-                            createNewBranch();
+                            const branchInp = document.getElementById('newBranchNameInput');
+                            if (branchInp) branchInp.value = parts[2];
+                            createNewBranch(parts[2]);
                         } else {
                             logTerminal("Branches: " + Object.keys(BRANCHES).join(', '));
                         }
@@ -1358,7 +1565,7 @@
                         let curr = BRANCHES[CURRENT_BRANCH];
                         while (curr && OBJECTS[curr]) {
                             const c = OBJECTS[curr].data;
-                            logTerminal(`* [${curr.substring(0, 7)}] ${c.message} (${c.author})`, "text-git-purple");
+                            logTerminal(`* [${curr.substring(0, 7)}] ${c.message} (${c.author}) • ${formatCommitDateTime(c.timestamp)}`, "text-git-purple");
                             curr = c.parent;
                         }
                         break;
@@ -1379,15 +1586,261 @@
             const btnGit = document.getElementById('btnNavGit');
 
             if (tab === 'files') {
-                filesPanel.classList.remove('hidden');
-                gitPanel.classList.add('hidden');
-                btnFiles.className = "flex-1 py-2.5 text-center border-b-2 border-git-orange text-white flex items-center justify-center space-x-1.5";
-                btnGit.className = "flex-1 py-2.5 text-center border-b-2 border-transparent hover:text-white flex items-center justify-center space-x-1.5 relative text-git-muted";
+                if (filesPanel) filesPanel.classList.remove('hidden');
+                if (gitPanel) gitPanel.classList.add('hidden');
+                if (btnFiles) btnFiles.className = "flex-1 py-2.5 text-center border-b-2 border-git-orange text-white flex items-center justify-center space-x-1.5";
+                if (btnGit) btnGit.className = "flex-1 py-2.5 text-center border-b-2 border-transparent hover:text-white flex items-center justify-center space-x-1.5 relative text-git-muted";
             } else {
-                filesPanel.classList.add('hidden');
-                gitPanel.classList.remove('hidden');
-                btnGit.className = "flex-1 py-2.5 text-center border-b-2 border-git-orange text-white flex items-center justify-center space-x-1.5 relative";
-                btnFiles.className = "flex-1 py-2.5 text-center border-b-2 border-transparent hover:text-white flex items-center justify-center space-x-1.5 text-git-muted";
+                if (filesPanel) filesPanel.classList.add('hidden');
+                if (gitPanel) gitPanel.classList.remove('hidden');
+                if (btnGit) btnGit.className = "flex-1 py-2.5 text-center border-b-2 border-git-orange text-white flex items-center justify-center space-x-1.5 relative";
+                if (btnFiles) btnFiles.className = "flex-1 py-2.5 text-center border-b-2 border-transparent hover:text-white flex items-center justify-center space-x-1.5 text-git-muted";
+            }
+        }
+
+        /* ---------------------------------------------------------------------
+         * PREVIEW HUB: DASHBOARD & USER FEEDBACK ENGINE
+         * --------------------------------------------------------------------- */
+        let CURRENT_FEEDBACK_RATING = 5;
+        let CURRENT_FEEDBACK_CATEGORY = 'General';
+        let ACTIVE_PREVIEW_SUBTAB = 'dashboard';
+        const FEEDBACK_STORE = [
+            {
+                rating: 5,
+                category: 'General',
+                comment: 'The interactive commit graph and side-by-side diff viewer are super responsive and clean!',
+                author: 'Frontend Lead',
+                timestamp: new Date(Date.now() - 3600000 * 2).toISOString()
+            },
+            {
+                rating: 5,
+                category: 'UI/UX',
+                comment: 'Love the dark studio theme and instant file tree navigation. Feels just like VS Code.',
+                author: 'DevOps Engineer',
+                timestamp: new Date(Date.now() - 3600000 * 24).toISOString()
+            }
+        ];
+
+        function switchPreviewSubTab(subTab) {
+            ACTIVE_PREVIEW_SUBTAB = subTab;
+            const viewDash = document.getElementById('previewSubViewDashboard');
+            const viewFeed = document.getElementById('previewSubViewFeedback');
+            const btnDash = document.getElementById('previewSubBtnDashboard');
+            const btnFeed = document.getElementById('previewSubBtnFeedback');
+
+            if (subTab === 'dashboard') {
+                if (viewDash) viewDash.classList.remove('hidden');
+                if (viewFeed) viewFeed.classList.add('hidden');
+                if (btnDash) btnDash.className = "px-3 py-1 rounded-md text-xs font-medium bg-git-orange text-white flex items-center space-x-1.5 transition";
+                if (btnFeed) btnFeed.className = "px-3 py-1 rounded-md text-xs font-medium text-git-muted hover:text-white flex items-center space-x-1.5 transition";
+                renderPreviewDashboard();
+            } else {
+                if (viewDash) viewDash.classList.add('hidden');
+                if (viewFeed) viewFeed.classList.remove('hidden');
+                if (btnFeed) btnFeed.className = "px-3 py-1 rounded-md text-xs font-medium bg-git-orange text-white flex items-center space-x-1.5 transition";
+                if (btnDash) btnDash.className = "px-3 py-1 rounded-md text-xs font-medium text-git-muted hover:text-white flex items-center space-x-1.5 transition";
+                renderFeedbackList();
+            }
+        }
+
+        function renderPreviewDashboard() {
+            // 1. Metric: Total Commits
+            let commitCount = 0;
+            const commitsList = [];
+            for (const [hash, obj] of Object.entries(OBJECTS)) {
+                if (obj.type === 'commit') {
+                    commitCount++;
+                    commitsList.push({ hash, ...obj.data });
+                }
+            }
+            const elTotalCommits = document.getElementById('metricTotalCommits');
+            if (elTotalCommits) elTotalCommits.innerText = commitCount;
+
+            // 2. Metric: Branches
+            const branchKeys = Object.keys(BRANCHES);
+            const elTotalBranches = document.getElementById('metricTotalBranches');
+            if (elTotalBranches) elTotalBranches.innerText = branchKeys.length;
+            const elBranchNames = document.getElementById('metricBranchNames');
+            if (elBranchNames) elBranchNames.innerText = branchKeys.join(', ');
+
+            // 3. Metric: Project Files
+            const fileKeys = Object.keys(VFS);
+            const elTotalFiles = document.getElementById('metricTotalFiles');
+            if (elTotalFiles) elTotalFiles.innerText = fileKeys.length;
+
+            // 4. Metric: Current HEAD
+            const headHash = BRANCHES[CURRENT_BRANCH];
+            const elHead = document.getElementById('metricCurrentHead');
+            if (elHead) elHead.innerText = headHash ? headHash.substring(0, 7) : '(root)';
+            const elActiveBranch = document.getElementById('metricActiveBranchDisplay');
+            if (elActiveBranch) elActiveBranch.innerText = `branch: ${CURRENT_BRANCH}`;
+
+            // 5. Populate HTML file selector for live preview
+            const fileSelect = document.getElementById('previewFileSelect');
+            if (fileSelect) {
+                const prevVal = fileSelect.value;
+                fileSelect.innerHTML = '';
+                const htmlFiles = fileKeys.filter(f => f.endsWith('.html') || f.endsWith('.htm'));
+                if (htmlFiles.length === 0) {
+                    const opt = document.createElement('option');
+                    opt.value = '';
+                    opt.innerText = 'No HTML files';
+                    fileSelect.appendChild(opt);
+                } else {
+                    for (const f of htmlFiles) {
+                        const opt = document.createElement('option');
+                        opt.value = f;
+                        opt.innerText = f;
+                        if (f === prevVal || (!prevVal && f === 'index.html')) {
+                            opt.selected = true;
+                        }
+                        fileSelect.appendChild(opt);
+                    }
+                }
+                updateLivePreviewIframe();
+            }
+
+            // 6. Recent Activity Stream
+            const stream = document.getElementById('previewActivityStream');
+            if (stream) {
+                stream.innerHTML = '';
+                commitsList.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                if (commitsList.length === 0) {
+                    stream.innerHTML = '<div class="text-git-muted italic p-2">No commit history yet. Stage and commit files to see activity.</div>';
+                } else {
+                    for (const c of commitsList) {
+                        const row = document.createElement('div');
+                        row.className = "p-2 bg-git-dark border border-git-border rounded hover:border-git-purple/50 transition";
+                        const branchTags = [];
+                        for (const [bName, bHash] of Object.entries(BRANCHES)) {
+                            if (bHash === c.hash) {
+                                branchTags.push(`<span class="px-1.5 py-0.2 rounded text-[10px] bg-git-purple/20 text-git-purple font-semibold border border-git-purple/30">${esc(bName)}</span>`);
+                            }
+                        }
+                        row.innerHTML = `
+                            <div class="flex items-center justify-between mb-1">
+                                <span class="font-mono text-git-purple font-semibold">[${c.hash.substring(0, 7)}]</span>
+                                <span class="text-[10px] text-git-muted">${formatCommitDateTime(c.timestamp)}</span>
+                            </div>
+                            <div class="text-white font-medium text-xs truncate">${esc(c.message)}</div>
+                            <div class="flex items-center justify-between mt-1 text-[11px] text-git-muted">
+                                <span><i class="fa-regular fa-user mr-1 text-git-blue"></i>${esc(c.author || 'dev')}</span>
+                                <div class="flex space-x-1">${branchTags.join(' ')}</div>
+                            </div>
+                        `;
+                        stream.appendChild(row);
+                    }
+                }
+            }
+
+            renderFeedbackList();
+        }
+
+        function updateLivePreviewIframe() {
+            const fileSelect = document.getElementById('previewFileSelect');
+            const iframe = document.getElementById('projectLiveIframe');
+            if (!iframe) return;
+
+            const selectedFile = fileSelect ? fileSelect.value : 'index.html';
+            const content = VFS[selectedFile] || '<!DOCTYPE html><html><body style="font-family:sans-serif;padding:2rem;text-align:center;color:#666;"><h3>No content available</h3><p>Select or create an HTML file in Workspace to preview it live.</p></body></html>';
+            iframe.srcdoc = content;
+        }
+
+        function setFeedbackRating(score) {
+            CURRENT_FEEDBACK_RATING = score;
+            const container = document.getElementById('feedbackRatingStars');
+            if (!container) return;
+            const buttons = container.querySelectorAll('.star-btn');
+            buttons.forEach((btn, idx) => {
+                if (idx < score) {
+                    btn.className = "star-btn text-yellow-400 text-base focus:outline-none transition-transform hover:scale-110";
+                } else {
+                    btn.className = "star-btn text-git-border text-base focus:outline-none transition-transform hover:scale-110";
+                }
+            });
+            const label = document.getElementById('feedbackRatingLabel');
+            if (label) label.innerText = `${score} of 5 Stars`;
+        }
+
+        function selectFeedbackCategory(cat, btn) {
+            CURRENT_FEEDBACK_CATEGORY = cat;
+            const container = document.getElementById('feedbackCategoryContainer');
+            if (!container) return;
+            const buttons = container.querySelectorAll('.category-btn');
+            buttons.forEach(b => {
+                b.className = "category-btn px-2.5 py-1 rounded text-xs border border-git-border text-git-muted hover:text-white transition";
+            });
+            if (btn) {
+                btn.className = "category-btn px-2.5 py-1 rounded text-xs border border-git-orange bg-git-orange text-white font-medium transition";
+            }
+        }
+
+        function submitUserFeedback() {
+            const commentInput = document.getElementById('feedbackCommentInput');
+            const authorInput = document.getElementById('feedbackAuthorInput');
+            const alertBox = document.getElementById('feedbackSuccessAlert');
+
+            const comment = commentInput ? commentInput.value.trim() : '';
+            if (!comment) {
+                alert("Please enter a short comment before submitting feedback.");
+                return;
+            }
+
+            const author = (authorInput && authorInput.value.trim()) ? authorInput.value.trim() : 'Anonymous Developer';
+            FEEDBACK_STORE.unshift({
+                rating: CURRENT_FEEDBACK_RATING,
+                category: CURRENT_FEEDBACK_CATEGORY,
+                comment,
+                author,
+                timestamp: new Date().toISOString()
+            });
+
+            if (commentInput) commentInput.value = '';
+            if (authorInput) authorInput.value = '';
+
+            if (alertBox) {
+                alertBox.classList.remove('hidden');
+                setTimeout(() => alertBox.classList.add('hidden'), 3500);
+            }
+
+            renderFeedbackList();
+        }
+
+        function renderFeedbackList() {
+            const list = document.getElementById('feedbackListContainer');
+            const badge = document.getElementById('feedbackBadgeCount');
+            const totalLabel = document.getElementById('feedbackTotalCountLabel');
+
+            if (badge) badge.innerText = FEEDBACK_STORE.length;
+            if (totalLabel) totalLabel.innerText = `${FEEDBACK_STORE.length} entr${FEEDBACK_STORE.length === 1 ? 'y' : 'ies'}`;
+
+            if (!list) return;
+            list.innerHTML = '';
+
+            for (const fb of FEEDBACK_STORE) {
+                const card = document.createElement('div');
+                card.className = "p-3 bg-git-card border border-git-border rounded-lg space-y-1.5 transition";
+
+                let starsHtml = '';
+                for (let i = 1; i <= 5; i++) {
+                    starsHtml += `<i class="fa-solid fa-star ${i <= fb.rating ? 'text-yellow-400' : 'text-git-border'} text-[11px]"></i>`;
+                }
+
+                card.innerHTML = `
+                    <div class="flex items-center justify-between text-xs">
+                        <div class="flex items-center space-x-2">
+                            <span class="font-medium text-white">${esc(fb.author)}</span>
+                            <span class="text-[10px] px-2 py-0.5 rounded-full bg-git-dark border border-git-border text-git-blue font-mono">${esc(fb.category)}</span>
+                        </div>
+                        <span class="text-[10px] text-git-muted font-mono">${formatCommitDateTime(fb.timestamp)}</span>
+                    </div>
+                    <p class="text-xs text-git-text leading-relaxed">${esc(fb.comment)}</p>
+                    <div class="flex items-center space-x-1 pt-1">
+                        ${starsHtml}
+                        <span class="text-[10px] text-git-muted ml-1.5 font-mono">${fb.rating}/5</span>
+                    </div>
+                `;
+                list.appendChild(card);
             }
         }
 
@@ -1395,39 +1848,52 @@
             const editorView = document.getElementById('viewContainerEditor');
             const diffView = document.getElementById('viewContainerDiff');
             const graphView = document.getElementById('viewContainerGraph');
+            const previewView = document.getElementById('viewContainerPreview');
 
             const tabEditor = document.getElementById('viewTabEditor');
             const tabDiff = document.getElementById('viewTabDiff');
             const tabGraph = document.getElementById('viewTabGraph');
+            const tabPreview = document.getElementById('viewTabPreview');
 
-            editorView.classList.add('hidden');
-            diffView.classList.add('hidden');
-            graphView.classList.add('hidden');
+            if (editorView) editorView.classList.add('hidden');
+            if (diffView) diffView.classList.add('hidden');
+            if (graphView) graphView.classList.add('hidden');
+            if (previewView) previewView.classList.add('hidden');
 
-            tabEditor.className = "px-3 py-1.5 rounded-t-md text-git-muted hover:text-white flex items-center space-x-2";
-            tabDiff.className = "px-3 py-1.5 rounded-t-md text-git-muted hover:text-white flex items-center space-x-2";
-            tabGraph.className = "px-3 py-1.5 rounded-t-md text-git-muted hover:text-white flex items-center space-x-2";
+            if (tabEditor) tabEditor.className = "px-3 py-1.5 rounded-t-md text-git-muted hover:text-white flex items-center space-x-2";
+            if (tabDiff) tabDiff.className = "px-3 py-1.5 rounded-t-md text-git-muted hover:text-white flex items-center space-x-2";
+            if (tabGraph) tabGraph.className = "px-3 py-1.5 rounded-t-md text-git-muted hover:text-white flex items-center space-x-2";
+            if (tabPreview) tabPreview.className = "px-3 py-1 rounded text-git-muted hover:text-white hover:bg-git-dark flex items-center space-x-1.5 transition cursor-pointer border border-git-border hover:border-git-orange";
 
             if (view === 'editor') {
-                editorView.classList.remove('hidden');
-                tabEditor.className = "px-3 py-1.5 rounded-t-md bg-git-dark text-white font-medium flex items-center space-x-2 border-t-2 border-git-orange";
+                if (editorView) editorView.classList.remove('hidden');
+                if (tabEditor) tabEditor.className = "px-3 py-1.5 rounded-t-md bg-git-dark text-white font-medium flex items-center space-x-2 border-t-2 border-git-orange";
             } else if (view === 'diff') {
-                diffView.classList.remove('hidden');
-                tabDiff.className = "px-3 py-1.5 rounded-t-md bg-git-dark text-white font-medium flex items-center space-x-2 border-t-2 border-git-orange";
+                if (diffView) diffView.classList.remove('hidden');
+                if (tabDiff) tabDiff.className = "px-3 py-1.5 rounded-t-md bg-git-dark text-white font-medium flex items-center space-x-2 border-t-2 border-git-orange";
                 renderDiffView();
             } else if (view === 'graph') {
-                graphView.classList.remove('hidden');
-                tabGraph.className = "px-3 py-1.5 rounded-t-md bg-git-dark text-white font-medium flex items-center space-x-2 border-t-2 border-git-orange";
+                if (graphView) graphView.classList.remove('hidden');
+                if (tabGraph) tabGraph.className = "px-3 py-1.5 rounded-t-md bg-git-dark text-white font-medium flex items-center space-x-2 border-t-2 border-git-orange";
                 renderCommitDagGraph();
+            } else if (view === 'preview') {
+                if (previewView) previewView.classList.remove('hidden');
+                if (tabPreview) tabPreview.className = "px-3 py-1 rounded bg-git-dark text-white font-medium flex items-center space-x-1.5 transition cursor-pointer border border-git-orange shadow-sm";
+                renderPreviewDashboard();
             }
         }
 
         /* ---------------------------------------------------------------------
          * WINDOW LOAD BOOTSTRAP
          * --------------------------------------------------------------------- */
-        window.onload = function() {
-            executeGitInit();
+        window.onload = async function() {
+            if (window.MINIGIT_LIVE && typeof window.MINIGIT_LIVE === 'object') {
+                loadLiveRepo();
+            } else {
+                await executeGitInit();
+            }
             openFileInEditor('index.html');
+            switchViewTab('graph');
         };
     </script>
 </body>
