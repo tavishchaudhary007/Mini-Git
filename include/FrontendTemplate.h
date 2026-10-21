@@ -27,8 +27,8 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                     },
                     colors: {
                         pro: {
-                            bg: '#000000',
-                            surface: '#09090b',
+                            bg: '#0F0F0F',
+                            surface: '#0F0F0F',
                             card: '#121214',
                             border: '#27272a',
                             text: '#FFFFFF',
@@ -42,7 +42,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
     </script>
     <style>
         body {
-            background-color: #000000;
+            background-color: #0F0F0F;
             color: #FFFFFF;
         }
         /* Custom scrollbar in dark monochrome minimalist style */
@@ -51,7 +51,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             height: 5px;
         }
         ::-webkit-scrollbar-track {
-            background: #09090b;
+            background: #0F0F0F;
         }
         ::-webkit-scrollbar-thumb {
             background: #27272a;
@@ -65,10 +65,10 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
         .diff-neutral { color: #a1a1aa; }
     </style>
 </head>
-<body class="bg-black text-white font-sans h-screen flex flex-col overflow-hidden select-none antialiased">
+<body class="bg-[#0F0F0F] text-white font-sans h-screen flex flex-col overflow-hidden select-none antialiased">
 
     <!-- TOP HEADER (Dark Monochrome Minimalist Aesthetic) -->
-    <header class="h-16 bg-black border-b border-zinc-800 flex items-center justify-between px-6 z-20 shrink-0">
+    <header class="h-16 bg-[#0F0F0F] border-b border-zinc-800 flex items-center justify-between px-6 z-20 shrink-0">
         
         <!-- Left: Wordmark brand in editorial serif styling (minigit) -->
         <div class="flex items-center space-x-3">
@@ -138,7 +138,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
     </header>
 
     <!-- SUBTITLE HERO STRIP (Dark Minimalist Subtext) -->
-    <div class="bg-zinc-950 border-b border-zinc-900 px-6 py-2 flex items-center justify-between text-xs text-zinc-400 shrink-0">
+    <div class="bg-[#141414] border-b border-zinc-900 px-6 py-2 flex items-center justify-between text-xs text-zinc-400 shrink-0">
         <p class="font-normal">
             <span class="text-white font-medium">A new kind of system for version control.</span> Whatever you need, let MiniGit handle it.
         </p>
@@ -153,10 +153,10 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
     <div class="flex flex-1 overflow-hidden">
 
         <!-- LEFT SIDEBAR: FILES & CHANGES -->
-        <aside class="w-80 bg-black border-r border-zinc-800 flex flex-col shrink-0">
+        <aside class="w-80 bg-[#0F0F0F] border-r border-zinc-800 flex flex-col shrink-0">
             
             <!-- Sidebar Capsule Switcher -->
-            <div class="p-3 border-b border-zinc-800 bg-black flex items-center">
+            <div class="p-3 border-b border-zinc-800 bg-[#0F0F0F] flex items-center">
                 <div class="flex flex-1 bg-zinc-900 p-1 rounded-full border border-zinc-800 text-xs">
                     <button id="btnNavFiles" onclick="switchSidebarTab('files')" class="flex-1 py-1 text-center font-semibold rounded-full bg-white text-black shadow-sm transition">
                         <span>Files</span>
@@ -184,7 +184,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             <div id="tabGitPanel" class="flex-1 flex flex-col overflow-y-auto p-4 space-y-4 hidden">
                 
                 <!-- Commit Snapshot Box (Inverted Dark Pill Form) -->
-                <div class="p-4 bg-zinc-950 rounded-2xl border border-zinc-800 space-y-3">
+                <div class="p-4 bg-[#141414] rounded-2xl border border-zinc-800 space-y-3">
                     <div class="flex items-center justify-between text-xs">
                         <span class="font-semibold text-white">Commit Checkpoint</span>
                         <span class="text-[10px] text-zinc-500">1-Click Save</span>
@@ -230,10 +230,10 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
         </aside>
 
         <!-- MAIN CENTER CONTENT -->
-        <main class="flex-1 flex flex-col bg-black overflow-hidden">
+        <main class="flex-1 flex flex-col bg-[#0F0F0F] overflow-hidden">
 
             <!-- VIEW 1: COMMIT DAG GRAPH VISUALIZER -->
-            <div id="viewContainerGraph" class="flex-1 flex flex-col p-6 overflow-hidden bg-black">
+            <div id="viewContainerGraph" class="flex-1 flex flex-col p-6 overflow-hidden bg-[#0F0F0F]">
                 <div class="flex justify-between items-center mb-4">
                     <div>
                         <h2 class="text-base font-serif font-medium text-white">Commit History &amp; Branch Graph</h2>
@@ -245,7 +245,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                     </div>
                 </div>
                 <!-- Interactive Canvas Container -->
-                <div class="flex-1 bg-zinc-950/80 border border-zinc-800 rounded-2xl relative overflow-auto p-6">
+                <div class="flex-1 bg-[#141414]/80 border border-zinc-800 rounded-2xl relative overflow-auto p-6">
                     <svg id="commitDagSvg" class="w-full h-full min-h-[360px]">
                         <!-- Rendered nodes and edges dynamically -->
                     </svg>
@@ -253,8 +253,8 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             </div>
 
             <!-- VIEW 2: VISUAL SIDE-BY-SIDE DIFF VIEWER -->
-            <div id="viewContainerDiff" class="flex-1 flex flex-col overflow-hidden hidden bg-black">
-                <div class="h-12 border-b border-zinc-800 flex items-center justify-between px-6 text-xs font-mono bg-zinc-950 text-zinc-400">
+            <div id="viewContainerDiff" class="flex-1 flex flex-col overflow-hidden hidden bg-[#0F0F0F]">
+                <div class="h-12 border-b border-zinc-800 flex items-center justify-between px-6 text-xs font-mono bg-[#141414] text-zinc-400">
                     <div class="flex items-center space-x-2">
                         <span class="text-zinc-500">File:</span>
                         <select id="diffFileSelect" onchange="renderDiffView()" class="bg-zinc-900 border border-zinc-800 text-white px-3 py-1 rounded-full focus:outline-none cursor-pointer">
@@ -270,12 +270,12 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                 <!-- Diff Content Grid -->
                 <div class="flex-1 grid grid-cols-2 divide-x divide-zinc-800 font-mono text-xs overflow-y-auto">
                     <!-- Left: Original (Head) -->
-                    <div class="p-4 bg-black overflow-x-auto">
+                    <div class="p-4 bg-[#0F0F0F] overflow-x-auto">
                         <div class="text-zinc-500 border-b border-zinc-800 pb-1 mb-2 font-bold uppercase text-[10px]">HEAD Commit Version</div>
                         <div id="diffOriginalLines" class="space-y-0.5"></div>
                     </div>
                     <!-- Right: Modified (Working Copy) -->
-                    <div class="p-4 bg-black overflow-x-auto">
+                    <div class="p-4 bg-[#0F0F0F] overflow-x-auto">
                         <div class="text-zinc-500 border-b border-zinc-800 pb-1 mb-2 font-bold uppercase text-[10px]">Working Copy Version</div>
                         <div id="diffModifiedLines" class="space-y-0.5"></div>
                     </div>
@@ -283,9 +283,9 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             </div>
 
             <!-- VIEW 3: CODE EDITOR -->
-            <div id="viewContainerEditor" class="flex-1 flex flex-col overflow-hidden relative hidden bg-black">
+            <div id="viewContainerEditor" class="flex-1 flex flex-col overflow-hidden relative hidden bg-[#0F0F0F]">
                 <!-- Editor Info Bar -->
-                <div class="h-11 bg-zinc-950 border-b border-zinc-800 flex items-center justify-between px-6 text-xs font-mono text-zinc-400">
+                <div class="h-11 bg-[#141414] border-b border-zinc-800 flex items-center justify-between px-6 text-xs font-mono text-zinc-400">
                     <div class="flex items-center space-x-2">
                         <i class="fa-regular fa-file-code text-zinc-500"></i>
                         <span id="editorFolderPathDisplay" class="text-zinc-500">/</span>
@@ -299,12 +299,12 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                     </div>
                 </div>
                 <!-- Textarea Editor -->
-                <textarea id="codeEditorArea" oninput="markFileAsModified()" class="flex-1 bg-black p-6 font-mono text-xs text-zinc-100 focus:outline-none resize-none leading-relaxed selection:bg-zinc-800 caret-white" spellcheck="false"></textarea>
+                <textarea id="codeEditorArea" oninput="markFileAsModified()" class="flex-1 bg-[#0F0F0F] p-6 font-mono text-xs text-zinc-100 focus:outline-none resize-none leading-relaxed selection:bg-zinc-800 caret-white" spellcheck="false"></textarea>
             </div>
 
             <!-- VIEW 4: PREVIEW WITH DASHBOARD & AUDIT -->
-            <div id="viewContainerPreview" class="flex-1 flex flex-col bg-black overflow-y-auto hidden">
-                <div class="h-12 border-b border-zinc-800 flex items-center justify-between px-6 text-xs bg-zinc-950 shrink-0">
+            <div id="viewContainerPreview" class="flex-1 flex flex-col bg-[#0F0F0F] overflow-y-auto hidden">
+                <div class="h-12 border-b border-zinc-800 flex items-center justify-between px-6 text-xs bg-[#141414] shrink-0">
                     <div class="flex items-center space-x-2">
                         <i class="fa-solid fa-gauge text-zinc-500"></i>
                         <span class="font-semibold text-white">Project Overview</span>
@@ -319,19 +319,19 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                 <div id="previewSubViewDashboard" class="flex-1 p-6 space-y-6 overflow-y-auto">
                     <!-- Metrics Summary Grid -->
                     <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4">
+                        <div class="bg-[#141414] border border-zinc-800 rounded-2xl p-4">
                             <div class="text-zinc-400 text-xs">Total Commits</div>
                             <div id="metricTotalCommits" class="text-2xl font-serif font-bold text-white mt-1">0</div>
                         </div>
-                        <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4">
+                        <div class="bg-[#141414] border border-zinc-800 rounded-2xl p-4">
                             <div class="text-zinc-400 text-xs">Active Branches</div>
                             <div id="metricTotalBranches" class="text-2xl font-serif font-bold text-white mt-1">1</div>
                         </div>
-                        <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4">
+                        <div class="bg-[#141414] border border-zinc-800 rounded-2xl p-4">
                             <div class="text-zinc-400 text-xs">Project Files</div>
                             <div id="metricTotalFiles" class="text-2xl font-serif font-bold text-white mt-1">0</div>
                         </div>
-                        <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4">
+                        <div class="bg-[#141414] border border-zinc-800 rounded-2xl p-4">
                             <div class="text-zinc-400 text-xs">Current Branch</div>
                             <div id="metricCurrentHead" class="text-sm font-mono font-bold text-white mt-2 truncate">main</div>
                         </div>
@@ -340,7 +340,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                     <!-- Sandbox & Recent Activity -->
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         <!-- Live Web Output Card -->
-                        <div class="bg-zinc-950 border border-zinc-800 rounded-2xl flex flex-col h-[380px] overflow-hidden shadow-sm">
+                        <div class="bg-[#141414] border border-zinc-800 rounded-2xl flex flex-col h-[380px] overflow-hidden shadow-sm">
                             <div class="px-4 py-3 border-b border-zinc-800 flex items-center justify-between bg-zinc-900 text-xs">
                                 <div class="flex items-center space-x-2">
                                     <span class="font-medium text-white">Live Web Sandbox</span>
@@ -356,7 +356,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                         </div>
 
                         <!-- Audit Activity Stream -->
-                        <div class="bg-zinc-950 border border-zinc-800 rounded-2xl flex flex-col h-[380px] overflow-hidden shadow-sm">
+                        <div class="bg-[#141414] border border-zinc-800 rounded-2xl flex flex-col h-[380px] overflow-hidden shadow-sm">
                             <div class="px-4 py-3 border-b border-zinc-800 bg-zinc-900 text-xs font-medium text-white">
                                 Recent Commits &amp; Activity
                             </div>
@@ -370,7 +370,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                 <!-- SUB-VIEW 2: FEEDBACK -->
                 <div id="previewSubViewFeedback" class="flex-1 p-6 space-y-4 overflow-y-auto hidden">
                     <div class="max-w-xl mx-auto space-y-4">
-                        <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-5 space-y-3">
+                        <div class="bg-[#141414] border border-zinc-800 rounded-2xl p-5 space-y-3">
                             <h4 class="text-sm font-semibold text-white">User Experience Feedback</h4>
                             <textarea id="feedbackCommentInput" rows="3" placeholder="Share your experience or suggestions..." class="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-3 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-white resize-none"></textarea>
                             <input id="feedbackAuthorInput" type="text" placeholder="Your name (optional)" class="w-full bg-zinc-900 border border-zinc-800 rounded-full px-4 py-2 text-xs text-white focus:outline-none font-mono">
@@ -385,8 +385,8 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
     </div>
 
     <!-- MODAL 1: CREATE NEW BRANCH (Dark Inverted Pill Modal) -->
-    <div id="newBranchModal" class="fixed inset-0 bg-black/70 backdrop-blur-md z-50 flex items-center justify-center hidden" onclick="if(event.target===this)closeNewBranchModal()">
-        <div class="bg-zinc-950 border border-zinc-800 w-full max-w-sm rounded-3xl shadow-2xl p-6 space-y-4">
+    <div id="newBranchModal" class="fixed inset-0 bg-[#0F0F0F]/80 backdrop-blur-md z-50 flex items-center justify-center hidden" onclick="if(event.target===this)closeNewBranchModal()">
+        <div class="bg-[#141414] border border-zinc-800 w-full max-w-sm rounded-3xl shadow-2xl p-6 space-y-4">
             <div class="flex items-center justify-between border-b border-zinc-800 pb-3">
                 <h3 class="font-serif font-medium text-white text-lg">Create New Branch</h3>
                 <button onclick="closeNewBranchModal()" class="text-zinc-500 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
@@ -403,8 +403,8 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
     </div>
 
     <!-- MODAL 2: MERGE BRANCH (Dark Inverted Pill Modal) -->
-    <div id="mergeModal" class="fixed inset-0 bg-black/70 backdrop-blur-md z-50 flex items-center justify-center hidden" onclick="if(event.target===this)closeMergeModal()">
-        <div class="bg-zinc-950 border border-zinc-800 w-full max-w-sm rounded-3xl shadow-2xl p-6 space-y-4">
+    <div id="mergeModal" class="fixed inset-0 bg-[#0F0F0F]/80 backdrop-blur-md z-50 flex items-center justify-center hidden" onclick="if(event.target===this)closeMergeModal()">
+        <div class="bg-[#141414] border border-zinc-800 w-full max-w-sm rounded-3xl shadow-2xl p-6 space-y-4">
             <div class="flex items-center justify-between border-b border-zinc-800 pb-3">
                 <h3 class="font-serif font-medium text-white text-lg">Merge Branch</h3>
                 <button onclick="closeMergeModal()" class="text-zinc-500 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
@@ -423,8 +423,8 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
     </div>
 
     <!-- MODAL 3: COMMIT DETAIL & ACTION -->
-    <div id="commitActionModal" class="fixed inset-0 bg-black/70 backdrop-blur-md z-50 flex items-center justify-center hidden" onclick="if(event.target===this)closeCommitActionModal()">
-        <div class="bg-zinc-950 border border-zinc-800 w-full max-w-md rounded-3xl shadow-2xl p-6 space-y-4">
+    <div id="commitActionModal" class="fixed inset-0 bg-[#0F0F0F]/80 backdrop-blur-md z-50 flex items-center justify-center hidden" onclick="if(event.target===this)closeCommitActionModal()">
+        <div class="bg-[#141414] border border-zinc-800 w-full max-w-md rounded-3xl shadow-2xl p-6 space-y-4">
             <div class="flex items-center justify-between border-b border-zinc-800 pb-3">
                 <h3 class="font-serif font-medium text-white text-lg">Commit Details</h3>
                 <button onclick="closeCommitActionModal()" class="text-zinc-500 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
@@ -456,8 +456,8 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
     </div>
 
     <!-- MODAL 4: FILE COMMIT PROVENANCE -->
-    <div id="fileCommitModal" class="fixed inset-0 bg-black/70 backdrop-blur-md z-50 flex items-center justify-center hidden" onclick="if(event.target===this)closeFileCommitModal()">
-        <div class="bg-zinc-950 border border-zinc-800 w-full max-w-lg rounded-3xl shadow-2xl p-6 space-y-4">
+    <div id="fileCommitModal" class="fixed inset-0 bg-[#0F0F0F]/80 backdrop-blur-md z-50 flex items-center justify-center hidden" onclick="if(event.target===this)closeFileCommitModal()">
+        <div class="bg-[#141414] border border-zinc-800 w-full max-w-lg rounded-3xl shadow-2xl p-6 space-y-4">
             <div class="flex items-center justify-between border-b border-zinc-800 pb-3">
                 <h3 class="font-serif font-medium text-white text-lg">File Provenance</h3>
                 <button onclick="closeFileCommitModal()" class="text-zinc-500 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
@@ -502,7 +502,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
         const DEMO_FILES = {
             "index.html": "<!DOCTYPE html>\n<html>\n<head>\n  <title>My MiniGit App</title>\n</head>\n<body>\n  <h1>Hello MiniGit!</h1>\n</body>\n</html>",
             "src/app.js": "// MiniGit Application Entry\nconsole.log('App initialized from src folder');\n\nexport function getVersion() {\n    return 'v2.4';\n}",
-            "styles/style.css": "body {\n  background-color: #000000;\n  color: #FFFFFF;\n  font-family: sans-serif;\n}",
+            "styles/style.css": "body {\n  background-color: #0F0F0F;\n  color: #FFFFFF;\n  font-family: sans-serif;\n}",
             "README.md": "# Mini-Git Project\nAn interactive browser-based Git studio engine with folder and commit tracking."
         };
 
@@ -1102,7 +1102,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                 stagedCount++;
                 if (stagedList) {
                     const item = document.createElement('div');
-                    item.className = "flex items-center justify-between p-2.5 bg-zinc-950 border border-zinc-800 rounded-2xl text-xs";
+                    item.className = "flex items-center justify-between p-2.5 bg-[#141414] border border-zinc-800 rounded-2xl text-xs";
                     item.innerHTML = `
                         <div class="flex items-center space-x-2 truncate cursor-pointer" onclick="openFileInEditor('${filepath}')">
                             <span class="text-xs text-emerald-400 font-bold">A</span>
@@ -1133,7 +1133,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                     unstagedCount++;
                     if (unstagedList) {
                         const item = document.createElement('div');
-                        item.className = "flex items-center justify-between p-2.5 bg-zinc-950 border border-zinc-800 rounded-2xl text-xs";
+                        item.className = "flex items-center justify-between p-2.5 bg-[#141414] border border-zinc-800 rounded-2xl text-xs";
                         const statusColor = status === 'U' ? 'text-zinc-400' : 'text-zinc-100';
                         item.innerHTML = `
                             <div class="flex items-center space-x-2 truncate cursor-pointer" onclick="openFileInEditor('${filepath}')">
@@ -1321,7 +1321,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                         const bText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
                         bText.setAttribute('x', labelOffset + bWidth / 2);
                         bText.setAttribute('y', nodeY + 4);
-                        bText.setAttribute('fill', isCur ? '#000000' : '#a1a1aa');
+                        bText.setAttribute('fill', isCur ? '#0F0F0F' : '#a1a1aa');
                         bText.setAttribute('font-size', '10px');
                         bText.setAttribute('font-family', 'Inter, sans-serif');
                         bText.setAttribute('text-anchor', 'middle');
