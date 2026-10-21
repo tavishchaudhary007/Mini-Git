@@ -49,13 +49,17 @@ public:
     const fs::path& root() const { return root_; }
 
     void add(const std::string& path);
+    void unstage(const std::string& path);
+    void discard(const std::string& path);
     Hash commit(const std::string& message);
+    Hash revert(const Hash& commitHash);
     std::vector<Commit> log() const;
     Status status() const;
     std::string diff(const std::string& path) const;
     Snapshot snapshot() const;
 
     void createBranch(const std::string& name);
+    void deleteBranch(const std::string& name) { refs_.deleteBranch(name); }
     std::vector<std::string> branches() const { return refs_.listBranches(); }
     std::string currentBranch() const { return refs_.currentBranch(); }
     Hash head() const { return refs_.headCommit(); }

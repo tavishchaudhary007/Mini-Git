@@ -39,6 +39,12 @@ void RefManager::createBranch(const std::string& n, const Hash& at) const {
     writeFile(branchFile(n), at.str() + "\n");
 }
 
+void RefManager::deleteBranch(const std::string& n) const {
+    if (!branchExists(n)) throw BranchException("branch does not exist: " + n);
+    if (onBranch() && currentBranch() == n) throw BranchException("cannot delete currently checked-out branch: " + n);
+    fs::remove(branchFile(n));
+}
+
 std::vector<std::string> RefManager::listBranches() const {
     std::vector<std::string> names;
     fs::path dir = gitDir_ / "refs" / "heads";

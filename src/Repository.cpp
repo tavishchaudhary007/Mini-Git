@@ -83,6 +83,67 @@ void Repository::add(const std::string& pathArg) {
     index_.save();
 }
 
+void Repository::unstage(const std::string& pathArg) {
+    auto head = headTree();
+    if (pathArg.empty() || pathArg == ".") {
+        index_.replace(head);
+        index_.save();
+        return;
+    }
+    std::string rel = relPath(fs::path(pathArg));
+    if (head.count(rel)) {
+        index_.set(rel, head.at(rel));
+    } else {
+        index_.remove(rel);
+    }
+    index_.save();
+}
+
+void Repository::discard(const std::string& pathArg) {
+    std::string rel = relPath(fs::path(pathArg));
+    auto head = headTree();
+    if (head.count(rel)) {
+        writeFile(root_ / rel, store_.loadAs<Blob>(head.at(rel))->content());
+        index_.set(rel, head.at(rel));
+        index_.save();
+    } else if (index_.has(rel)) {
+        writeFile(root_ / rel, store_.loadAs<Blob>(index_.get(rel))->content());
+    } else if (fs::exists(root_ / rel)) {
+        fs::remove_all(root_ / rel);
+    }
+}
+
+Hash Repository::revert(const Hash& commitHash) {
+    if (isDirty()) throw MiniGitException("you have uncommitted changes; commit them first");
+    auto c = store_.loadAs<Commit>(commitHash);
+    Hash parentHash = c->parent();
+
+    std::map<std::string, Hash> cTree = store_.loadAs<Tree>(c->tree())->entries();
+    std::map<std::string, Hash> pTree;
+    if (!parentHash.empty()) {
+        pTree = store_.loadAs<Tree>(store_.loadAs<Commit>(parentHash)->tree())->entries();
+    }
+
+    // Invert the changes introduced in c
+    for (const auto& [path, h] : cTree) {
+        if (pTree.count(path)) {
+            writeFile(root_ / path, store_.loadAs<Blob>(pTree.at(path))->content());
+            index_.set(path, pTree.at(path));
+        } else {
+            if (fs::exists(root_ / path)) fs::remove(root_ / path);
+            index_.remove(path);
+        }
+    }
+    for (const auto& [path, h] : pTree) {
+        if (!cTree.count(path)) {
+            writeFile(root_ / path, store_.loadAs<Blob>(h)->content());
+            index_.set(path, h);
+        }
+    }
+    index_.save();
+    return commit("Revert \"" + c->message() + "\"");
+}
+
 Hash Repository::commit(const std::string& message) {
     if (message.empty()) throw MiniGitException("commit message must not be empty");
     if (index_.empty()) throw NothingToCommitException("nothing to commit (staging area is empty)");

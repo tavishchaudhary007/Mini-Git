@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <iostream>
 #include "HtmlExporter.h"
+#include "HttpServer.h"
 
 using std::cout;
 
@@ -29,51 +30,74 @@ void CommitCmd::execute(Repository* repo, const Args& args) {
 }
 
 void LogCmd::execute(Repository* repo, const Args& args) {
-    bool oneline = !args.empty() && args[0] == "--oneline";
-    auto commits = repo->log();
-    if (commits.empty()) { cout << "No commits yet.\n"; return; }
-    for (const auto& c : commits) {
-        if (oneline) cout << c.hash().shortStr() << " " << c.message().substr(0, c.message().find('\n')) << "\n";
-        else         cout << c << "\n";
+    bool oneline = false;
+    for (const auto& a : args) {
+        if (a == "--oneline") oneline = true;
+        else usageError(*this);
+    }
+    for (const auto& c : repo->log()) {
+        if (oneline) {
+            std::string first = c.message();
+            auto nl = first.find('\n');
+            if (nl != std::string::npos) first = first.substr(0, nl);
+            cout << c.hash().shortStr() << " " << first << "\n";
+        } else {
+            cout << "commit " << c.hash().str() << "\nAuthor: " << c.author() << "\nDate:   " << c.time() << "\n\n    "
+                 << c.message() << "\n\n";
+        }
     }
 }
 
-void StatusCmd::execute(Repository* repo, const Args&) {
-    std::string b = repo->currentBranch();
-    cout << (b.empty() ? "HEAD detached at " + repo->head().shortStr() : "On branch " + b) << "\n";
+void StatusCmd::execute(Repository* repo, const Args& args) {
+    if (!args.empty()) usageError(*this);
     Status s = repo->status();
-    auto section = [](const char* title, const std::vector<std::string>& v) {
-        if (v.empty()) return;
-        cout << title << "\n";
-        for (const auto& f : v) cout << "    " << f << "\n";
-    };
-    section("Staged (will be committed):", s.staged);
-    section("Modified (not staged):", s.modified);
-    section("Deleted (not staged):", s.deleted);
-    section("Untracked:", s.untracked);
-    if (s.clean()) cout << "Nothing to report, working tree clean.\n";
+    std::string b = repo->currentBranch();
+    cout << "On branch " << (b.empty() ? "(detached)" : b) << "\n";
+    if (s.clean()) { cout << "nothing to commit, working tree clean\n"; return; }
+    if (!s.staged.empty()) {
+        cout << "\nChanges to be committed:\n";
+        for (const auto& f : s.staged) cout << "  staged:    " << f << "\n";
+    }
+    if (!s.modified.empty() || !s.deleted.empty()) {
+        cout << "\nChanges not staged for commit:\n";
+        for (const auto& f : s.modified) cout << "  modified:  " << f << "\n";
+        for (const auto& f : s.deleted)  cout << "  deleted:   " << f << "\n";
+    }
+    if (!s.untracked.empty()) {
+        cout << "\nUntracked files:\n";
+        for (const auto& f : s.untracked) cout << "  " << f << "\n";
+    }
 }
 
 void DiffCmd::execute(Repository* repo, const Args& args) {
-    std::string d = repo->diff(args.empty() ? "" : args[0]);
-    cout << (d.empty() ? "No differences.\n" : d);
+    if (args.size() > 1) usageError(*this);
+    std::string out = repo->diff(args.empty() ? "" : args[0]);
+    if (!out.empty()) cout << out;
 }
 
 void BranchCmd::execute(Repository* repo, const Args& args) {
     if (args.empty()) {
         std::string cur = repo->currentBranch();
-        for (const auto& b : repo->branches()) cout << (b == cur ? "* " : "  ") << b << "\n";
+        for (const auto& b : repo->branches()) {
+            if (b == cur) cout << "* " << b << "\n";
+            else          cout << "  " << b << "\n";
+        }
         return;
     }
-    repo->createBranch(args[0]);
-    cout << "Created branch " << args[0] << "\n";
+    if (args.size() == 1) {
+        repo->createBranch(args[0]);
+        cout << "Created branch " << args[0] << "\n";
+        return;
+    }
+    usageError(*this);
 }
 
 void CheckoutCmd::execute(Repository* repo, const Args& args) {
     if (args.size() != 1) usageError(*this);
     repo->checkout(args[0]);
     std::string b = repo->currentBranch();
-    cout << (b.empty() ? "HEAD is now at " + repo->head().shortStr() : "Switched to branch '" + b + "'") << "\n";
+    if (!b.empty()) cout << "Switched to branch '" << b << "'\n";
+    else           cout << "Note: switching to '" << args[0] << "'. HEAD is now detached.\n";
 }
 
 void MergeCmd::execute(Repository* repo, const Args& args) {
@@ -81,7 +105,6 @@ void MergeCmd::execute(Repository* repo, const Args& args) {
     cout << repo->merge(args[0]) << "\n";
 }
 
-// Opens a file with the OS default program (the browser, for .html).
 static bool openInBrowser(const fs::path& file) {
 #if defined(_WIN32)
     std::string cmd = "start \"\" \"" + file.string() + "\"";
@@ -107,4 +130,23 @@ void HtmlCmd::execute(Repository* repo, const Args& args) {
         if (openInBrowser(out)) cout << "Opened in your default browser.\n";
         else cout << "Could not launch a browser; open the file above manually.\n";
     }
+}
+
+void UiCmd::execute(Repository* repo, const Args& args) {
+    int port = 8080;
+    bool open = true;
+    for (size_t i = 0; i < args.size(); ++i) {
+        if (args[i] == "--no-open") {
+            open = false;
+        } else if (args[i] == "--port" && i + 1 < args.size()) {
+            port = std::stoi(args[++i]);
+        } else {
+            usageError(*this);
+        }
+    }
+    HttpServer::run(repo, port, open);
+}
+
+void ServeCmd::execute(Repository* repo, const Args& args) {
+    UiCmd().execute(repo, args);
 }
