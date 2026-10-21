@@ -12,6 +12,7 @@ A small version control system written in C++17. It tracks changes to text files
 5. [Tutorial: your first repository](#tutorial-your-first-repository)
 6. [Tutorial: branches and merging](#tutorial-branches-and-merging)
 7. [Visual dashboard: `minigit html`](#visual-dashboard-minigit-html)
+8. [Interactive Web Studio: `minigit ui`](#interactive-web-studio-minigit-ui)
 8. [Command reference](#command-reference)
 9. [Project structure](#project-structure)
 10. [How it works](#how-it-works)
@@ -36,6 +37,7 @@ A small version control system written in C++17. It tracks changes to text files
 | `checkout` | Switch branch or go to a commit hash |
 | `merge` | Fast-forward merge |
 | `html` | Open a visual dashboard of the repository in your browser |
+| `ui` / `serve` | Launch interactive local web studio (zero-CLI version control) |
 
 ## Requirements
 
@@ -229,6 +231,27 @@ Notes:
 - Opening `templates/frontend.html` directly (without the CLI) starts a self-contained **demo mode** with sample files.
 
 **Editing the web UI:** change `templates/frontend.html`, then run `python tools/embed_frontend.py` and rebuild. The script regenerates `include/FrontendTemplate.h`, which compiles the page into the executable.
+
+## Interactive Web Studio: `minigit ui` / `minigit serve`
+
+Run this inside any Mini-Git repository:
+```bash
+minigit ui
+# or specify port and prevent auto-opening browser
+minigit serve --port 8080 --no-open
+```
+
+This starts an embedded local HTTP server and opens the **Interactive Web Studio** in your browser.
+
+You can perform your entire version control workflow **visually without memorizing or typing terminal commands**:
+- **Point-and-click Staging:** Stage and unstage individual files or entire folders with `+` and `-` buttons.
+- **1-Click Commit:** Type your commit note into the snapshot box and click **Commit Snapshot**.
+- **Visual Branching:** Create, switch, and merge branches with intuitive modal dialogues.
+- **Commit Actions:** Click any commit node in the DAG graph to view its history, check it out, branch from it, or **Revert** it.
+- **Discard Changes:** Safely revert accidental uncommitted edits with one click.
+- **Live Auto-Sync:** The web interface automatically synchronizes with filesystem changes in real time.
+
+---
 
 ## Command reference
 

@@ -21,6 +21,7 @@ public:
     bool branchExists(const std::string& n) const { return fs::exists(branchFile(n)); }
     Hash branchTip(const std::string& n) const;
     void createBranch(const std::string& n, const Hash& at) const;
+    void deleteBranch(const std::string& n) const;
     std::vector<std::string> listBranches() const;
     void switchToBranch(const std::string& n) const;
     void detach(const Hash& h) const;
