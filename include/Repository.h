@@ -14,6 +14,14 @@ struct Status {
     bool clean() const { return staged.empty() && modified.empty() && deleted.empty() && untracked.empty(); }
 };
 
+struct ReflogEntry {
+    std::string timestamp;
+    std::string action;
+    std::string oldHash;
+    std::string newHash;
+    std::string description;
+};
+
 // Read-only copy of everything a frontend needs to display a repository.
 struct Snapshot {
     std::string currentBranch;                      // "" when HEAD is detached
@@ -65,4 +73,21 @@ public:
     Hash head() const { return refs_.headCommit(); }
     void checkout(const std::string& target);
     std::string merge(const std::string& branch);
+
+    // Safety Nets & Reflog
+    void recordReflog(const std::string& action, const Hash& oldH, const Hash& newH, const std::string& desc);
+    std::vector<ReflogEntry> reflog() const;
+    std::string undo();
+    std::string stashSave(const std::string& message = "");
+    std::string stashPop();
+    bool hasStash() const;
+
+    // Serverless P2P & LAN Sync Bundle
+    std::string exportBundleJson() const;
+    std::string importBundleJson(const std::string& bundleJson);
+
+    // Git Interoperability Bridge
+    std::string gitStatus() const;
+    std::string exportToGit();
+    std::string importFromGit();
 };

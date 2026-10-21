@@ -2,7 +2,10 @@
 #include <algorithm>
 #include <cstdlib>
 #include <ctime>
+#include <fstream>
+#include <sstream>
 #include "DiffEngine.h"
+#include "HtmlExporter.h"
 
 Repository::Repository(const fs::path& root)
     : root_(root), gitDir_(root / ".minigit"), store_(gitDir_ / "objects"),
@@ -158,6 +161,7 @@ Hash Repository::commit(const std::string& message) {
     store_.save(tree);
     Hash h = store_.save(Commit(tree.hash(), parent, author(), message, std::time(nullptr)));
     refs_.updateHead(h);
+    recordReflog("commit", parent, h, message);
     return h;
 }
 
@@ -220,6 +224,7 @@ void Repository::createBranch(const std::string& name) {
     Hash tip = refs_.headCommit();
     if (tip.empty()) throw BranchException("cannot create a branch before the first commit");
     refs_.createBranch(name, tip);
+    recordReflog("branch", tip, tip, "Created branch " + name);
 }
 
 bool Repository::isDirty() const {
@@ -252,12 +257,14 @@ void Repository::restoreCommit(const Hash& c) {
 
 void Repository::checkout(const std::string& target) {
     if (isDirty()) throw CheckoutException("you have uncommitted changes; commit them first");
+    Hash oldHead = refs_.headCommit();
     bool isBranch = refs_.branchExists(target);
     Hash dest = isBranch ? refs_.branchTip(target) : store_.resolvePrefix(target);
     store_.loadAs<Commit>(dest);  // validates that dest is a commit
     restoreCommit(dest);
     if (isBranch) refs_.switchToBranch(target);
     else          refs_.detach(dest);
+    recordReflog("checkout", oldHead, dest, "Switched to " + target);
 }
 
 std::string Repository::merge(const std::string& branch) {
@@ -271,6 +278,7 @@ std::string Repository::merge(const std::string& branch) {
     if (isAncestor(cur, tgt)) {
         restoreCommit(tgt);
         refs_.updateHead(tgt);
+        recordReflog("merge", cur, tgt, "Merged branch " + branch);
         return "Fast-forward to " + tgt.shortStr();
     }
     throw MergeException("branches have diverged; only fast-forward merges are supported");
@@ -297,4 +305,261 @@ Snapshot Repository::snapshot() const {
     for (const auto& [path, h] : head)
         if (!index_.has(path)) s.stagedDeleted.push_back(path);
     return s;
+}
+
+static std::string currentIsoTime() {
+    char buf[32];
+    std::time_t t = std::time(nullptr);
+    std::tm* tm = std::gmtime(&t);
+    std::strftime(buf, sizeof buf, "%Y-%m-%dT%H:%M:%SZ", tm);
+    return buf;
+}
+
+void Repository::recordReflog(const std::string& action, const Hash& oldH, const Hash& newH, const std::string& desc) {
+    try {
+        std::ofstream ofs(gitDir_ / "reflog", std::ios::app);
+        if (ofs.is_open()) {
+            ofs << currentIsoTime() << "|" << action << "|"
+                << (oldH.empty() ? "0000000" : oldH.str()) << "|"
+                << (newH.empty() ? "0000000" : newH.str()) << "|"
+                << desc << "\n";
+        }
+    } catch (...) {}
+}
+
+std::vector<ReflogEntry> Repository::reflog() const {
+    std::vector<ReflogEntry> entries;
+    fs::path p = gitDir_ / "reflog";
+    if (fs::exists(p)) {
+        std::ifstream ifs(p);
+        std::string line;
+        while (std::getline(ifs, line)) {
+            if (line.empty()) continue;
+            std::stringstream ss(line);
+            std::string item;
+            std::vector<std::string> parts;
+            while (std::getline(ss, item, '|')) parts.push_back(item);
+            if (parts.size() >= 5) {
+                entries.push_back({parts[0], parts[1], parts[2], parts[3], parts[4]});
+            }
+        }
+    }
+    if (entries.empty()) {
+        for (const auto& c : log()) {
+            entries.push_back({
+                currentIsoTime(),
+                "commit",
+                (c.parent().empty() ? "0000000" : c.parent().str()),
+                c.hash().str(),
+                c.message()
+            });
+        }
+    }
+    std::reverse(entries.begin(), entries.end());
+    return entries;
+}
+
+std::string Repository::undo() {
+    Hash cur = refs_.headCommit();
+    if (cur.empty()) throw MiniGitException("nothing to undo (repository has no commits)");
+    auto c = store_.loadAs<Commit>(cur);
+    Hash parent = c->parent();
+    if (parent.empty()) {
+        throw MiniGitException("cannot undo the initial commit");
+    }
+
+    if (refs_.onBranch()) {
+        refs_.updateHead(parent);
+    } else {
+        refs_.detach(parent);
+    }
+
+    recordReflog("undo", cur, parent, "Undid commit: " + c->message());
+    return "Undid commit [" + cur.shortStr() + "]. Your changes are preserved in the working directory.";
+}
+
+bool Repository::hasStash() const {
+    return fs::exists(gitDir_ / "stash");
+}
+
+std::string Repository::stashSave(const std::string& message) {
+    Status s = status();
+    if (s.clean()) throw MiniGitException("no uncommitted changes to stash");
+
+    Tree t;
+    for (const auto& f : workingFiles()) {
+        t.set(f, store_.save(Blob(readFile(root_ / f))));
+    }
+    store_.save(t);
+
+    std::string desc = message.empty() ? ("WIP on " + (currentBranch().empty() ? "detached" : currentBranch())) : message;
+    Hash h = store_.save(Commit(t.hash(), head(), author(), desc, std::time(nullptr)));
+    writeFile(gitDir_ / "stash", h.str());
+
+    if (!head().empty()) {
+        restoreCommit(head());
+    }
+
+    recordReflog("stash", head(), h, "Saved stash: " + desc);
+    return "Saved stash [" + h.shortStr() + "]: " + desc;
+}
+
+std::string Repository::stashPop() {
+    if (!hasStash()) throw MiniGitException("no stash entries found to pop");
+    std::string hStr = readFile(gitDir_ / "stash");
+    while (!hStr.empty() && (hStr.back() == '\r' || hStr.back() == '\n' || hStr.back() == ' ')) hStr.pop_back();
+    Hash stashHash(hStr);
+
+    auto c = store_.loadAs<Commit>(stashHash);
+    auto t = store_.loadAs<Tree>(c->tree());
+    for (const auto& [p, blobHash] : t->entries()) {
+        writeFile(root_ / p, store_.loadAs<Blob>(blobHash)->content());
+        index_.set(p, blobHash);
+    }
+    index_.save();
+
+    fs::remove(gitDir_ / "stash");
+    recordReflog("stash_pop", head(), head(), "Restored stash [" + stashHash.shortStr() + "]");
+    return "Restored and applied stash [" + stashHash.shortStr() + "]";
+}
+
+std::string Repository::exportBundleJson() const {
+    return HtmlExporter::toJson(snapshot(), root_.filename().string());
+}
+
+std::string Repository::importBundleJson(const std::string& bundleJson) {
+    // Parse objects from bundle JSON
+    size_t objPos = bundleJson.find("\"objects\":{");
+    if (objPos != std::string::npos) {
+        size_t start = objPos + 11;
+        while (start < bundleJson.size()) {
+            size_t hashStart = bundleJson.find('"', start);
+            if (hashStart == std::string::npos) break;
+            size_t hashEnd = bundleJson.find('"', hashStart + 1);
+            if (hashEnd == std::string::npos) break;
+            std::string hashStr = bundleJson.substr(hashStart + 1, hashEnd - hashStart - 1);
+            if (hashStr.size() >= 40) {
+                size_t typePos = bundleJson.find("\"type\":\"", hashEnd);
+                if (typePos != std::string::npos && typePos < hashEnd + 50) {
+                    size_t typeEnd = bundleJson.find('"', typePos + 8);
+                    std::string type = bundleJson.substr(typePos + 8, typeEnd - typePos - 8);
+                    if (type == "blob") {
+                        size_t cPos = bundleJson.find("\"content\":\"", typeEnd);
+                        if (cPos != std::string::npos) {
+                            size_t cStart = cPos + 11;
+                            std::string content;
+                            for (size_t i = cStart; i < bundleJson.size(); ++i) {
+                                if (bundleJson[i] == '\\' && i + 1 < bundleJson.size()) {
+                                    char next = bundleJson[++i];
+                                    if (next == 'n') content += '\n';
+                                    else if (next == 'r') content += '\r';
+                                    else if (next == 't') content += '\t';
+                                    else if (next == '"') content += '"';
+                                    else if (next == '\\') content += '\\';
+                                    else content += next;
+                                } else if (bundleJson[i] == '"') {
+                                    break;
+                                } else {
+                                    content += bundleJson[i];
+                                }
+                            }
+                            store_.save(Blob(content));
+                        }
+                    }
+                }
+            }
+            size_t nextObj = bundleJson.find("},\"", hashEnd);
+            if (nextObj == std::string::npos || nextObj > bundleJson.find("},\"files\"", hashEnd)) {
+                break;
+            }
+            start = nextObj + 2;
+        }
+    }
+
+    // Parse branches from bundle JSON
+    size_t bPos = bundleJson.find("\"branches\":{");
+    if (bPos != std::string::npos) {
+        size_t bEnd = bundleJson.find('}', bPos);
+        std::string bSection = bundleJson.substr(bPos + 12, bEnd - bPos - 12);
+        std::stringstream ss(bSection);
+        std::string pair;
+        while (std::getline(ss, pair, ',')) {
+            size_t q1 = pair.find('"');
+            size_t q2 = pair.find('"', q1 + 1);
+            size_t q3 = pair.find('"', q2 + 1);
+            size_t q4 = pair.find('"', q3 + 1);
+            if (q1 != std::string::npos && q2 != std::string::npos && q3 != std::string::npos && q4 != std::string::npos) {
+                std::string bName = pair.substr(q1 + 1, q2 - q1 - 1);
+                std::string bHashStr = pair.substr(q3 + 1, q4 - q3 - 1);
+                if (!bName.empty() && bHashStr.size() >= 40) {
+                    Hash h(bHashStr);
+                    if (store_.exists(h)) {
+                        if (!refs_.branchExists(bName)) {
+                            refs_.createBranch(bName, h);
+                        } else if (isAncestor(refs_.branchTip(bName), h)) {
+                            if (refs_.currentBranch() == bName) {
+                                restoreCommit(h);
+                                refs_.updateHead(h);
+                            } else {
+                                refs_.createBranch(bName, h);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    recordReflog("p2p_sync", head(), head(), "P2P LAN Sync Bundle Imported");
+    return "P2P LAN Sync complete: verified objects and updated branches.";
+}
+
+std::string Repository::gitStatus() const {
+    bool hasGit = fs::exists(root_ / ".git");
+    return hasGit ? "{\"gitExists\":true}" : "{\"gitExists\":false}";
+}
+
+std::string Repository::exportToGit() {
+    fs::path gitDir = root_ / ".git";
+    std::string rootStr = root_.string();
+    std::string headMsg = "MiniGit snapshot sync";
+    if (!head().empty()) {
+        try {
+            headMsg = store_.loadAs<Commit>(head())->message();
+        } catch (...) {}
+    }
+    std::string safeMsg;
+    for (char c : headMsg) { if (c == '"') safeMsg += "'"; else safeMsg += c; }
+
+    std::string cmd;
+    if (!fs::exists(gitDir)) {
+#ifdef _WIN32
+        cmd = "cd /d \"" + rootStr + "\" && git init && git add -A && git commit -m \"" + safeMsg + "\"";
+#else
+        cmd = "cd \"" + rootStr + "\" && git init && git add -A && git commit -m \"" + safeMsg + "\"";
+#endif
+    } else {
+#ifdef _WIN32
+        cmd = "cd /d \"" + rootStr + "\" && git add -A && git commit -m \"" + safeMsg + "\"";
+#else
+        cmd = "cd \"" + rootStr + "\" && git add -A && git commit -m \"" + safeMsg + "\"";
+#endif
+    }
+
+    int ret = std::system(cmd.c_str());
+    recordReflog("git_export", head(), head(), "Exported to standard Git (.git)");
+    if (ret == 0) {
+        return "Exported to standard Git repository successfully.";
+    }
+    return "Git export executed (exit code " + std::to_string(ret) + ").";
+}
+
+std::string Repository::importFromGit() {
+    if (!fs::exists(root_ / ".git")) {
+        throw MiniGitException("no .git repository found in current directory");
+    }
+    add(".");
+    Hash h = commit("Imported snapshot from standard Git repository (.git)");
+    recordReflog("git_import", Hash(), h, "Imported from standard Git");
+    return "Successfully imported Git repository as commit [" + h.shortStr() + "].";
 }

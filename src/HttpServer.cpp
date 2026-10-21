@@ -271,6 +271,65 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser) {
                 std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
                 sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
                                  "{\"ok\":true,\"hash\":\"" + h.str() + "\",\"snapshot\":" + snap + "}");
+            } else if (method == "POST" && uri == "/api/undo") {
+                std::string resMsg = repo->undo();
+                std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
+                sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
+                                 "{\"ok\":true,\"message\":\"" + resMsg + "\",\"snapshot\":" + snap + "}");
+            } else if (method == "POST" && uri == "/api/stash/save") {
+                std::string msg = getJsonString(body, "message");
+                std::string resMsg = repo->stashSave(msg);
+                std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
+                sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
+                                 "{\"ok\":true,\"message\":\"" + resMsg + "\",\"snapshot\":" + snap + "}");
+            } else if (method == "POST" && uri == "/api/stash/pop") {
+                std::string resMsg = repo->stashPop();
+                std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
+                sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
+                                 "{\"ok\":true,\"message\":\"" + resMsg + "\",\"snapshot\":" + snap + "}");
+            } else if (method == "GET" && uri == "/api/reflog") {
+                auto entries = repo->reflog();
+                std::ostringstream json;
+                json << "{\"ok\":true,\"reflog\":[";
+                bool first = true;
+                for (const auto& r : entries) {
+                    if (!first) json << ',';
+                    first = false;
+                    json << "{\"timestamp\":\"" << r.timestamp << "\","
+                         << "\"action\":\"" << r.action << "\","
+                         << "\"oldHash\":\"" << r.oldHash << "\","
+                         << "\"newHash\":\"" << r.newHash << "\","
+                         << "\"description\":\"" << r.description << "\"}";
+                }
+                json << "]}";
+                sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8", json.str());
+            } else if (method == "POST" && uri == "/api/reflog/restore") {
+                std::string hash = getJsonString(body, "hash");
+                repo->checkout(hash);
+                std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
+                sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
+                                 "{\"ok\":true,\"message\":\"Restored to checkpoint " + hash.substr(0, 7) + "\",\"snapshot\":" + snap + "}");
+            } else if (method == "GET" && uri == "/api/sync/bundle") {
+                std::string bundle = repo->exportBundleJson();
+                sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8", bundle);
+            } else if (method == "POST" && uri == "/api/sync/import-bundle") {
+                std::string resMsg = repo->importBundleJson(body);
+                std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
+                sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
+                                 "{\"ok\":true,\"message\":\"" + resMsg + "\",\"snapshot\":" + snap + "}");
+            } else if (method == "GET" && uri == "/api/git/status") {
+                std::string statusJson = repo->gitStatus();
+                sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8", statusJson);
+            } else if (method == "POST" && uri == "/api/git/export") {
+                std::string resMsg = repo->exportToGit();
+                std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
+                sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
+                                 "{\"ok\":true,\"message\":\"" + resMsg + "\",\"snapshot\":" + snap + "}");
+            } else if (method == "POST" && uri == "/api/git/import") {
+                std::string resMsg = repo->importFromGit();
+                std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
+                sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
+                                 "{\"ok\":true,\"message\":\"" + resMsg + "\",\"snapshot\":" + snap + "}");
             } else {
                 sendHttpResponse(clientSock, 404, "Not Found", "application/json", "{\"ok\":false,\"error\":\"endpoint not found\"}");
             }
