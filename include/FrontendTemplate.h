@@ -28,8 +28,8 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                     colors: {
                         pro: {
                             bg: '#0F0F0F',
-                            surface: '#0F0F0F',
-                            card: '#121214',
+                            surface: '#141414',
+                            card: '#181818',
                             border: '#27272a',
                             text: '#FFFFFF',
                             muted: '#a1a1aa',
@@ -63,6 +63,30 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
         .diff-added { background-color: #064e3b; color: #6ee7b7; }
         .diff-removed { background-color: #450a0a; color: #fca5a5; }
         .diff-neutral { color: #a1a1aa; }
+        
+        /* Custom Range Slider */
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            background: #27272a;
+            height: 6px;
+            border-radius: 9999px;
+            outline: none;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #FFFFFF;
+            cursor: pointer;
+            box-shadow: 0 0 10px rgba(255,255,255,0.4);
+            transition: transform 0.1s ease;
+        }
+        input[type="range"]::-webkit-slider-thumb:hover {
+            transform: scale(1.15);
+        }
     </style>
 </head>
 <body class="bg-[#0F0F0F] text-white font-sans h-screen flex flex-col overflow-hidden select-none antialiased">
@@ -92,6 +116,10 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                 <i class="fa-solid fa-diagram-project text-[11px]"></i>
                 <span>Graph</span>
             </button>
+            <button id="viewTabTimeline" onclick="switchViewTab('timeline')" class="px-4 py-1.5 rounded-full text-xs font-medium text-zinc-400 hover:text-white transition flex items-center space-x-1.5 cursor-pointer">
+                <i class="fa-solid fa-clock-rotate-left text-[11px]"></i>
+                <span>Time Travel</span>
+            </button>
             <button id="viewTabDiff" onclick="switchViewTab('diff')" class="px-4 py-1.5 rounded-full text-xs font-medium text-zinc-400 hover:text-white transition flex items-center space-x-1.5 cursor-pointer">
                 <i class="fa-solid fa-code-compare text-[11px]"></i>
                 <span>Diff</span>
@@ -106,25 +134,51 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             </button>
         </div>
 
-        <!-- Right: Branch pill and actions (Capsule Buttons) -->
+        <!-- Right: Actions & Tools (P2P Sync, Safety Undo, Git Bridge, Branches) -->
         <div class="flex items-center space-x-2">
+            <!-- 1-Click Safety Undo -->
+            <button onclick="executeQuickUndo()" title="Undo Last Commit (Soft Reset)" class="rounded-full bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 px-3 py-1.5 text-xs font-medium flex items-center space-x-1.5 transition cursor-pointer">
+                <i class="fa-solid fa-rotate-left text-[10px]"></i>
+                <span>Undo</span>
+            </button>
+
+            <!-- Safety Net / Reflog Flight Recorder -->
+            <button onclick="openSafetyNetModal()" title="Safety Flight Recorder & Reflog" class="rounded-full bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 px-3 py-1.5 text-xs font-medium flex items-center space-x-1.5 transition cursor-pointer">
+                <i class="fa-solid fa-shield-halved text-[10px] text-zinc-400"></i>
+                <span class="hidden md:inline">Safety Net</span>
+            </button>
+
+            <!-- Serverless P2P & LAN Sync -->
+            <button onclick="openLanSyncModal()" title="Serverless P2P & LAN Sync" class="rounded-full bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 px-3 py-1.5 text-xs font-medium flex items-center space-x-1.5 transition cursor-pointer">
+                <i class="fa-solid fa-network-wired text-[10px] text-zinc-400"></i>
+                <span class="hidden md:inline">P2P Sync</span>
+            </button>
+
+            <!-- Git Interoperability Bridge -->
+            <button onclick="openGitBridgeModal()" title="Git Interoperability Bridge" class="rounded-full bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 px-3 py-1.5 text-xs font-medium flex items-center space-x-1.5 transition cursor-pointer">
+                <i class="fa-brands fa-git-alt text-[11px] text-orange-400"></i>
+                <span class="hidden md:inline">Git Bridge</span>
+            </button>
+
+            <span class="text-zinc-800">|</span>
+
             <!-- Active Branch Selector -->
-            <div class="flex items-center bg-zinc-900 border border-zinc-800 rounded-full px-3.5 py-1 text-xs hover:border-zinc-700 transition">
+            <div class="flex items-center bg-zinc-900 border border-zinc-800 rounded-full px-3 py-1 text-xs hover:border-zinc-700 transition">
                 <i class="fa-solid fa-code-branch text-zinc-400 mr-2 text-[11px]"></i>
-                <span class="text-zinc-500 mr-1.5 font-normal">branch:</span>
+                <span class="text-zinc-500 mr-1 font-normal">branch:</span>
                 <select id="branchSelect" onchange="switchBranchUI(this.value)" class="bg-transparent text-white font-mono font-medium focus:outline-none cursor-pointer">
                     <!-- Populated dynamically -->
                 </select>
             </div>
 
             <!-- New Branch Capsule Button -->
-            <button onclick="openNewBranchModal()" title="Create New Branch" class="rounded-full bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 px-3.5 py-1.5 text-xs font-medium flex items-center space-x-1.5 transition cursor-pointer">
+            <button onclick="openNewBranchModal()" title="Create New Branch" class="rounded-full bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 px-3 py-1.5 text-xs font-medium flex items-center space-x-1.5 transition cursor-pointer">
                 <i class="fa-solid fa-plus text-[10px]"></i>
                 <span>Branch</span>
             </button>
 
             <!-- Merge Capsule Button -->
-            <button onclick="openMergeModal()" title="Merge Branch" class="rounded-full bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 px-3.5 py-1.5 text-xs font-medium flex items-center space-x-1.5 transition cursor-pointer">
+            <button onclick="openMergeModal()" title="Merge Branch" class="rounded-full bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 px-3 py-1.5 text-xs font-medium flex items-center space-x-1.5 transition cursor-pointer">
                 <i class="fa-solid fa-code-merge text-[10px]"></i>
                 <span>Merge</span>
             </button>
@@ -132,7 +186,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             <!-- Refresh / Sync Button -->
             <button onclick="refreshRepositorySnapshot()" title="Synchronize Repository" class="rounded-full bg-white hover:bg-zinc-200 text-black px-3.5 py-1.5 text-xs font-semibold flex items-center space-x-1.5 transition cursor-pointer shadow-sm">
                 <i class="fa-solid fa-arrows-rotate text-[11px]"></i>
-                <span class="hidden md:inline">Sync</span>
+                <span class="hidden lg:inline">Sync</span>
             </button>
         </div>
     </header>
@@ -142,10 +196,12 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
         <p class="font-normal">
             <span class="text-white font-medium">A new kind of system for version control.</span> Whatever you need, let MiniGit handle it.
         </p>
-        <div class="flex items-center space-x-3 text-[11px]">
+        <div class="flex items-center space-x-4 text-[11px]">
             <span class="text-zinc-500">Head: <span id="stripHeadHash" class="font-mono text-zinc-200 font-semibold">root</span></span>
             <span class="text-zinc-700">&bull;</span>
             <span class="text-zinc-500">Files: <span id="stripFileCount" class="text-zinc-200 font-semibold">0</span></span>
+            <span class="text-zinc-700">&bull;</span>
+            <span id="stashStatusLabel" class="text-zinc-500">Stash: <span id="stashCountBadge" class="font-mono text-zinc-400">clean</span></span>
         </div>
     </div>
 
@@ -183,6 +239,15 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             <!-- CHANGES / SOURCE CONTROL TAB -->
             <div id="tabGitPanel" class="flex-1 flex flex-col overflow-y-auto p-4 space-y-4 hidden">
                 
+                <!-- Quick Stash Safety Net Row -->
+                <div class="flex items-center justify-between px-1 text-xs">
+                    <span class="text-zinc-500 text-[11px] uppercase tracking-wider font-semibold">Safety Stash</span>
+                    <div class="flex items-center space-x-2">
+                        <button onclick="executeQuickStash()" title="Stash uncommitted changes" class="px-3 py-1 rounded-full bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 text-xs font-medium cursor-pointer transition">Stash</button>
+                        <button onclick="executePopStash()" title="Restore and apply stashed changes" class="px-3 py-1 rounded-full bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 text-xs font-medium cursor-pointer transition">Pop</button>
+                    </div>
+                </div>
+
                 <!-- Commit Snapshot Box (Inverted Dark Pill Form) -->
                 <div class="p-4 bg-[#141414] rounded-2xl border border-zinc-800 space-y-3">
                     <div class="flex items-center justify-between text-xs">
@@ -252,7 +317,99 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                 </div>
             </div>
 
-            <!-- VIEW 2: VISUAL SIDE-BY-SIDE DIFF VIEWER -->
+            <!-- VIEW 2: VISUAL TIME TRAVEL SLIDER -->
+            <div id="viewContainerTimeline" class="flex-1 flex flex-col p-6 overflow-y-auto hidden bg-[#0F0F0F] space-y-6">
+                <!-- Header & Controls -->
+                <div class="flex flex-col md:flex-row justify-between md:items-center gap-4">
+                    <div>
+                        <h2 class="text-xl font-serif font-medium text-white">Visual History &amp; Time Travel</h2>
+                        <p class="text-xs text-zinc-400">Scrub smoothly through historical snapshots, inspect file states, and restore with one click</p>
+                    </div>
+                    <!-- Playback Controls -->
+                    <div class="flex items-center space-x-2 bg-zinc-900 border border-zinc-800 p-1.5 rounded-full">
+                        <button onclick="timeTravelStep('start')" title="Earliest Commit" class="w-7 h-7 rounded-full bg-zinc-800 hover:bg-zinc-700 flex items-center justify-center text-xs"><i class="fa-solid fa-backward-step"></i></button>
+                        <button onclick="timeTravelStep('prev')" title="Previous Commit" class="w-7 h-7 rounded-full bg-zinc-800 hover:bg-zinc-700 flex items-center justify-center text-xs"><i class="fa-solid fa-chevron-left"></i></button>
+                        <button id="btnTimeTravelPlay" onclick="toggleTimeTravelPlayback()" title="Play / Pause Auto-Scrub" class="px-3 py-1 rounded-full bg-white text-black font-semibold text-xs flex items-center space-x-1 cursor-pointer">
+                            <i id="timeTravelPlayIcon" class="fa-solid fa-play text-[10px]"></i>
+                            <span id="timeTravelPlayLabel">Play</span>
+                        </button>
+                        <button onclick="timeTravelStep('next')" title="Next Commit" class="w-7 h-7 rounded-full bg-zinc-800 hover:bg-zinc-700 flex items-center justify-center text-xs"><i class="fa-solid fa-chevron-right"></i></button>
+                        <button onclick="timeTravelStep('end')" title="Latest HEAD Commit" class="w-7 h-7 rounded-full bg-zinc-800 hover:bg-zinc-700 flex items-center justify-center text-xs"><i class="fa-solid fa-forward-step"></i></button>
+                    </div>
+                </div>
+
+                <!-- Main Time Travel Scrubber Card -->
+                <div class="p-6 bg-[#141414] border border-zinc-800 rounded-2xl space-y-5">
+                    <div class="flex items-center justify-between text-xs text-zinc-400">
+                        <span class="flex items-center space-x-2">
+                            <i class="fa-regular fa-clock text-zinc-400"></i>
+                            <span>Historical Timeline</span>
+                        </span>
+                        <span id="timeTravelStepCounter" class="font-mono text-zinc-300 font-semibold">Commit 0 of 0</span>
+                    </div>
+
+                    <!-- Range Slider -->
+                    <div class="px-2">
+                        <input id="timeTravelSlider" type="range" min="0" max="0" value="0" oninput="onTimeTravelSliderInput(this.value)" class="w-full cursor-pointer">
+                    </div>
+
+                    <!-- Selected Commit Snapshot Highlight Card -->
+                    <div class="p-4 bg-zinc-900/70 border border-zinc-800 rounded-xl space-y-3">
+                        <div class="flex flex-col md:flex-row justify-between md:items-center gap-2">
+                            <div class="space-y-1">
+                                <div class="flex items-center space-x-2">
+                                    <span id="timeTravelCommitHash" class="font-mono text-xs font-bold text-white bg-zinc-800 px-2 py-0.5 rounded-full">#root</span>
+                                    <span id="timeTravelCommitAuthor" class="text-xs text-zinc-400">Author</span>
+                                    <span class="text-zinc-600">&bull;</span>
+                                    <span id="timeTravelCommitDate" class="text-xs text-zinc-500">Date</span>
+                                </div>
+                                <h3 id="timeTravelCommitMessage" class="text-sm font-semibold text-white">Select a commit along the slider</h3>
+                            </div>
+                            
+                            <!-- Action Buttons at this point in time -->
+                            <div class="flex items-center space-x-2 shrink-0">
+                                <button onclick="actionTimeTravelRestore()" title="Restore working tree files to this commit" class="px-4 py-1.5 rounded-full bg-white hover:bg-zinc-200 text-black text-xs font-semibold shadow-sm transition flex items-center space-x-1.5 cursor-pointer">
+                                    <i class="fa-solid fa-rotate text-[10px]"></i>
+                                    <span>Restore Files</span>
+                                </button>
+                                <button onclick="actionTimeTravelBranch()" title="Create new branch at this point" class="px-3.5 py-1.5 rounded-full bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium transition flex items-center space-x-1.5 cursor-pointer">
+                                    <i class="fa-solid fa-code-branch text-[10px]"></i>
+                                    <span>Branch Here</span>
+                                </button>
+                                <button onclick="actionTimeTravelCheckout()" title="Checkout this commit" class="px-3.5 py-1.5 rounded-full bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium transition flex items-center space-x-1.5 cursor-pointer">
+                                    <i class="fa-solid fa-location-crosshairs text-[10px]"></i>
+                                    <span>Checkout</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Snapshot Inspector Grid (File Tree & Content at this point in time) -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1 min-h-[300px]">
+                    <!-- Historical Files list at that commit -->
+                    <div class="bg-[#141414] border border-zinc-800 rounded-2xl flex flex-col p-4 space-y-3">
+                        <div class="flex items-center justify-between text-xs border-b border-zinc-800 pb-2">
+                            <span class="font-medium text-white">Files at this Checkpoint</span>
+                            <span id="timeTravelFileCount" class="font-mono text-zinc-500">0 files</span>
+                        </div>
+                        <div id="timeTravelFileList" class="flex-1 overflow-y-auto space-y-1 font-mono text-xs">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+
+                    <!-- File Content / Diff at that commit -->
+                    <div class="lg:col-span-2 bg-[#141414] border border-zinc-800 rounded-2xl flex flex-col p-4 space-y-2">
+                        <div class="flex items-center justify-between text-xs border-b border-zinc-800 pb-2">
+                            <span id="timeTravelPreviewFileName" class="font-mono font-medium text-white">Select a file</span>
+                            <span class="text-zinc-500 text-[11px]">Snapshot Content</span>
+                        </div>
+                        <pre id="timeTravelFileContent" class="flex-1 bg-[#0F0F0F] p-4 rounded-xl border border-zinc-800 font-mono text-xs text-zinc-300 overflow-auto whitespace-pre leading-relaxed">No file selected.</pre>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VIEW 3: VISUAL SIDE-BY-SIDE DIFF VIEWER -->
             <div id="viewContainerDiff" class="flex-1 flex flex-col overflow-hidden hidden bg-[#0F0F0F]">
                 <div class="h-12 border-b border-zinc-800 flex items-center justify-between px-6 text-xs font-mono bg-[#141414] text-zinc-400">
                     <div class="flex items-center space-x-2">
@@ -282,7 +439,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                 </div>
             </div>
 
-            <!-- VIEW 3: CODE EDITOR -->
+            <!-- VIEW 4: CODE EDITOR -->
             <div id="viewContainerEditor" class="flex-1 flex flex-col overflow-hidden relative hidden bg-[#0F0F0F]">
                 <!-- Editor Info Bar -->
                 <div class="h-11 bg-[#141414] border-b border-zinc-800 flex items-center justify-between px-6 text-xs font-mono text-zinc-400">
@@ -302,7 +459,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                 <textarea id="codeEditorArea" oninput="markFileAsModified()" class="flex-1 bg-[#0F0F0F] p-6 font-mono text-xs text-zinc-100 focus:outline-none resize-none leading-relaxed selection:bg-zinc-800 caret-white" spellcheck="false"></textarea>
             </div>
 
-            <!-- VIEW 4: PREVIEW WITH DASHBOARD & AUDIT -->
+            <!-- VIEW 5: PREVIEW WITH DASHBOARD & AUDIT -->
             <div id="viewContainerPreview" class="flex-1 flex flex-col bg-[#0F0F0F] overflow-y-auto hidden">
                 <div class="h-12 border-b border-zinc-800 flex items-center justify-between px-6 text-xs bg-[#141414] shrink-0">
                     <div class="flex items-center space-x-2">
@@ -384,6 +541,10 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
         </main>
     </div>
 
+    <!-- ========================================================================= -->
+    <!-- MODALS SECTION                                                            -->
+    <!-- ========================================================================= -->
+
     <!-- MODAL 1: CREATE NEW BRANCH (Dark Inverted Pill Modal) -->
     <div id="newBranchModal" class="fixed inset-0 bg-[#0F0F0F]/80 backdrop-blur-md z-50 flex items-center justify-center hidden" onclick="if(event.target===this)closeNewBranchModal()">
         <div class="bg-[#141414] border border-zinc-800 w-full max-w-sm rounded-3xl shadow-2xl p-6 space-y-4">
@@ -402,7 +563,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- MODAL 2: MERGE BRANCH (Dark Inverted Pill Modal) -->
+    <!-- MODAL 2: MERGE BRANCH -->
     <div id="mergeModal" class="fixed inset-0 bg-[#0F0F0F]/80 backdrop-blur-md z-50 flex items-center justify-center hidden" onclick="if(event.target===this)closeMergeModal()">
         <div class="bg-[#141414] border border-zinc-800 w-full max-w-sm rounded-3xl shadow-2xl p-6 space-y-4">
             <div class="flex items-center justify-between border-b border-zinc-800 pb-3">
@@ -455,22 +616,132 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- MODAL 4: FILE COMMIT PROVENANCE -->
-    <div id="fileCommitModal" class="fixed inset-0 bg-[#0F0F0F]/80 backdrop-blur-md z-50 flex items-center justify-center hidden" onclick="if(event.target===this)closeFileCommitModal()">
-        <div class="bg-[#141414] border border-zinc-800 w-full max-w-lg rounded-3xl shadow-2xl p-6 space-y-4">
+    <!-- MODAL 4: SERVERLESS P2P & LAN SYNC -->
+    <div id="lanSyncModal" class="fixed inset-0 bg-[#0F0F0F]/80 backdrop-blur-md z-50 flex items-center justify-center hidden" onclick="if(event.target===this)closeLanSyncModal()">
+        <div class="bg-[#141414] border border-zinc-800 w-full max-w-lg rounded-3xl shadow-2xl p-6 space-y-5">
             <div class="flex items-center justify-between border-b border-zinc-800 pb-3">
-                <h3 class="font-serif font-medium text-white text-lg">File Provenance</h3>
-                <button onclick="closeFileCommitModal()" class="text-zinc-500 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
-            </div>
-            <div class="space-y-3 text-xs">
-                <div class="bg-zinc-900/70 p-3 rounded-2xl border border-zinc-800 space-y-1.5 font-mono">
-                    <div class="flex justify-between"><span class="text-zinc-400">File:</span><span id="fcmFileName" class="text-white font-bold"></span></div>
-                    <div class="flex justify-between"><span class="text-zinc-400">Folder:</span><span id="fcmFolderPath" class="text-zinc-300"></span></div>
+                <div>
+                    <h3 class="font-serif font-medium text-white text-lg">Serverless P2P &amp; LAN Sync</h3>
+                    <p class="text-xs text-zinc-400">Collaborate directly on Wi-Fi without GitHub or cloud accounts</p>
                 </div>
-                <div id="fcmCommitHistoryList" class="space-y-2 max-h-56 overflow-y-auto pr-1"></div>
+                <button onclick="closeLanSyncModal()" class="text-zinc-500 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
             </div>
+
+            <!-- Local Node Card -->
+            <div class="p-4 bg-zinc-900/70 border border-zinc-800 rounded-2xl space-y-2">
+                <div class="flex justify-between items-center text-xs">
+                    <span class="text-zinc-400">Your Local Peer Address</span>
+                    <span class="px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-bold">Active Node</span>
+                </div>
+                <div class="flex items-center justify-between bg-zinc-900 px-3 py-2 rounded-xl border border-zinc-800 font-mono text-xs">
+                    <span id="localPeerAddressText" class="text-white">http://localhost:8080</span>
+                    <button onclick="copyLocalPeerAddress()" class="text-zinc-400 hover:text-white text-xs"><i class="fa-regular fa-copy"></i> Copy</button>
+                </div>
+            </div>
+
+            <!-- Direct Peer Sync (Pull / Push) -->
+            <div class="space-y-3">
+                <label class="block text-xs font-medium text-zinc-300">Sync with Teammate over Local Network</label>
+                <input id="lanPeerUrlInput" type="text" placeholder="http://192.168.1.50:8080" class="w-full bg-zinc-900 border border-zinc-800 rounded-full px-4 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-white font-mono">
+                <div class="grid grid-cols-2 gap-3 pt-1">
+                    <button onclick="executeLanPull()" class="py-2.5 rounded-full bg-white hover:bg-zinc-200 text-black font-semibold text-xs shadow-sm transition flex items-center justify-center space-x-2 cursor-pointer">
+                        <i class="fa-solid fa-arrow-down text-xs"></i>
+                        <span>Pull from Peer</span>
+                    </button>
+                    <button onclick="executeLanPush()" class="py-2.5 rounded-full bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 font-medium text-xs transition flex items-center justify-center space-x-2 cursor-pointer">
+                        <i class="fa-solid fa-arrow-up text-xs"></i>
+                        <span>Push to Peer</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Portable Snapshot Bundle (AirDrop / USB / Chat) -->
+            <div class="p-4 bg-zinc-900/40 border border-zinc-800 rounded-2xl space-y-3 text-xs">
+                <div class="font-medium text-white">Portable Snapshot Bundle</div>
+                <p class="text-zinc-400 text-[11px]">Download all objects and history into a standalone file you can airdrop or send over chat.</p>
+                <div class="flex items-center space-x-2 pt-1">
+                    <button onclick="downloadRepositoryBundle()" class="flex-1 py-2 rounded-full bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 transition text-xs font-medium flex items-center justify-center space-x-1.5 cursor-pointer">
+                        <i class="fa-solid fa-download text-[11px]"></i>
+                        <span>Export Bundle (.json)</span>
+                    </button>
+                    <label class="flex-1 py-2 rounded-full bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 transition text-xs font-medium flex items-center justify-center space-x-1.5 cursor-pointer text-center">
+                        <i class="fa-solid fa-upload text-[11px]"></i>
+                        <span>Import Bundle</span>
+                        <input type="file" id="bundleFileInput" accept=".json" onchange="uploadRepositoryBundle(event)" class="hidden">
+                    </label>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL 5: SAFETY NET & REFLOG FLIGHT RECORDER -->
+    <div id="safetyNetModal" class="fixed inset-0 bg-[#0F0F0F]/80 backdrop-blur-md z-50 flex items-center justify-center hidden" onclick="if(event.target===this)closeSafetyNetModal()">
+        <div class="bg-[#141414] border border-zinc-800 w-full max-w-xl rounded-3xl shadow-2xl p-6 space-y-4">
+            <div class="flex items-center justify-between border-b border-zinc-800 pb-3">
+                <div>
+                    <h3 class="font-serif font-medium text-white text-lg">Safety Flight Recorder &amp; Reflog</h3>
+                    <p class="text-xs text-zinc-400">Every action is recorded. Restore any historical state with 1 click.</p>
+                </div>
+                <button onclick="closeSafetyNetModal()" class="text-zinc-500 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            
+            <div class="space-y-2">
+                <div class="flex items-center justify-between text-xs text-zinc-400 px-1">
+                    <span>Recent Actions &amp; Checkpoints</span>
+                    <span id="reflogEntryCountBadge" class="font-mono text-zinc-500">0 records</span>
+                </div>
+                <div id="safetyReflogList" class="max-h-72 overflow-y-auto space-y-2 pr-1 font-mono text-xs">
+                    <!-- Populated dynamically -->
+                </div>
+            </div>
+
             <div class="flex justify-end pt-2">
-                <button onclick="closeFileCommitModal()" class="px-5 py-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 text-xs rounded-full transition font-medium">Close</button>
+                <button onclick="closeSafetyNetModal()" class="px-5 py-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 text-xs rounded-full transition font-medium">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL 6: GIT INTEROPERABILITY BRIDGE -->
+    <div id="gitBridgeModal" class="fixed inset-0 bg-[#0F0F0F]/80 backdrop-blur-md z-50 flex items-center justify-center hidden" onclick="if(event.target===this)closeGitBridgeModal()">
+        <div class="bg-[#141414] border border-zinc-800 w-full max-w-lg rounded-3xl shadow-2xl p-6 space-y-5">
+            <div class="flex items-center justify-between border-b border-zinc-800 pb-3">
+                <div>
+                    <h3 class="font-serif font-medium text-white text-lg">Git Interoperability Bridge</h3>
+                    <p class="text-xs text-zinc-400">Bridge MiniGit with standard Git (.git) repositories</p>
+                </div>
+                <button onclick="closeGitBridgeModal()" class="text-zinc-500 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <!-- Status Card -->
+            <div class="p-4 bg-zinc-900/70 border border-zinc-800 rounded-2xl flex items-center justify-between text-xs">
+                <div>
+                    <div class="font-semibold text-white">Standard Git Status</div>
+                    <div id="gitBridgeStatusText" class="text-zinc-400 text-[11px]">Checking repository directory...</div>
+                </div>
+                <span id="gitBridgeStatusPill" class="px-3 py-1 rounded-full text-xs font-semibold bg-zinc-800 text-zinc-400">Checking...</span>
+            </div>
+
+            <!-- Two Action Cards -->
+            <div class="space-y-3">
+                <!-- Export to Git -->
+                <div class="p-4 bg-zinc-900/40 border border-zinc-800 rounded-2xl space-y-2 text-xs">
+                    <div class="font-semibold text-white">Export to Standard Git (.git)</div>
+                    <p class="text-zinc-400 text-[11px]">Synchronizes current MiniGit commits and tree into standard Git so VS Code, SourceTree, and standard Git CLI can read it.</p>
+                    <button onclick="executeGitBridgeExport()" class="w-full py-2.5 rounded-full bg-white hover:bg-zinc-200 text-black font-semibold text-xs shadow-sm transition flex items-center justify-center space-x-2 cursor-pointer">
+                        <i class="fa-solid fa-arrow-right-from-bracket text-xs"></i>
+                        <span>Export to .git Repository</span>
+                    </button>
+                </div>
+
+                <!-- Import from Git -->
+                <div class="p-4 bg-zinc-900/40 border border-zinc-800 rounded-2xl space-y-2 text-xs">
+                    <div class="font-semibold text-white">Import from Standard Git (.git)</div>
+                    <p class="text-zinc-400 text-[11px]">Imports commits and working tree from an existing .git repository into MiniGit studio.</p>
+                    <button onclick="executeGitBridgeImport()" class="w-full py-2.5 rounded-full bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 font-medium text-xs transition flex items-center justify-center space-x-2 cursor-pointer">
+                        <i class="fa-solid fa-arrow-right-to-bracket text-xs"></i>
+                        <span>Import from .git Repository</span>
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -498,6 +769,15 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
         let ACTIVE_FILE = "index.html";
         let SELECTED_COMMIT_HASH = null;
         const FOLDER_COLLAPSED_STATE = {};
+
+        // In-memory Safety Net / Reflog (for demo / standalone mode)
+        let DEMO_REFLOG = [];
+        let DEMO_STASH = null;
+
+        // Visual Time Travel State
+        let TIME_TRAVEL_INDEX = 0;
+        let TIME_TRAVEL_COMMITS = [];
+        let TIME_TRAVEL_PLAY_TIMER = null;
 
         const DEMO_FILES = {
             "index.html": "<!DOCTYPE html>\n<html>\n<head>\n  <title>My MiniGit App</title>\n</head>\n<body>\n  <h1>Hello MiniGit!</h1>\n</body>\n</html>",
@@ -609,6 +889,27 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             return '<i class="fa-regular fa-file-code text-zinc-400"></i>';
         }
 
+        function recordDemoReflog(action, oldHash, newHash, description) {
+            DEMO_REFLOG.unshift({
+                timestamp: new Date().toISOString(),
+                action,
+                oldHash: oldHash || "0000000",
+                newHash: newHash || "0000000",
+                description
+            });
+        }
+
+        function getChronologicalCommits() {
+            const commits = [];
+            for (const [hash, obj] of Object.entries(OBJECTS)) {
+                if (obj.type === 'commit') {
+                    commits.push({ hash, ...obj.data });
+                }
+            }
+            commits.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+            return commits;
+        }
+
         /* ---------------------------------------------------------------------
          * LIVE & DEMO REPOSITORY LOADER
          * --------------------------------------------------------------------- */
@@ -641,6 +942,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             OBJECTS[commitHash] = { type: 'commit', data: commitObj };
             BRANCHES["main"] = commitHash;
 
+            recordDemoReflog("commit", null, commitHash, "Initial repository setup");
             updateUI();
         }
 
@@ -825,8 +1127,538 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             STAGING_INDEX = {};
             if (msgInput) msgInput.value = '';
 
+            recordDemoReflog("commit", parentHash, commitHash, message);
             showToast(`Committed [${commitHash.substring(0, 7)}]`);
             updateUI();
+        }
+
+        /* ---------------------------------------------------------------------
+         * FEATURE 1: VISUAL TIME TRAVEL SLIDER ENGINE
+         * --------------------------------------------------------------------- */
+        function initTimeTravelSlider() {
+            TIME_TRAVEL_COMMITS = getChronologicalCommits();
+            const slider = document.getElementById('timeTravelSlider');
+            if (!slider) return;
+
+            if (TIME_TRAVEL_COMMITS.length === 0) {
+                slider.min = 0;
+                slider.max = 0;
+                slider.value = 0;
+                return;
+            }
+
+            slider.min = 0;
+            slider.max = TIME_TRAVEL_COMMITS.length - 1;
+            TIME_TRAVEL_INDEX = TIME_TRAVEL_COMMITS.length - 1;
+            slider.value = TIME_TRAVEL_INDEX;
+            renderTimeTravelSnapshot(TIME_TRAVEL_INDEX);
+        }
+
+        function onTimeTravelSliderInput(val) {
+            TIME_TRAVEL_INDEX = parseInt(val, 10);
+            renderTimeTravelSnapshot(TIME_TRAVEL_INDEX);
+        }
+
+        function renderTimeTravelSnapshot(idx) {
+            if (!TIME_TRAVEL_COMMITS[idx]) return;
+            const c = TIME_TRAVEL_COMMITS[idx];
+            
+            const counter = document.getElementById('timeTravelStepCounter');
+            if (counter) counter.textContent = `Commit ${idx + 1} of ${TIME_TRAVEL_COMMITS.length}`;
+
+            const hashEl = document.getElementById('timeTravelCommitHash');
+            if (hashEl) hashEl.textContent = `[${c.hash.substring(0, 7)}]`;
+
+            const authorEl = document.getElementById('timeTravelCommitAuthor');
+            if (authorEl) authorEl.textContent = c.author || 'unknown';
+
+            const dateEl = document.getElementById('timeTravelCommitDate');
+            if (dateEl) dateEl.textContent = formatCommitDateTime(c.timestamp);
+
+            const msgEl = document.getElementById('timeTravelCommitMessage');
+            if (msgEl) msgEl.textContent = c.message || '';
+
+            // Render historical files at this snapshot
+            const listEl = document.getElementById('timeTravelFileList');
+            const countEl = document.getElementById('timeTravelFileCount');
+            if (listEl) {
+                listEl.innerHTML = '';
+                const treeObj = OBJECTS[c.tree];
+                const treeData = (treeObj && treeObj.data) ? treeObj.data : {};
+                const filePaths = Object.keys(treeData).sort();
+                if (countEl) countEl.textContent = `${filePaths.length} files`;
+
+                filePaths.forEach((fp, i) => {
+                    const row = document.createElement('div');
+                    row.className = "flex items-center justify-between py-1.5 px-3 rounded-lg hover:bg-zinc-800 text-zinc-300 hover:text-white cursor-pointer transition";
+                    row.onclick = () => previewTimeTravelFile(fp, treeData[fp]);
+                    row.innerHTML = `
+                        <div class="flex items-center space-x-2 truncate">
+                            <i class="fa-regular fa-file-code text-zinc-500"></i>
+                            <span class="truncate">${fp}</span>
+                        </div>
+                        <i class="fa-solid fa-eye text-[10px] text-zinc-500"></i>
+                    `;
+                    listEl.appendChild(row);
+
+                    if (i === 0) {
+                        previewTimeTravelFile(fp, treeData[fp]);
+                    }
+                });
+            }
+        }
+
+        function previewTimeTravelFile(filepath, blobHash) {
+            const nameEl = document.getElementById('timeTravelPreviewFileName');
+            const contentEl = document.getElementById('timeTravelFileContent');
+            if (nameEl) nameEl.textContent = filepath;
+            if (contentEl) {
+                const blob = OBJECTS[blobHash];
+                contentEl.textContent = (blob && blob.content !== undefined) ? blob.content : "File content unavailable";
+            }
+        }
+
+        function timeTravelStep(dir) {
+            if (TIME_TRAVEL_COMMITS.length === 0) return;
+            const slider = document.getElementById('timeTravelSlider');
+            if (!slider) return;
+
+            if (dir === 'start') TIME_TRAVEL_INDEX = 0;
+            else if (dir === 'prev') TIME_TRAVEL_INDEX = Math.max(0, TIME_TRAVEL_INDEX - 1);
+            else if (dir === 'next') TIME_TRAVEL_INDEX = Math.min(TIME_TRAVEL_COMMITS.length - 1, TIME_TRAVEL_INDEX + 1);
+            else if (dir === 'end') TIME_TRAVEL_INDEX = TIME_TRAVEL_COMMITS.length - 1;
+
+            slider.value = TIME_TRAVEL_INDEX;
+            renderTimeTravelSnapshot(TIME_TRAVEL_INDEX);
+        }
+
+        function toggleTimeTravelPlayback() {
+            const label = document.getElementById('timeTravelPlayLabel');
+            const icon = document.getElementById('timeTravelPlayIcon');
+            if (TIME_TRAVEL_PLAY_TIMER) {
+                clearInterval(TIME_TRAVEL_PLAY_TIMER);
+                TIME_TRAVEL_PLAY_TIMER = null;
+                if (label) label.textContent = "Play";
+                if (icon) icon.className = "fa-solid fa-play text-[10px]";
+            } else {
+                if (label) label.textContent = "Pause";
+                if (icon) icon.className = "fa-solid fa-pause text-[10px]";
+                TIME_TRAVEL_PLAY_TIMER = setInterval(() => {
+                    if (TIME_TRAVEL_INDEX >= TIME_TRAVEL_COMMITS.length - 1) {
+                        TIME_TRAVEL_INDEX = 0;
+                    } else {
+                        TIME_TRAVEL_INDEX++;
+                    }
+                    const slider = document.getElementById('timeTravelSlider');
+                    if (slider) slider.value = TIME_TRAVEL_INDEX;
+                    renderTimeTravelSnapshot(TIME_TRAVEL_INDEX);
+                }, 1400);
+            }
+        }
+
+        async function actionTimeTravelRestore() {
+            const c = TIME_TRAVEL_COMMITS[TIME_TRAVEL_INDEX];
+            if (!c) return;
+            if (!confirm(`Restore all working directory files to commit [${c.hash.substring(0, 7)}]?`)) return;
+
+            if (IS_SERVER_MODE) {
+                const res = await apiPost('reflog/restore', { hash: c.hash });
+                if (res) showToast(`Restored files to [${c.hash.substring(0, 7)}]`);
+                return;
+            }
+
+            const treeObj = OBJECTS[c.tree];
+            if (treeObj && treeObj.data) {
+                VFS = {};
+                for (const [fp, bHash] of Object.entries(treeObj.data)) {
+                    if (OBJECTS[bHash]) VFS[fp] = OBJECTS[bHash].content;
+                }
+                recordDemoReflog("restore", BRANCHES[CURRENT_BRANCH], c.hash, `Restored working tree to ${c.hash.substring(0, 7)}`);
+                showToast(`Restored working tree to [${c.hash.substring(0, 7)}]`);
+                updateUI();
+            }
+        }
+
+        function actionTimeTravelBranch() {
+            const c = TIME_TRAVEL_COMMITS[TIME_TRAVEL_INDEX];
+            if (!c) return;
+            SELECTED_COMMIT_HASH = c.hash;
+            openNewBranchModal();
+        }
+
+        async function actionTimeTravelCheckout() {
+            const c = TIME_TRAVEL_COMMITS[TIME_TRAVEL_INDEX];
+            if (!c) return;
+            SELECTED_COMMIT_HASH = c.hash;
+            await actionCheckoutSelectedCommit();
+        }
+
+        /* ---------------------------------------------------------------------
+         * FEATURE 2: SERVERLESS P2P & LAN SYNC ENGINE
+         * --------------------------------------------------------------------- */
+        function openLanSyncModal() {
+            const modal = document.getElementById('lanSyncModal');
+            const addrEl = document.getElementById('localPeerAddressText');
+            if (addrEl) {
+                addrEl.textContent = window.location.origin || "http://localhost:8080";
+            }
+            if (modal) modal.classList.remove('hidden');
+        }
+
+        function closeLanSyncModal() {
+            const modal = document.getElementById('lanSyncModal');
+            if (modal) modal.classList.add('hidden');
+        }
+
+        function copyLocalPeerAddress() {
+            const addr = window.location.origin || "http://localhost:8080";
+            navigator.clipboard.writeText(addr);
+            showToast("Copied peer address to clipboard");
+        }
+
+        async function executeLanPull() {
+            const input = document.getElementById('lanPeerUrlInput');
+            let peerUrl = (input ? input.value : '').trim();
+            if (!peerUrl) {
+                showToast("Please enter peer address (e.g. http://192.168.1.5:8080)", "error");
+                return;
+            }
+            if (!peerUrl.startsWith('http')) peerUrl = 'http://' + peerUrl;
+
+            showToast("Connecting to peer over LAN...");
+            try {
+                const res = await fetch(peerUrl + '/api/sync/bundle', { mode: 'cors' });
+                if (!res.ok) throw new Error("Peer returned HTTP " + res.status);
+                const bundle = await res.json();
+                
+                if (IS_SERVER_MODE) {
+                    const postRes = await apiPost('sync/import-bundle', bundle);
+                    if (postRes) showToast("Synchronized with LAN peer successfully!");
+                } else {
+                    // Merge bundle in client mode
+                    if (bundle.objects) Object.assign(OBJECTS, bundle.objects);
+                    if (bundle.branches) Object.assign(BRANCHES, bundle.branches);
+                    recordDemoReflog("p2p_sync", null, null, `Pulled from peer ${peerUrl}`);
+                    showToast("Synchronized with LAN peer successfully!");
+                    updateUI();
+                }
+                closeLanSyncModal();
+            } catch (err) {
+                showToast("P2P Sync failed: " + err.message, "error");
+            }
+        }
+
+        async function executeLanPush() {
+            const input = document.getElementById('lanPeerUrlInput');
+            let peerUrl = (input ? input.value : '').trim();
+            if (!peerUrl) {
+                showToast("Please enter peer address (e.g. http://192.168.1.5:8080)", "error");
+                return;
+            }
+            if (!peerUrl.startsWith('http')) peerUrl = 'http://' + peerUrl;
+
+            showToast("Pushing snapshot bundle to LAN peer...");
+            try {
+                let bundleData = null;
+                if (IS_SERVER_MODE) {
+                    const bRes = await fetch('/api/sync/bundle');
+                    bundleData = await bRes.json();
+                } else {
+                    bundleData = {
+                        repoName: "minigit",
+                        branches: BRANCHES,
+                        objects: OBJECTS,
+                        files: VFS,
+                        currentBranch: CURRENT_BRANCH
+                    };
+                }
+
+                const postRes = await fetch(peerUrl + '/api/sync/import-bundle', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(bundleData),
+                    mode: 'cors'
+                });
+                const resJson = await postRes.json();
+                if (resJson && resJson.ok) {
+                    showToast("Successfully pushed bundle to LAN peer!");
+                    closeLanSyncModal();
+                } else {
+                    showToast(resJson.error || "Peer rejected bundle", "error");
+                }
+            } catch (err) {
+                showToast("Push failed: " + err.message, "error");
+            }
+        }
+
+        async function downloadRepositoryBundle() {
+            let bundleObj = null;
+            if (IS_SERVER_MODE) {
+                try {
+                    const res = await fetch('/api/sync/bundle');
+                    bundleObj = await res.json();
+                } catch (e) {}
+            }
+            if (!bundleObj) {
+                bundleObj = {
+                    minigit_bundle: 1,
+                    repoName: "minigit",
+                    generated: new Date().toISOString(),
+                    currentBranch: CURRENT_BRANCH,
+                    branches: BRANCHES,
+                    objects: OBJECTS,
+                    files: VFS
+                };
+            }
+
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(bundleObj, null, 2));
+            const dlAnchor = document.createElement('a');
+            dlAnchor.setAttribute("href", dataStr);
+            dlAnchor.setAttribute("download", `minigit-bundle-${Date.now()}.json`);
+            document.body.appendChild(dlAnchor);
+            dlAnchor.click();
+            dlAnchor.remove();
+            showToast("Exported portable bundle file");
+        }
+
+        function uploadRepositoryBundle(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                try {
+                    const bundle = JSON.parse(e.target.result);
+                    if (IS_SERVER_MODE) {
+                        const res = await apiPost('sync/import-bundle', bundle);
+                        if (res) showToast("Bundle imported successfully");
+                    } else {
+                        if (bundle.objects) Object.assign(OBJECTS, bundle.objects);
+                        if (bundle.branches) Object.assign(BRANCHES, bundle.branches);
+                        recordDemoReflog("bundle_import", null, null, "Imported bundle file");
+                        showToast("Bundle imported successfully");
+                        updateUI();
+                    }
+                    closeLanSyncModal();
+                } catch (err) {
+                    showToast("Invalid bundle file: " + err.message, "error");
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        /* ---------------------------------------------------------------------
+         * FEATURE 3: ESSENTIAL EVERYDAY SAFETY NETS & REFLOG
+         * --------------------------------------------------------------------- */
+        async function executeQuickUndo() {
+            if (IS_SERVER_MODE) {
+                const res = await apiPost('undo');
+                if (res) showToast(res.message || "Undo successful!");
+                return;
+            }
+
+            // Demo Undo
+            const curHash = BRANCHES[CURRENT_BRANCH];
+            if (!curHash || !OBJECTS[curHash]) {
+                showToast("Nothing to undo", "error");
+                return;
+            }
+            const parent = OBJECTS[curHash].data.parent;
+            if (!parent) {
+                showToast("Cannot undo the initial commit", "error");
+                return;
+            }
+            BRANCHES[CURRENT_BRANCH] = parent;
+            recordDemoReflog("undo", curHash, parent, `Undid commit ${curHash.substring(0, 7)}`);
+            showToast(`Undid commit [${curHash.substring(0, 7)}]. Changes preserved.`);
+            updateUI();
+        }
+
+        async function executeQuickStash() {
+            if (IS_SERVER_MODE) {
+                const res = await apiPost('stash/save', { message: 'Quick Stash' });
+                if (res) {
+                    showToast(res.message || "Saved stash checkpoint");
+                    updateStashBadge(true);
+                }
+                return;
+            }
+
+            DEMO_STASH = { ...VFS };
+            const headHash = BRANCHES[CURRENT_BRANCH];
+            if (headHash && OBJECTS[headHash]) {
+                const treeHash = OBJECTS[headHash].data.tree;
+                const treeData = OBJECTS[treeHash]?.data || {};
+                VFS = {};
+                for (const [fp, bHash] of Object.entries(treeData)) {
+                    if (OBJECTS[bHash]) VFS[fp] = OBJECTS[bHash].content;
+                }
+            }
+            recordDemoReflog("stash", headHash, headHash, "Saved working directory stash");
+            updateStashBadge(true);
+            showToast("Saved working changes into safety stash");
+            updateUI();
+        }
+
+        async function executePopStash() {
+            if (IS_SERVER_MODE) {
+                const res = await apiPost('stash/pop');
+                if (res) {
+                    showToast(res.message || "Stash applied");
+                    updateStashBadge(false);
+                }
+                return;
+            }
+
+            if (!DEMO_STASH) {
+                showToast("No stash entries found", "error");
+                return;
+            }
+            VFS = { ...DEMO_STASH };
+            DEMO_STASH = null;
+            updateStashBadge(false);
+            recordDemoReflog("stash_pop", null, null, "Restored and popped stash");
+            showToast("Restored and applied stash");
+            updateUI();
+        }
+
+        function updateStashBadge(hasStash) {
+            const badge = document.getElementById('stashCountBadge');
+            if (badge) {
+                badge.textContent = hasStash ? "1 WIP" : "clean";
+                badge.className = hasStash ? "font-mono text-emerald-400 font-bold" : "font-mono text-zinc-400";
+            }
+        }
+
+        async function openSafetyNetModal() {
+            const modal = document.getElementById('safetyNetModal');
+            const list = document.getElementById('safetyReflogList');
+            const countBadge = document.getElementById('reflogEntryCountBadge');
+            if (!modal || !list) return;
+
+            list.innerHTML = '<div class="text-zinc-500 text-xs py-4 text-center">Loading flight recorder...</div>';
+            modal.classList.remove('hidden');
+
+            let entries = [];
+            if (IS_SERVER_MODE) {
+                try {
+                    const res = await fetch('/api/reflog');
+                    const data = await res.json();
+                    if (data && data.reflog) entries = data.reflog;
+                } catch (e) {}
+            } else {
+                entries = DEMO_REFLOG;
+            }
+
+            if (countBadge) countBadge.textContent = `${entries.length} records`;
+
+            if (entries.length === 0) {
+                list.innerHTML = '<div class="text-zinc-500 text-xs py-4 text-center">No safety log entries yet.</div>';
+                return;
+            }
+
+            list.innerHTML = '';
+            entries.forEach(r => {
+                const row = document.createElement('div');
+                row.className = "p-3 bg-zinc-900 border border-zinc-800 rounded-xl flex items-center justify-between text-xs";
+                row.innerHTML = `
+                    <div class="space-y-1">
+                        <div class="flex items-center space-x-2">
+                            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-zinc-800 text-white">${r.action}</span>
+                            <span class="text-zinc-500 text-[10px]">${formatCommitDateTime(r.timestamp)}</span>
+                        </div>
+                        <div class="text-zinc-200">${r.description}</div>
+                        <div class="text-[10px] text-zinc-500 font-mono">${r.oldHash.substring(0, 7)} &rarr; ${r.newHash.substring(0, 7)}</div>
+                    </div>
+                    ${r.newHash && r.newHash !== '0000000' ? `
+                    <button onclick="restoreSafetyNetCommit('${r.newHash}')" class="px-3 py-1.5 rounded-full bg-white hover:bg-zinc-200 text-black font-semibold text-xs transition cursor-pointer">Restore</button>
+                    ` : ''}
+                `;
+                list.appendChild(row);
+            });
+        }
+
+        function closeSafetyNetModal() {
+            const modal = document.getElementById('safetyNetModal');
+            if (modal) modal.classList.add('hidden');
+        }
+
+        async function restoreSafetyNetCommit(hash) {
+            if (!confirm(`Restore repository to commit [${hash.substring(0, 7)}]?`)) return;
+            closeSafetyNetModal();
+            if (IS_SERVER_MODE) {
+                const res = await apiPost('reflog/restore', { hash });
+                if (res) showToast(`Restored to checkpoint [${hash.substring(0, 7)}]`);
+            } else {
+                SELECTED_COMMIT_HASH = hash;
+                await actionCheckoutSelectedCommit();
+            }
+        }
+
+        /* ---------------------------------------------------------------------
+         * FEATURE 4: GIT INTEROPERABILITY BRIDGE (.git)
+         * --------------------------------------------------------------------- */
+        async function openGitBridgeModal() {
+            const modal = document.getElementById('gitBridgeModal');
+            const statusText = document.getElementById('gitBridgeStatusText');
+            const pill = document.getElementById('gitBridgeStatusPill');
+            if (modal) modal.classList.remove('hidden');
+
+            if (IS_SERVER_MODE) {
+                try {
+                    const res = await fetch('/api/git/status');
+                    const data = await res.json();
+                    if (data && data.gitExists) {
+                        if (statusText) statusText.textContent = "Standard .git directory detected in current workspace.";
+                        if (pill) {
+                            pill.textContent = "Ready";
+                            pill.className = "px-3 py-1 rounded-full text-xs font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800";
+                        }
+                    } else {
+                        if (statusText) statusText.textContent = "No .git folder found. Exporting will initialize a standard Git repo.";
+                        if (pill) {
+                            pill.textContent = "Not Initialized";
+                            pill.className = "px-3 py-1 rounded-full text-xs font-semibold bg-zinc-800 text-zinc-400";
+                        }
+                    }
+                } catch (e) {}
+            } else {
+                if (statusText) statusText.textContent = "Running in browser preview mode. Connect via 'minigit ui' to bridge with system git.";
+                if (pill) {
+                    pill.textContent = "Browser Mode";
+                    pill.className = "px-3 py-1 rounded-full text-xs font-semibold bg-zinc-800 text-zinc-400";
+                }
+            }
+        }
+
+        function closeGitBridgeModal() {
+            const modal = document.getElementById('gitBridgeModal');
+            if (modal) modal.classList.add('hidden');
+        }
+
+        async function executeGitBridgeExport() {
+            if (!IS_SERVER_MODE) {
+                showToast("Git bridge requires server mode ('minigit ui')", "error");
+                return;
+            }
+            showToast("Exporting to standard Git repository...");
+            const res = await apiPost('git/export');
+            if (res) {
+                showToast(res.message || "Exported to .git successfully!");
+                closeGitBridgeModal();
+            }
+        }
+
+        async function executeGitBridgeImport() {
+            if (!IS_SERVER_MODE) {
+                showToast("Git bridge requires server mode ('minigit ui')", "error");
+                return;
+            }
+            showToast("Importing from standard Git repository...");
+            const res = await apiPost('git/import');
+            if (res) {
+                showToast(res.message || "Imported from .git successfully!");
+                closeGitBridgeModal();
+            }
         }
 
         /* ---------------------------------------------------------------------
@@ -868,6 +1700,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             }
 
             BRANCHES[branchName] = BRANCHES[CURRENT_BRANCH];
+            recordDemoReflog("branch", BRANCHES[CURRENT_BRANCH], BRANCHES[CURRENT_BRANCH], `Created branch ${branchName}`);
             showToast(`Created branch '${branchName}'`);
             updateUI();
         }
@@ -914,6 +1747,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                 if (res) showToast(res.result || `Merged '${targetBranch}'`);
                 return;
             }
+            recordDemoReflog("merge", BRANCHES[CURRENT_BRANCH], BRANCHES[targetBranch], `Merged branch ${targetBranch} into ${CURRENT_BRANCH}`);
             showToast(`Merged '${targetBranch}' into '${CURRENT_BRANCH}'`);
             updateUI();
         }
@@ -928,6 +1762,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             }
 
             if (!BRANCHES[targetBranch] && BRANCHES[targetBranch] !== null) return;
+            const oldBranch = CURRENT_BRANCH;
             CURRENT_BRANCH = targetBranch;
             const targetCommitHash = BRANCHES[targetBranch];
 
@@ -940,6 +1775,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                 }
             }
             STAGING_INDEX = {};
+            recordDemoReflog("checkout", BRANCHES[oldBranch], targetCommitHash, `Switched to branch ${targetBranch}`);
             showToast(`Switched to '${CURRENT_BRANCH}'`);
             updateUI();
         }
@@ -972,6 +1808,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                 const res = await apiPost('checkout', { target: SELECTED_COMMIT_HASH });
                 if (res) showToast(`Checked out [${SELECTED_COMMIT_HASH.substring(0, 7)}]`);
             } else {
+                recordDemoReflog("checkout", BRANCHES[CURRENT_BRANCH], SELECTED_COMMIT_HASH, `Detached HEAD at ${SELECTED_COMMIT_HASH.substring(0, 7)}`);
                 showToast(`Checked out [${SELECTED_COMMIT_HASH.substring(0, 7)}]`);
             }
         }
@@ -990,26 +1827,9 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                 const res = await apiPost('revert', { hash: SELECTED_COMMIT_HASH });
                 if (res) showToast(`Reverted commit [${res.hash.substring(0, 7)}]`);
             } else {
+                recordDemoReflog("revert", BRANCHES[CURRENT_BRANCH], SELECTED_COMMIT_HASH, `Reverted commit ${SELECTED_COMMIT_HASH.substring(0, 7)}`);
                 showToast(`Reverted [${SELECTED_COMMIT_HASH.substring(0, 7)}]`);
             }
-        }
-
-        function openActiveFileCommitModal() {
-            const modal = document.getElementById('fileCommitModal');
-            if (!modal || !ACTIVE_FILE) return;
-            const { folder, filename } = splitPath(ACTIVE_FILE);
-            document.getElementById('fcmFileName').textContent = filename;
-            document.getElementById('fcmFolderPath').textContent = folder;
-            const list = document.getElementById('fcmCommitHistoryList');
-            if (list) {
-                list.innerHTML = `<div class="p-3 bg-zinc-900 border border-zinc-800 rounded-xl font-mono text-xs text-zinc-300">Tracking active on '${ACTIVE_FILE}'</div>`;
-            }
-            modal.classList.remove('hidden');
-        }
-
-        function closeFileCommitModal() {
-            const modal = document.getElementById('fileCommitModal');
-            if (modal) modal.classList.add('hidden');
         }
 
         /* ---------------------------------------------------------------------
@@ -1023,6 +1843,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             populateDiffFileSelect();
             renderDiffView();
             renderPreviewDashboard();
+            initTimeTravelSlider();
 
             // Subtitle hero strip stats
             const curHead = BRANCHES[CURRENT_BRANCH];
@@ -1242,13 +2063,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             if (!svg) return;
             svg.innerHTML = '';
 
-            const commitNodes = [];
-            for (const [hash, obj] of Object.entries(OBJECTS)) {
-                if (obj.type === 'commit') {
-                    commitNodes.push({ hash, ...obj.data });
-                }
-            }
-            commitNodes.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+            const commitNodes = getChronologicalCommits();
 
             let y = 50;
             const x = 70;
@@ -1344,21 +2159,27 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             const editorView = document.getElementById('viewContainerEditor');
             const diffView = document.getElementById('viewContainerDiff');
             const graphView = document.getElementById('viewContainerGraph');
+            const timelineView = document.getElementById('viewContainerTimeline');
             const previewView = document.getElementById('viewContainerPreview');
 
             const tabEditor = document.getElementById('viewTabEditor');
             const tabDiff = document.getElementById('viewTabDiff');
             const tabGraph = document.getElementById('viewTabGraph');
+            const tabTimeline = document.getElementById('viewTabTimeline');
             const tabPreview = document.getElementById('viewTabPreview');
 
-            [editorView, diffView, graphView, previewView].forEach(v => v?.classList.add('hidden'));
-            [tabEditor, tabDiff, tabGraph, tabPreview].forEach(t => {
+            [editorView, diffView, graphView, timelineView, previewView].forEach(v => v?.classList.add('hidden'));
+            [tabEditor, tabDiff, tabGraph, tabTimeline, tabPreview].forEach(t => {
                 if (t) t.className = "px-4 py-1.5 rounded-full text-xs font-medium text-zinc-400 hover:text-white transition flex items-center space-x-1.5 cursor-pointer";
             });
 
             if (view === 'editor') {
                 editorView?.classList.remove('hidden');
                 if (tabEditor) tabEditor.className = "px-4 py-1.5 rounded-full text-xs font-semibold bg-white text-black shadow-sm transition flex items-center space-x-1.5 cursor-pointer";
+            } else if (view === 'timeline') {
+                timelineView?.classList.remove('hidden');
+                if (tabTimeline) tabTimeline.className = "px-4 py-1.5 rounded-full text-xs font-semibold bg-white text-black shadow-sm transition flex items-center space-x-1.5 cursor-pointer";
+                initTimeTravelSlider();
             } else if (view === 'diff') {
                 diffView?.classList.remove('hidden');
                 if (tabDiff) tabDiff.className = "px-4 py-1.5 rounded-full text-xs font-semibold bg-white text-black shadow-sm transition flex items-center space-x-1.5 cursor-pointer";
