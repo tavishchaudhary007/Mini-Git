@@ -17,24 +17,12 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&display=swap" rel="stylesheet">
     <script>
         tailwind.config = {
-            darkMode: 'class',
             theme: {
                 extend: {
                     fontFamily: {
                         serif: ['Newsreader', 'Instrument Serif', 'Georgia', 'serif'],
                         sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
                         mono: ['"JetBrains Mono"', '"SF Mono"', 'Menlo', 'monospace'],
-                    },
-                    colors: {
-                        pro: {
-                            bg: '#0F0F0F',
-                            surface: '#141414',
-                            card: '#181818',
-                            border: '#27272a',
-                            text: '#FFFFFF',
-                            muted: '#a1a1aa',
-                            subtle: '#71717a',
-                        }
                     }
                 }
             }
@@ -42,33 +30,33 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
     </script>
     <style>
         body {
-            background-color: #0F0F0F;
-            color: #FFFFFF;
+            background-color: #F8F9FA;
+            color: #111827;
         }
-        /* Custom scrollbar in dark monochrome minimalist style */
+        /* Custom scrollbar */
         ::-webkit-scrollbar {
-            width: 5px;
-            height: 5px;
+            width: 6px;
+            height: 6px;
         }
         ::-webkit-scrollbar-track {
-            background: #0F0F0F;
+            background: #F8F9FA;
         }
         ::-webkit-scrollbar-thumb {
-            background: #27272a;
+            background: #E5E7EB;
             border-radius: 9999px;
         }
         ::-webkit-scrollbar-thumb:hover {
-            background: #3f3f46;
+            background: #D1D5DB;
         }
-        .diff-added { background-color: #064e3b; color: #6ee7b7; }
-        .diff-removed { background-color: #450a0a; color: #fca5a5; }
-        .diff-neutral { color: #a1a1aa; }
+        .diff-added { background-color: #ECFDF5; color: #065F46; }
+        .diff-removed { background-color: #FEF2F2; color: #991B1B; }
+        .diff-neutral { color: #6B7280; }
         
         /* Custom Range Slider */
         input[type="range"] {
             -webkit-appearance: none;
             appearance: none;
-            background: #27272a;
+            background: #E5E7EB;
             height: 6px;
             border-radius: 9999px;
             outline: none;
@@ -79,9 +67,9 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             width: 18px;
             height: 18px;
             border-radius: 50%;
-            background: #FFFFFF;
+            background: #000000;
             cursor: pointer;
-            box-shadow: 0 0 10px rgba(255,255,255,0.4);
+            box-shadow: 0 0 6px rgba(0,0,0,0.25);
             transition: transform 0.1s ease;
         }
         input[type="range"]::-webkit-slider-thumb:hover {
@@ -89,526 +77,532 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
         }
     </style>
 </head>
-<body class="bg-[#0F0F0F] text-white font-sans h-screen flex flex-col overflow-hidden select-none antialiased">
+<body class="bg-[#F8F9FA] text-gray-900 font-sans h-screen flex flex-col overflow-hidden select-none antialiased">
 
-    <!-- TOP HEADER (Dark Monochrome Minimalist Aesthetic) -->
-    <header class="h-16 bg-[#0F0F0F] border-b border-zinc-800 flex items-center justify-between px-6 z-20 shrink-0">
+    <!-- ========================================================================= -->
+    <!-- TOP NAVIGATION BAR (Matching Screenshot Layout)                           -->
+    <!-- ========================================================================= -->
+    <header class="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-8 z-20 shrink-0">
         
-        <!-- Left: Wordmark brand in editorial serif styling (minigit) -->
-        <div class="flex items-center space-x-3">
-            <div class="flex items-baseline space-x-1 cursor-pointer" onclick="switchViewTab('graph')">
-                <span class="font-serif text-2xl tracking-tight text-white font-normal">mini</span>
-                <span class="font-serif text-2xl italic font-light text-zinc-400">git</span>
+        <!-- Left: Wordmark & Navigation Tabs -->
+        <div class="flex items-center space-x-6">
+            <!-- Wordmark Brand -->
+            <div class="flex items-baseline space-x-1 cursor-pointer" onclick="switchViewTab('dashboard')">
+                <span class="font-serif text-2xl font-bold tracking-tight text-black">pulse</span>
             </div>
-            <span class="text-zinc-700">/</span>
-            <div class="flex items-center space-x-1.5">
-                <span id="repoNameDisplay" class="font-mono text-xs text-zinc-300 bg-zinc-900 px-3 py-1 rounded-full font-medium border border-zinc-800">minigit</span>
-                <div id="liveServerStatusBadge" class="hidden items-center space-x-1.5 px-3 py-1 bg-white text-black rounded-full text-xs font-semibold">
-                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                    <span>Live Studio</span>
-                </div>
-            </div>
+
+            <!-- Segmented Capsule Navigation -->
+            <nav class="flex items-center space-x-1">
+                <button id="viewTabDashboard" onclick="switchViewTab('dashboard')" class="px-4 py-2 rounded-full text-xs font-semibold bg-black text-white flex items-center space-x-2 cursor-pointer shadow-xs transition">
+                    <i class="fa-solid fa-table-columns text-[11px]"></i>
+                    <span>Dashboard</span>
+                </button>
+                <button id="viewTabGraph" onclick="switchViewTab('graph')" class="px-4 py-2 rounded-full text-xs font-medium text-gray-600 hover:text-black hover:bg-gray-100 flex items-center space-x-2 cursor-pointer transition">
+                    <i class="fa-solid fa-diagram-project text-[11px]"></i>
+                    <span>Monitors</span>
+                </button>
+                <button id="viewTabTimeline" onclick="switchViewTab('timeline')" class="px-4 py-2 rounded-full text-xs font-medium text-gray-600 hover:text-black hover:bg-gray-100 flex items-center space-x-2 cursor-pointer transition">
+                    <i class="fa-regular fa-clock text-[11px]"></i>
+                    <span>Incidents</span>
+                </button>
+                <button id="viewTabDiff" onclick="switchViewTab('diff')" class="px-4 py-2 rounded-full text-xs font-medium text-gray-600 hover:text-black hover:bg-gray-100 flex items-center space-x-2 cursor-pointer transition">
+                    <i class="fa-regular fa-file-lines text-[11px]"></i>
+                    <span>Reports</span>
+                </button>
+                <button id="viewTabEditor" onclick="switchViewTab('editor')" class="px-4 py-2 rounded-full text-xs font-medium text-gray-600 hover:text-black hover:bg-gray-100 flex items-center space-x-2 cursor-pointer transition">
+                    <i class="fa-solid fa-code text-[11px]"></i>
+                    <span id="activeEditorFileName">Editor</span>
+                </button>
+                <button id="viewTabPreview" onclick="switchViewTab('preview')" class="px-4 py-2 rounded-full text-xs font-medium text-gray-600 hover:text-black hover:bg-gray-100 flex items-center space-x-2 cursor-pointer transition">
+                    <i class="fa-solid fa-display text-[11px]"></i>
+                    <span>Preview</span>
+                </button>
+            </nav>
         </div>
 
-        <!-- Center: Segmented Navigation View Switcher (Rounded Capsule Tabs) -->
-        <div class="flex items-center bg-zinc-900 p-1 rounded-full border border-zinc-800 text-xs">
-            <button id="viewTabGraph" onclick="switchViewTab('graph')" class="px-4 py-1.5 rounded-full text-xs font-semibold bg-white text-black shadow-sm transition flex items-center space-x-1.5 cursor-pointer">
-                <i class="fa-solid fa-diagram-project text-[11px]"></i>
-                <span>Graph</span>
-            </button>
-            <button id="viewTabTimeline" onclick="switchViewTab('timeline')" class="px-4 py-1.5 rounded-full text-xs font-medium text-zinc-400 hover:text-white transition flex items-center space-x-1.5 cursor-pointer">
-                <i class="fa-solid fa-clock-rotate-left text-[11px]"></i>
-                <span>Time Travel</span>
-            </button>
-            <button id="viewTabDiff" onclick="switchViewTab('diff')" class="px-4 py-1.5 rounded-full text-xs font-medium text-zinc-400 hover:text-white transition flex items-center space-x-1.5 cursor-pointer">
-                <i class="fa-solid fa-code-compare text-[11px]"></i>
-                <span>Diff</span>
-            </button>
-            <button id="viewTabEditor" onclick="switchViewTab('editor')" class="px-4 py-1.5 rounded-full text-xs font-medium text-zinc-400 hover:text-white transition flex items-center space-x-1.5 cursor-pointer">
-                <i class="fa-solid fa-code text-[11px]"></i>
-                <span id="activeEditorFileName">Editor</span>
-            </button>
-            <button id="viewTabPreview" onclick="switchViewTab('preview')" class="px-4 py-1.5 rounded-full text-xs font-medium text-zinc-400 hover:text-white transition flex items-center space-x-1.5 cursor-pointer">
-                <i class="fa-solid fa-display text-[11px]"></i>
-                <span>Preview</span>
-            </button>
-        </div>
-
-        <!-- Right: Actions & Tools (P2P Sync, Safety Undo, Git Bridge, Branches) -->
-        <div class="flex items-center space-x-2">
+        <!-- Right: Actions, Bridge, Sync & Branch Selector -->
+        <div class="flex items-center space-x-4">
             <!-- 1-Click Safety Undo -->
-            <button onclick="executeQuickUndo()" title="Undo Last Commit (Soft Reset)" class="rounded-full bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 px-3 py-1.5 text-xs font-medium flex items-center space-x-1.5 transition cursor-pointer">
-                <i class="fa-solid fa-rotate-left text-[10px]"></i>
-                <span>Undo</span>
+            <button onclick="executeQuickUndo()" title="Undo Last Commit" class="text-xs text-gray-600 hover:text-black flex items-center space-x-1.5 px-3 py-1.5 rounded-full hover:bg-gray-100 transition cursor-pointer">
+                <i class="fa-solid fa-rotate-left text-[11px]"></i>
+                <span class="font-medium">Undo</span>
             </button>
 
-            <!-- Safety Net / Reflog Flight Recorder -->
-            <button onclick="openSafetyNetModal()" title="Safety Flight Recorder & Reflog" class="rounded-full bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 px-3 py-1.5 text-xs font-medium flex items-center space-x-1.5 transition cursor-pointer">
-                <i class="fa-solid fa-shield-halved text-[10px] text-zinc-400"></i>
-                <span class="hidden md:inline">Safety Net</span>
+            <!-- Safety Net / Reflog -->
+            <button onclick="openSafetyNetModal()" title="Safety Flight Recorder & Reflog" class="text-xs text-gray-600 hover:text-black flex items-center space-x-1.5 px-3 py-1.5 rounded-full hover:bg-gray-100 transition cursor-pointer">
+                <i class="fa-solid fa-shield-halved text-[11px]"></i>
+                <span class="font-medium">Safety Net</span>
             </button>
 
-            <!-- Serverless P2P & LAN Sync -->
-            <button onclick="openLanSyncModal()" title="Serverless P2P & LAN Sync" class="rounded-full bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 px-3 py-1.5 text-xs font-medium flex items-center space-x-1.5 transition cursor-pointer">
-                <i class="fa-solid fa-network-wired text-[10px] text-zinc-400"></i>
-                <span class="hidden md:inline">P2P Sync</span>
+            <!-- Serverless P2P Sync -->
+            <button onclick="openLanSyncModal()" title="Serverless P2P & LAN Sync" class="text-xs text-gray-600 hover:text-black flex items-center space-x-1.5 px-3 py-1.5 rounded-full hover:bg-gray-100 transition cursor-pointer">
+                <i class="fa-solid fa-network-wired text-[11px]"></i>
+                <span class="font-medium">P2P Sync</span>
             </button>
 
             <!-- Git Interoperability Bridge -->
-            <button onclick="openGitBridgeModal()" title="Git Interoperability Bridge" class="rounded-full bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 px-3 py-1.5 text-xs font-medium flex items-center space-x-1.5 transition cursor-pointer">
-                <i class="fa-brands fa-git-alt text-[11px] text-orange-400"></i>
-                <span class="hidden md:inline">Git Bridge</span>
+            <button onclick="openGitBridgeModal()" title="Git Bridge (.git)" class="text-xs text-gray-600 hover:text-black flex items-center space-x-1.5 px-3 py-1.5 rounded-full hover:bg-gray-100 transition cursor-pointer">
+                <i class="fa-brands fa-git-alt text-[12px] text-orange-500"></i>
+                <span class="font-medium">Git Bridge</span>
             </button>
 
-            <span class="text-zinc-800">|</span>
+            <span class="text-gray-300">|</span>
 
-            <!-- Active Branch Selector -->
-            <div class="flex items-center bg-zinc-900 border border-zinc-800 rounded-full px-3 py-1 text-xs hover:border-zinc-700 transition">
-                <i class="fa-solid fa-code-branch text-zinc-400 mr-2 text-[11px]"></i>
-                <span class="text-zinc-500 mr-1 font-normal">branch:</span>
-                <select id="branchSelect" onchange="switchBranchUI(this.value)" class="bg-transparent text-white font-mono font-medium focus:outline-none cursor-pointer">
+            <!-- Branch Selector Pill -->
+            <div class="flex items-center bg-gray-50 border border-gray-200 rounded-full px-3.5 py-1 text-xs text-gray-700">
+                <i class="fa-solid fa-code-branch text-gray-400 mr-2 text-[11px]"></i>
+                <span class="text-gray-400 mr-1.5">branch:</span>
+                <select id="branchSelect" onchange="switchBranchUI(this.value)" class="bg-transparent font-medium cursor-pointer focus:outline-none">
                     <!-- Populated dynamically -->
                 </select>
             </div>
 
-            <!-- New Branch Capsule Button -->
-            <button onclick="openNewBranchModal()" title="Create New Branch" class="rounded-full bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 px-3 py-1.5 text-xs font-medium flex items-center space-x-1.5 transition cursor-pointer">
+            <!-- New Branch Pill Button -->
+            <button onclick="openNewBranchModal()" title="Create New Branch" class="rounded-full bg-gray-100 hover:bg-gray-200 text-gray-800 border border-gray-200 px-3.5 py-1.5 text-xs font-medium flex items-center space-x-1.5 transition cursor-pointer">
                 <i class="fa-solid fa-plus text-[10px]"></i>
                 <span>Branch</span>
             </button>
 
-            <!-- Merge Capsule Button -->
-            <button onclick="openMergeModal()" title="Merge Branch" class="rounded-full bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 px-3 py-1.5 text-xs font-medium flex items-center space-x-1.5 transition cursor-pointer">
-                <i class="fa-solid fa-code-merge text-[10px]"></i>
-                <span>Merge</span>
+            <!-- Refresh / Sync Button -->
+            <button onclick="refreshRepositorySnapshot()" title="Synchronize Repository" class="rounded-full bg-white hover:bg-gray-100 text-gray-700 border border-gray-200 px-3.5 py-1.5 text-xs font-medium flex items-center space-x-1.5 transition cursor-pointer shadow-xs">
+                <i class="fa-solid fa-arrows-rotate text-[11px]"></i>
+                <span class="hidden xl:inline">Sync</span>
             </button>
 
-            <!-- Refresh / Sync Button -->
-            <button onclick="refreshRepositorySnapshot()" title="Synchronize Repository" class="rounded-full bg-white hover:bg-zinc-200 text-black px-3.5 py-1.5 text-xs font-semibold flex items-center space-x-1.5 transition cursor-pointer shadow-sm">
-                <i class="fa-solid fa-arrows-rotate text-[11px]"></i>
-                <span class="hidden lg:inline">Sync</span>
-            </button>
+            <!-- Live Server Badge -->
+            <div id="liveServerStatusBadge" class="hidden items-center space-x-1.5 px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-medium">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span>Live</span>
+            </div>
         </div>
     </header>
 
-    <!-- SUBTITLE HERO STRIP (Dark Minimalist Subtext) -->
-    <div class="bg-[#141414] border-b border-zinc-900 px-6 py-2 flex items-center justify-between text-xs text-zinc-400 shrink-0">
-        <p class="font-normal">
-            <span class="text-white font-medium">A new kind of system for version control.</span> Whatever you need, let MiniGit handle it.
-        </p>
-        <div class="flex items-center space-x-4 text-[11px]">
-            <span class="text-zinc-500">Head: <span id="stripHeadHash" class="font-mono text-zinc-200 font-semibold">root</span></span>
-            <span class="text-zinc-700">&bull;</span>
-            <span class="text-zinc-500">Files: <span id="stripFileCount" class="text-zinc-200 font-semibold">0</span></span>
-            <span class="text-zinc-700">&bull;</span>
-            <span id="stashStatusLabel" class="text-zinc-500">Stash: <span id="stashCountBadge" class="font-mono text-zinc-400">clean</span></span>
+    <!-- ========================================================================= -->
+    <!-- MAIN WORKSPACE & SCROLLABLE CONTENT                                       -->
+    <!-- ========================================================================= -->
+    <div class="flex-1 overflow-y-auto px-8 py-8 space-y-7">
+
+        <!-- SECTION 1: SYSTEM HEALTH DASHBOARD HEADER STRIP -->
+        <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+            <div>
+                <h1 class="font-serif text-3xl font-medium tracking-tight text-gray-900">System Health Dashboard</h1>
+                <p class="text-sm text-gray-500 mt-1">Real-time status overview and recent health checks</p>
+            </div>
+            <!-- + Add Monitor / Commit Checkpoint Primary Button -->
+            <button onclick="openCommitModal()" class="rounded-full bg-black hover:bg-gray-800 text-white px-5 py-2.5 text-xs font-semibold flex items-center space-x-2 shadow-sm cursor-pointer transition active:scale-[0.98] shrink-0">
+                <i class="fa-solid fa-plus text-[10px]"></i>
+                <span>Add Monitor</span>
+            </button>
         </div>
-    </div>
 
-    <!-- MAIN WORKSPACE -->
-    <div class="flex flex-1 overflow-hidden">
-
-        <!-- LEFT SIDEBAR: FILES & CHANGES -->
-        <aside class="w-80 bg-[#0F0F0F] border-r border-zinc-800 flex flex-col shrink-0">
-            
-            <!-- Sidebar Capsule Switcher -->
-            <div class="p-3 border-b border-zinc-800 bg-[#0F0F0F] flex items-center">
-                <div class="flex flex-1 bg-zinc-900 p-1 rounded-full border border-zinc-800 text-xs">
-                    <button id="btnNavFiles" onclick="switchSidebarTab('files')" class="flex-1 py-1 text-center font-semibold rounded-full bg-white text-black shadow-sm transition">
-                        <span>Files</span>
-                    </button>
-                    <button id="btnNavGit" onclick="switchSidebarTab('git')" class="flex-1 py-1 text-center font-medium text-zinc-400 hover:text-white transition rounded-full flex items-center justify-center space-x-1">
-                        <span>Changes</span>
-                        <span id="sidebarChangesBadge" class="hidden ml-1 px-1.5 py-0.2 bg-white text-black text-[10px] font-bold rounded-full">0</span>
-                    </button>
+        <!-- SECTION 2: STAT CARDS ROW (5 Cards exactly matching the screenshot) -->
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <!-- Card 1: MONITORS -->
+            <div class="bg-white border border-gray-200 rounded-2xl p-5 shadow-xs flex flex-col justify-between">
+                <div class="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-gray-400">
+                    <span>Monitors</span>
+                    <i class="fa-solid fa-server text-gray-400 text-xs"></i>
                 </div>
+                <div id="cardTotalCommits" class="text-3xl font-bold text-gray-900 mt-2">0</div>
+                <div class="text-xs text-gray-400 mt-1">Total configured</div>
             </div>
 
-            <!-- FILE EXPLORER TAB -->
-            <div id="tabFilesPanel" class="flex-1 flex flex-col overflow-y-auto p-4 space-y-2">
-                <div class="flex items-center justify-between text-[11px] text-zinc-500 uppercase font-semibold tracking-wider">
-                    <span>Repository Files</span>
-                    <button onclick="refreshRepositorySnapshot()" class="text-zinc-500 hover:text-white"><i class="fa-solid fa-rotate text-xs"></i></button>
+            <!-- Card 2: OPERATIONAL -->
+            <div class="bg-white border border-gray-200 rounded-2xl p-5 shadow-xs flex flex-col justify-between">
+                <div class="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-emerald-600">
+                    <span>Operational</span>
+                    <i class="fa-regular fa-circle-check text-emerald-500 text-xs"></i>
                 </div>
-                <!-- File Tree List -->
-                <div id="fileTreeContainer" class="space-y-1 font-mono text-xs">
-                    <!-- Populated dynamically -->
-                </div>
+                <div id="cardActiveBranches" class="text-3xl font-bold text-emerald-600 mt-2">0</div>
+                <div class="text-xs text-gray-400 mt-1">Passing checks</div>
             </div>
 
-            <!-- CHANGES / SOURCE CONTROL TAB -->
-            <div id="tabGitPanel" class="flex-1 flex flex-col overflow-y-auto p-4 space-y-4 hidden">
+            <!-- Card 3: OUTAGES -->
+            <div class="bg-white border border-gray-200 rounded-2xl p-5 shadow-xs flex flex-col justify-between">
+                <div class="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-rose-500">
+                    <span>Outages</span>
+                    <i class="fa-solid fa-triangle-exclamation text-rose-400 text-xs"></i>
+                </div>
+                <div id="cardUnstagedChanges" class="text-3xl font-bold text-rose-500 mt-2">0</div>
+                <div class="text-xs text-gray-400 mt-1">Failing endpoints</div>
+            </div>
+
+            <!-- Card 4: OPEN INCIDENTS -->
+            <div class="bg-white border border-gray-200 rounded-2xl p-5 shadow-xs flex flex-col justify-between">
+                <div class="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-amber-500">
+                    <span>Open Incidents</span>
+                    <i class="fa-regular fa-clock text-amber-500 text-xs"></i>
+                </div>
+                <div id="cardStagedFiles" class="text-3xl font-bold text-amber-500 mt-2">0</div>
+                <div class="text-xs text-gray-400 mt-1">Active downtime</div>
+            </div>
+
+            <!-- Card 5: NEW REPORTS -->
+            <div class="bg-white border border-gray-200 rounded-2xl p-5 shadow-xs flex flex-col justify-between">
+                <div class="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-gray-400">
+                    <span>New Reports</span>
+                    <i class="fa-regular fa-file-lines text-gray-400 text-xs"></i>
+                </div>
+                <div id="cardTotalFiles" class="text-3xl font-bold text-gray-900 mt-2">0</div>
+                <div class="text-xs text-gray-400 mt-1">User problem reports</div>
+            </div>
+        </div>
+
+        <!-- SECTION 3: HERO DARK BANNER (LAST 24 HOURS PERFORMANCE) -->
+        <div class="rounded-3xl bg-[#0D0D0E] text-white p-7 shadow-sm">
+            <div class="flex items-center space-x-2 text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-4">
+                <i class="fa-solid fa-arrow-trend-up text-zinc-400 text-xs"></i>
+                <span>Last 24 Hours Performance</span>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <!-- Stat 1 -->
+                <div>
+                    <div id="heroUptimeText" class="text-3xl font-bold text-white tracking-tight">100%</div>
+                    <div class="text-xs text-zinc-400 mt-1">Overall System Uptime</div>
+                </div>
+                <!-- Stat 2 -->
+                <div>
+                    <div id="heroLatencyText" class="text-3xl font-bold text-white tracking-tight">0 ms</div>
+                    <div class="text-xs text-zinc-400 mt-1">Average Response Latency</div>
+                </div>
+                <!-- Stat 3 -->
+                <div>
+                    <div id="heroChecksText" class="text-3xl font-bold text-white tracking-tight">0</div>
+                    <div class="text-xs text-zinc-400 mt-1">Total Health Checks Executed</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 4: DYNAMIC MAIN PANELS (Switching via Navigation Tabs) -->
+
+        <!-- TAB VIEW 1: DASHBOARD (Overview Cards Matching Bottom of Screenshot) -->
+        <div id="viewContainerDashboard" class="space-y-6">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 
-                <!-- Quick Stash Safety Net Row -->
-                <div class="flex items-center justify-between px-1 text-xs">
-                    <span class="text-zinc-500 text-[11px] uppercase tracking-wider font-semibold">Safety Stash</span>
-                    <div class="flex items-center space-x-2">
-                        <button onclick="executeQuickStash()" title="Stash uncommitted changes" class="px-3 py-1 rounded-full bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 text-xs font-medium cursor-pointer transition">Stash</button>
-                        <button onclick="executePopStash()" title="Restore and apply stashed changes" class="px-3 py-1 rounded-full bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 text-xs font-medium cursor-pointer transition">Pop</button>
-                    </div>
-                </div>
-
-                <!-- Commit Snapshot Box (Inverted Dark Pill Form) -->
-                <div class="p-4 bg-[#141414] rounded-2xl border border-zinc-800 space-y-3">
-                    <div class="flex items-center justify-between text-xs">
-                        <span class="font-semibold text-white">Commit Checkpoint</span>
-                        <span class="text-[10px] text-zinc-500">1-Click Save</span>
-                    </div>
-                    <textarea id="commitMsgInput" rows="2" placeholder="What changes did you make?" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-3 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-white resize-none font-sans transition"></textarea>
-                    
-                    <!-- Solid White Pill Button -->
-                    <button onclick="executeGitCommit()" class="w-full py-2.5 rounded-full bg-white hover:bg-zinc-200 text-black font-semibold text-xs shadow-sm transition flex items-center justify-center space-x-2 cursor-pointer active:scale-[0.98]">
-                        <i class="fa-solid fa-check text-xs"></i>
-                        <span>Continue &amp; Commit</span>
-                    </button>
-                </div>
-
-                <!-- Staged Changes Section -->
-                <div>
-                    <div class="flex items-center justify-between text-xs text-zinc-400 mb-2">
-                        <span class="font-semibold uppercase tracking-wider text-[11px] text-zinc-500 flex items-center space-x-1.5">
-                            <span>Staged</span>
-                            <span id="stagedCountLabel" class="text-emerald-400 font-mono font-bold">(0)</span>
-                        </span>
-                        <button onclick="executeGitUnstageAll()" class="text-[11px] text-zinc-500 hover:text-white">Unstage All</button>
-                    </div>
-                    <div id="stagedList" class="space-y-1.5 font-mono text-xs">
-                        <!-- Populated dynamically -->
-                    </div>
-                </div>
-
-                <!-- Working Directory Changes Section -->
-                <div>
-                    <div class="flex items-center justify-between text-xs text-zinc-400 mb-2">
-                        <span class="font-semibold uppercase tracking-wider text-[11px] text-zinc-500 flex items-center space-x-1.5">
-                            <span>Changes</span>
-                            <span id="unstagedCountLabel" class="text-zinc-200 font-mono font-bold">(0)</span>
-                        </span>
-                        <button onclick="executeGitStageAll()" class="text-[11px] text-zinc-500 hover:text-white">Stage All</button>
-                    </div>
-                    <div id="unstagedList" class="space-y-1.5 font-mono text-xs">
-                        <!-- Populated dynamically -->
-                    </div>
-                </div>
-            </div>
-
-        </aside>
-
-        <!-- MAIN CENTER CONTENT -->
-        <main class="flex-1 flex flex-col bg-[#0F0F0F] overflow-hidden">
-
-            <!-- VIEW 1: COMMIT DAG GRAPH VISUALIZER -->
-            <div id="viewContainerGraph" class="flex-1 flex flex-col p-6 overflow-hidden bg-[#0F0F0F]">
-                <div class="flex justify-between items-center mb-4">
-                    <div>
-                        <h2 class="text-base font-serif font-medium text-white">Commit History &amp; Branch Graph</h2>
-                        <p class="text-xs text-zinc-400">Click any commit node to inspect details, checkout, branch, or revert</p>
-                    </div>
-                    <div class="flex items-center space-x-4 text-xs text-zinc-400">
-                        <span class="flex items-center space-x-1.5"><span class="w-2.5 h-2.5 rounded-full bg-white inline-block"></span> <span>HEAD Commit</span></span>
-                        <span class="flex items-center space-x-1.5"><span class="w-2.5 h-2.5 rounded-full bg-zinc-600 inline-block"></span> <span>Previous Commit</span></span>
-                    </div>
-                </div>
-                <!-- Interactive Canvas Container -->
-                <div class="flex-1 bg-[#141414]/80 border border-zinc-800 rounded-2xl relative overflow-auto p-6">
-                    <svg id="commitDagSvg" class="w-full h-full min-h-[360px]">
-                        <!-- Rendered nodes and edges dynamically -->
-                    </svg>
-                </div>
-            </div>
-
-            <!-- VIEW 2: VISUAL TIME TRAVEL SLIDER -->
-            <div id="viewContainerTimeline" class="flex-1 flex flex-col p-6 overflow-y-auto hidden bg-[#0F0F0F] space-y-6">
-                <!-- Header & Controls -->
-                <div class="flex flex-col md:flex-row justify-between md:items-center gap-4">
-                    <div>
-                        <h2 class="text-xl font-serif font-medium text-white">Visual History &amp; Time Travel</h2>
-                        <p class="text-xs text-zinc-400">Scrub smoothly through historical snapshots, inspect file states, and restore with one click</p>
-                    </div>
-                    <!-- Playback Controls -->
-                    <div class="flex items-center space-x-2 bg-zinc-900 border border-zinc-800 p-1.5 rounded-full">
-                        <button onclick="timeTravelStep('start')" title="Earliest Commit" class="w-7 h-7 rounded-full bg-zinc-800 hover:bg-zinc-700 flex items-center justify-center text-xs"><i class="fa-solid fa-backward-step"></i></button>
-                        <button onclick="timeTravelStep('prev')" title="Previous Commit" class="w-7 h-7 rounded-full bg-zinc-800 hover:bg-zinc-700 flex items-center justify-center text-xs"><i class="fa-solid fa-chevron-left"></i></button>
-                        <button id="btnTimeTravelPlay" onclick="toggleTimeTravelPlayback()" title="Play / Pause Auto-Scrub" class="px-3 py-1 rounded-full bg-white text-black font-semibold text-xs flex items-center space-x-1 cursor-pointer">
-                            <i id="timeTravelPlayIcon" class="fa-solid fa-play text-[10px]"></i>
-                            <span id="timeTravelPlayLabel">Play</span>
-                        </button>
-                        <button onclick="timeTravelStep('next')" title="Next Commit" class="w-7 h-7 rounded-full bg-zinc-800 hover:bg-zinc-700 flex items-center justify-center text-xs"><i class="fa-solid fa-chevron-right"></i></button>
-                        <button onclick="timeTravelStep('end')" title="Latest HEAD Commit" class="w-7 h-7 rounded-full bg-zinc-800 hover:bg-zinc-700 flex items-center justify-center text-xs"><i class="fa-solid fa-forward-step"></i></button>
-                    </div>
-                </div>
-
-                <!-- Main Time Travel Scrubber Card -->
-                <div class="p-6 bg-[#141414] border border-zinc-800 rounded-2xl space-y-5">
-                    <div class="flex items-center justify-between text-xs text-zinc-400">
-                        <span class="flex items-center space-x-2">
-                            <i class="fa-regular fa-clock text-zinc-400"></i>
-                            <span>Historical Timeline</span>
-                        </span>
-                        <span id="timeTravelStepCounter" class="font-mono text-zinc-300 font-semibold">Commit 0 of 0</span>
+                <!-- Left Column: Monitors Overview -->
+                <div class="space-y-3">
+                    <div class="flex items-center justify-between">
+                        <h2 class="font-serif text-xl font-medium text-gray-900">Monitors Overview</h2>
+                        <a href="javascript:void(0)" onclick="switchViewTab('editor')" class="text-xs text-gray-500 hover:text-black font-medium flex items-center space-x-1">
+                            <span>View all files</span>
+                            <i class="fa-solid fa-arrow-right text-[10px]"></i>
+                        </a>
                     </div>
 
-                    <!-- Range Slider -->
-                    <div class="px-2">
-                        <input id="timeTravelSlider" type="range" min="0" max="0" value="0" oninput="onTimeTravelSliderInput(this.value)" class="w-full cursor-pointer">
-                    </div>
-
-                    <!-- Selected Commit Snapshot Highlight Card -->
-                    <div class="p-4 bg-zinc-900/70 border border-zinc-800 rounded-xl space-y-3">
-                        <div class="flex flex-col md:flex-row justify-between md:items-center gap-2">
-                            <div class="space-y-1">
-                                <div class="flex items-center space-x-2">
-                                    <span id="timeTravelCommitHash" class="font-mono text-xs font-bold text-white bg-zinc-800 px-2 py-0.5 rounded-full">#root</span>
-                                    <span id="timeTravelCommitAuthor" class="text-xs text-zinc-400">Author</span>
-                                    <span class="text-zinc-600">&bull;</span>
-                                    <span id="timeTravelCommitDate" class="text-xs text-zinc-500">Date</span>
-                                </div>
-                                <h3 id="timeTravelCommitMessage" class="text-sm font-semibold text-white">Select a commit along the slider</h3>
-                            </div>
-                            
-                            <!-- Action Buttons at this point in time -->
-                            <div class="flex items-center space-x-2 shrink-0">
-                                <button onclick="actionTimeTravelRestore()" title="Restore working tree files to this commit" class="px-4 py-1.5 rounded-full bg-white hover:bg-zinc-200 text-black text-xs font-semibold shadow-sm transition flex items-center space-x-1.5 cursor-pointer">
-                                    <i class="fa-solid fa-rotate text-[10px]"></i>
-                                    <span>Restore Files</span>
-                                </button>
-                                <button onclick="actionTimeTravelBranch()" title="Create new branch at this point" class="px-3.5 py-1.5 rounded-full bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium transition flex items-center space-x-1.5 cursor-pointer">
-                                    <i class="fa-solid fa-code-branch text-[10px]"></i>
-                                    <span>Branch Here</span>
-                                </button>
-                                <button onclick="actionTimeTravelCheckout()" title="Checkout this commit" class="px-3.5 py-1.5 rounded-full bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium transition flex items-center space-x-1.5 cursor-pointer">
-                                    <i class="fa-solid fa-location-crosshairs text-[10px]"></i>
-                                    <span>Checkout</span>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Snapshot Inspector Grid (File Tree & Content at this point in time) -->
-                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1 min-h-[300px]">
-                    <!-- Historical Files list at that commit -->
-                    <div class="bg-[#141414] border border-zinc-800 rounded-2xl flex flex-col p-4 space-y-3">
-                        <div class="flex items-center justify-between text-xs border-b border-zinc-800 pb-2">
-                            <span class="font-medium text-white">Files at this Checkpoint</span>
-                            <span id="timeTravelFileCount" class="font-mono text-zinc-500">0 files</span>
-                        </div>
-                        <div id="timeTravelFileList" class="flex-1 overflow-y-auto space-y-1 font-mono text-xs">
-                            <!-- Populated dynamically -->
-                        </div>
-                    </div>
-
-                    <!-- File Content / Diff at that commit -->
-                    <div class="lg:col-span-2 bg-[#141414] border border-zinc-800 rounded-2xl flex flex-col p-4 space-y-2">
-                        <div class="flex items-center justify-between text-xs border-b border-zinc-800 pb-2">
-                            <span id="timeTravelPreviewFileName" class="font-mono font-medium text-white">Select a file</span>
-                            <span class="text-zinc-500 text-[11px]">Snapshot Content</span>
-                        </div>
-                        <pre id="timeTravelFileContent" class="flex-1 bg-[#0F0F0F] p-4 rounded-xl border border-zinc-800 font-mono text-xs text-zinc-300 overflow-auto whitespace-pre leading-relaxed">No file selected.</pre>
-                    </div>
-                </div>
-            </div>
-
-            <!-- VIEW 3: VISUAL SIDE-BY-SIDE DIFF VIEWER -->
-            <div id="viewContainerDiff" class="flex-1 flex flex-col overflow-hidden hidden bg-[#0F0F0F]">
-                <div class="h-12 border-b border-zinc-800 flex items-center justify-between px-6 text-xs font-mono bg-[#141414] text-zinc-400">
-                    <div class="flex items-center space-x-2">
-                        <span class="text-zinc-500">File:</span>
-                        <select id="diffFileSelect" onchange="renderDiffView()" class="bg-zinc-900 border border-zinc-800 text-white px-3 py-1 rounded-full focus:outline-none cursor-pointer">
-                            <!-- Populated dynamically -->
-                        </select>
-                    </div>
-                    <div class="flex items-center space-x-4 text-xs">
-                        <span class="text-rose-400 flex items-center"><i class="fa-solid fa-minus mr-1"></i> HEAD Version</span>
-                        <span class="text-emerald-400 flex items-center"><i class="fa-solid fa-plus mr-1"></i> Working Copy</span>
-                    </div>
-                </div>
-
-                <!-- Diff Content Grid -->
-                <div class="flex-1 grid grid-cols-2 divide-x divide-zinc-800 font-mono text-xs overflow-y-auto">
-                    <!-- Left: Original (Head) -->
-                    <div class="p-4 bg-[#0F0F0F] overflow-x-auto">
-                        <div class="text-zinc-500 border-b border-zinc-800 pb-1 mb-2 font-bold uppercase text-[10px]">HEAD Commit Version</div>
-                        <div id="diffOriginalLines" class="space-y-0.5"></div>
-                    </div>
-                    <!-- Right: Modified (Working Copy) -->
-                    <div class="p-4 bg-[#0F0F0F] overflow-x-auto">
-                        <div class="text-zinc-500 border-b border-zinc-800 pb-1 mb-2 font-bold uppercase text-[10px]">Working Copy Version</div>
-                        <div id="diffModifiedLines" class="space-y-0.5"></div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- VIEW 4: CODE EDITOR -->
-            <div id="viewContainerEditor" class="flex-1 flex flex-col overflow-hidden relative hidden bg-[#0F0F0F]">
-                <!-- Editor Info Bar -->
-                <div class="h-11 bg-[#141414] border-b border-zinc-800 flex items-center justify-between px-6 text-xs font-mono text-zinc-400">
-                    <div class="flex items-center space-x-2">
-                        <i class="fa-regular fa-file-code text-zinc-500"></i>
-                        <span id="editorFolderPathDisplay" class="text-zinc-500">/</span>
-                        <span id="editorFilePathDisplay" class="text-white font-semibold">index.html</span>
-                    </div>
-                    <div class="flex items-center space-x-3">
-                        <button onclick="saveActiveFileFromEditor()" class="rounded-full bg-white hover:bg-zinc-200 text-black px-4 py-1 text-xs font-sans font-semibold flex items-center space-x-1.5 transition cursor-pointer">
-                            <i class="fa-solid fa-floppy-disk text-[10px]"></i>
-                            <span>Save</span>
-                        </button>
-                    </div>
-                </div>
-                <!-- Textarea Editor -->
-                <textarea id="codeEditorArea" oninput="markFileAsModified()" class="flex-1 bg-[#0F0F0F] p-6 font-mono text-xs text-zinc-100 focus:outline-none resize-none leading-relaxed selection:bg-zinc-800 caret-white" spellcheck="false"></textarea>
-            </div>
-
-            <!-- VIEW 5: PREVIEW WITH DASHBOARD & AUDIT -->
-            <div id="viewContainerPreview" class="flex-1 flex flex-col bg-[#0F0F0F] overflow-y-auto hidden">
-                <div class="h-12 border-b border-zinc-800 flex items-center justify-between px-6 text-xs bg-[#141414] shrink-0">
-                    <div class="flex items-center space-x-2">
-                        <i class="fa-solid fa-gauge text-zinc-500"></i>
-                        <span class="font-semibold text-white">Project Overview</span>
-                    </div>
-                    <div class="flex items-center bg-zinc-900 p-0.5 rounded-full border border-zinc-800">
-                        <button id="previewSubBtnDashboard" onclick="switchPreviewSubTab('dashboard')" class="px-4 py-1 rounded-full text-xs font-semibold bg-white text-black transition">Dashboard</button>
-                        <button id="previewSubBtnFeedback" onclick="switchPreviewSubTab('feedback')" class="px-4 py-1 rounded-full text-xs font-medium text-zinc-400 hover:text-white transition">Feedback</button>
-                    </div>
-                </div>
-
-                <!-- SUB-VIEW 1: DASHBOARD -->
-                <div id="previewSubViewDashboard" class="flex-1 p-6 space-y-6 overflow-y-auto">
-                    <!-- Metrics Summary Grid -->
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <div class="bg-[#141414] border border-zinc-800 rounded-2xl p-4">
-                            <div class="text-zinc-400 text-xs">Total Commits</div>
-                            <div id="metricTotalCommits" class="text-2xl font-serif font-bold text-white mt-1">0</div>
-                        </div>
-                        <div class="bg-[#141414] border border-zinc-800 rounded-2xl p-4">
-                            <div class="text-zinc-400 text-xs">Active Branches</div>
-                            <div id="metricTotalBranches" class="text-2xl font-serif font-bold text-white mt-1">1</div>
-                        </div>
-                        <div class="bg-[#141414] border border-zinc-800 rounded-2xl p-4">
-                            <div class="text-zinc-400 text-xs">Project Files</div>
-                            <div id="metricTotalFiles" class="text-2xl font-serif font-bold text-white mt-1">0</div>
-                        </div>
-                        <div class="bg-[#141414] border border-zinc-800 rounded-2xl p-4">
-                            <div class="text-zinc-400 text-xs">Current Branch</div>
-                            <div id="metricCurrentHead" class="text-sm font-mono font-bold text-white mt-2 truncate">main</div>
-                        </div>
-                    </div>
-
-                    <!-- Sandbox & Recent Activity -->
-                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        <!-- Live Web Output Card -->
-                        <div class="bg-[#141414] border border-zinc-800 rounded-2xl flex flex-col h-[380px] overflow-hidden shadow-sm">
-                            <div class="px-4 py-3 border-b border-zinc-800 flex items-center justify-between bg-zinc-900 text-xs">
-                                <div class="flex items-center space-x-2">
-                                    <span class="font-medium text-white">Live Web Sandbox</span>
-                                    <select id="previewFileSelect" onchange="updateLivePreviewIframe()" class="bg-zinc-800 border border-zinc-700 text-white text-[11px] rounded-full px-2.5 py-0.5 focus:outline-none">
-                                        <!-- HTML files from VFS -->
-                                    </select>
-                                </div>
-                                <button onclick="updateLivePreviewIframe()" class="rounded-full bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-3 py-0.5 text-xs">Reload</button>
-                            </div>
-                            <div class="flex-1 bg-white relative">
-                                <iframe id="projectLiveIframe" sandbox="allow-scripts allow-modals" class="w-full h-full border-none bg-white"></iframe>
+                    <!-- Staging & Working Copy Card -->
+                    <div class="bg-white border border-gray-200 rounded-2xl p-6 shadow-xs space-y-5">
+                        <!-- Quick Stash Safety Row -->
+                        <div class="flex items-center justify-between pb-3 border-b border-gray-100 text-xs">
+                            <span class="font-semibold text-gray-700">Safety Stash &amp; Fast Checkpoint</span>
+                            <div class="flex items-center space-x-2">
+                                <button onclick="executeQuickStash()" class="px-3.5 py-1 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium cursor-pointer transition">Stash</button>
+                                <button onclick="executePopStash()" class="px-3.5 py-1 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium cursor-pointer transition">Pop</button>
                             </div>
                         </div>
 
-                        <!-- Audit Activity Stream -->
-                        <div class="bg-[#141414] border border-zinc-800 rounded-2xl flex flex-col h-[380px] overflow-hidden shadow-sm">
-                            <div class="px-4 py-3 border-b border-zinc-800 bg-zinc-900 text-xs font-medium text-white">
-                                Recent Commits &amp; Activity
+                        <!-- Staged Changes Section -->
+                        <div class="space-y-2">
+                            <div class="flex items-center justify-between text-xs text-gray-500">
+                                <span class="font-semibold uppercase tracking-wider text-[11px] text-emerald-600 flex items-center space-x-1.5">
+                                    <span>Staged For Commit</span>
+                                    <span id="stagedCountLabel" class="font-mono font-bold">(0)</span>
+                                </span>
+                                <button onclick="executeGitUnstageAll()" class="text-[11px] text-gray-400 hover:text-black">Unstage All</button>
                             </div>
-                            <div id="previewActivityStream" class="flex-1 p-4 overflow-y-auto space-y-2 font-mono text-xs">
+                            <div id="stagedList" class="space-y-1.5 font-mono text-xs max-h-44 overflow-y-auto pr-1">
+                                <!-- Populated dynamically -->
+                            </div>
+                        </div>
+
+                        <!-- Working Directory Changes Section -->
+                        <div class="space-y-2">
+                            <div class="flex items-center justify-between text-xs text-gray-500">
+                                <span class="font-semibold uppercase tracking-wider text-[11px] text-rose-500 flex items-center space-x-1.5">
+                                    <span>Uncommitted Changes</span>
+                                    <span id="unstagedCountLabel" class="font-mono font-bold">(0)</span>
+                                </span>
+                                <button onclick="executeGitStageAll()" class="text-[11px] text-gray-400 hover:text-black">Stage All</button>
+                            </div>
+                            <div id="unstagedList" class="space-y-1.5 font-mono text-xs max-h-44 overflow-y-auto pr-1">
                                 <!-- Populated dynamically -->
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- SUB-VIEW 2: FEEDBACK -->
-                <div id="previewSubViewFeedback" class="flex-1 p-6 space-y-4 overflow-y-auto hidden">
-                    <div class="max-w-xl mx-auto space-y-4">
-                        <div class="bg-[#141414] border border-zinc-800 rounded-2xl p-5 space-y-3">
-                            <h4 class="text-sm font-semibold text-white">User Experience Feedback</h4>
-                            <textarea id="feedbackCommentInput" rows="3" placeholder="Share your experience or suggestions..." class="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-3 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-white resize-none"></textarea>
-                            <input id="feedbackAuthorInput" type="text" placeholder="Your name (optional)" class="w-full bg-zinc-900 border border-zinc-800 rounded-full px-4 py-2 text-xs text-white focus:outline-none font-mono">
-                            <button onclick="submitUserFeedback()" class="w-full rounded-full bg-white hover:bg-zinc-200 text-black font-semibold text-xs py-2.5 transition">Submit Feedback</button>
+                <!-- Right Column: Recent Checks -->
+                <div class="space-y-3">
+                    <div class="flex items-center justify-between">
+                        <h2 class="font-serif text-xl font-medium text-gray-900">Recent Checks</h2>
+                        <span class="text-xs text-gray-400 font-mono">Live stream</span>
+                    </div>
+
+                    <!-- Commit History & Audit Stream Card -->
+                    <div class="bg-white border border-gray-200 rounded-2xl p-6 shadow-xs space-y-3 min-h-[340px] flex flex-col">
+                        <div id="recentChecksStream" class="flex-1 space-y-2.5 overflow-y-auto pr-1">
+                            <!-- Populated dynamically -->
                         </div>
-                        <div id="feedbackListContainer" class="space-y-2"></div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- TAB VIEW 2: COMMIT GRAPH (Monitors View) -->
+        <div id="viewContainerGraph" class="space-y-4 hidden">
+            <div class="flex justify-between items-center">
+                <div>
+                    <h2 class="font-serif text-xl font-medium text-gray-900">Commit History &amp; Branch Graph</h2>
+                    <p class="text-xs text-gray-500">Visual topology of all commits, branch pointers, and merge relationships</p>
+                </div>
+                <div class="flex items-center space-x-4 text-xs text-gray-500">
+                    <span class="flex items-center space-x-1.5"><span class="w-2.5 h-2.5 rounded-full bg-black inline-block"></span> <span>HEAD Commit</span></span>
+                    <span class="flex items-center space-x-1.5"><span class="w-2.5 h-2.5 rounded-full bg-gray-300 inline-block"></span> <span>Previous Commit</span></span>
+                </div>
+            </div>
+            <div class="bg-white border border-gray-200 rounded-2xl p-6 relative overflow-auto shadow-xs min-h-[440px]">
+                <svg id="commitDagSvg" class="w-full h-full min-h-[380px]">
+                    <!-- Rendered dynamically -->
+                </svg>
+            </div>
+        </div>
+
+        <!-- TAB VIEW 3: TIME TRAVEL (Incidents View) -->
+        <div id="viewContainerTimeline" class="space-y-5 hidden">
+            <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+                <div>
+                    <h2 class="font-serif text-xl font-medium text-gray-900">Visual Time Travel &amp; Historical Incidents</h2>
+                    <p class="text-xs text-gray-500">Scrub smoothly through historical snapshots, inspect file states, and restore with one click</p>
+                </div>
+                <!-- Playback controls -->
+                <div class="flex items-center space-x-1.5 bg-white border border-gray-200 p-1 rounded-full shadow-xs">
+                    <button onclick="timeTravelStep('start')" title="Earliest Commit" class="w-7 h-7 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-xs"><i class="fa-solid fa-backward-step"></i></button>
+                    <button onclick="timeTravelStep('prev')" title="Previous Commit" class="w-7 h-7 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-xs"><i class="fa-solid fa-chevron-left"></i></button>
+                    <button id="btnTimeTravelPlay" onclick="toggleTimeTravelPlayback()" title="Play / Pause Auto-Scrub" class="px-3.5 py-1 rounded-full bg-black text-white font-semibold text-xs flex items-center space-x-1.5 cursor-pointer">
+                        <i id="timeTravelPlayIcon" class="fa-solid fa-play text-[10px]"></i>
+                        <span id="timeTravelPlayLabel">Play</span>
+                    </button>
+                    <button onclick="timeTravelStep('next')" title="Next Commit" class="w-7 h-7 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-xs"><i class="fa-solid fa-chevron-right"></i></button>
+                    <button onclick="timeTravelStep('end')" title="Latest HEAD" class="w-7 h-7 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-xs"><i class="fa-solid fa-forward-step"></i></button>
+                </div>
+            </div>
+
+            <!-- Scrubber Card -->
+            <div class="bg-white border border-gray-200 rounded-2xl p-6 shadow-xs space-y-5">
+                <div class="flex items-center justify-between text-xs text-gray-500">
+                    <span class="font-semibold uppercase tracking-wider text-[11px] text-gray-400">Chronological Scrub Bar</span>
+                    <span id="timeTravelStepCounter" class="font-mono text-gray-700 font-semibold">Commit 0 of 0</span>
+                </div>
+                <div class="px-1">
+                    <input id="timeTravelSlider" type="range" min="0" max="0" value="0" oninput="onTimeTravelSliderInput(this.value)" class="w-full cursor-pointer">
+                </div>
+
+                <!-- Commit Snapshot Detail -->
+                <div class="p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-3">
+                    <div class="flex flex-col md:flex-row justify-between md:items-center gap-3">
+                        <div class="space-y-1">
+                            <div class="flex items-center space-x-2">
+                                <span id="timeTravelCommitHash" class="font-mono text-xs font-bold text-black bg-white px-2.5 py-0.5 rounded-full border border-gray-200">#root</span>
+                                <span id="timeTravelCommitAuthor" class="text-xs text-gray-600">Author</span>
+                                <span class="text-gray-300">&bull;</span>
+                                <span id="timeTravelCommitDate" class="text-xs text-gray-400">Date</span>
+                            </div>
+                            <h3 id="timeTravelCommitMessage" class="text-sm font-semibold text-gray-900">Select a commit along the slider</h3>
+                        </div>
+                        <div class="flex items-center space-x-2 shrink-0">
+                            <button onclick="actionTimeTravelRestore()" class="px-4 py-1.5 rounded-full bg-black hover:bg-gray-800 text-white text-xs font-semibold shadow-xs transition flex items-center space-x-1.5 cursor-pointer">
+                                <i class="fa-solid fa-rotate text-[10px]"></i>
+                                <span>Restore Files</span>
+                            </button>
+                            <button onclick="actionTimeTravelBranch()" class="px-3.5 py-1.5 rounded-full bg-white hover:bg-gray-100 text-gray-800 border border-gray-200 text-xs font-medium transition flex items-center space-x-1.5 cursor-pointer">
+                                <i class="fa-solid fa-code-branch text-[10px]"></i>
+                                <span>Branch Here</span>
+                            </button>
+                            <button onclick="actionTimeTravelCheckout()" class="px-3.5 py-1.5 rounded-full bg-white hover:bg-gray-100 text-gray-800 border border-gray-200 text-xs font-medium transition flex items-center space-x-1.5 cursor-pointer">
+                                <i class="fa-solid fa-location-crosshairs text-[10px]"></i>
+                                <span>Checkout</span>
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
 
-        </main>
+            <!-- Dual Panel Files & Preview -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 min-h-[300px]">
+                <div class="bg-white border border-gray-200 rounded-2xl p-5 shadow-xs flex flex-col space-y-3">
+                    <div class="flex items-center justify-between text-xs border-b border-gray-100 pb-2">
+                        <span class="font-medium text-gray-900">Files at this Checkpoint</span>
+                        <span id="timeTravelFileCount" class="font-mono text-gray-500 text-xs">0 files</span>
+                    </div>
+                    <div id="timeTravelFileList" class="flex-1 overflow-y-auto space-y-1 font-mono text-xs"></div>
+                </div>
+                <div class="lg:col-span-2 bg-white border border-gray-200 rounded-2xl p-5 shadow-xs flex flex-col space-y-2">
+                    <div class="flex items-center justify-between text-xs border-b border-gray-100 pb-2">
+                        <span id="timeTravelPreviewFileName" class="font-mono font-medium text-gray-900">Select a file</span>
+                        <span class="text-gray-400 text-[11px]">Snapshot Content</span>
+                    </div>
+                    <pre id="timeTravelFileContent" class="flex-1 bg-gray-50 p-4 rounded-xl border border-gray-200 font-mono text-xs text-gray-800 overflow-auto whitespace-pre leading-relaxed">No file selected.</pre>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB VIEW 4: VISUAL DIFF (Reports View) -->
+        <div id="viewContainerDiff" class="space-y-4 hidden">
+            <div class="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-xs">
+                <div class="h-12 border-b border-gray-200 flex items-center justify-between px-6 text-xs font-mono bg-gray-50">
+                    <div class="flex items-center space-x-2">
+                        <span class="text-gray-500">File:</span>
+                        <select id="diffFileSelect" onchange="renderDiffView()" class="bg-white border border-gray-200 text-gray-900 px-3 py-1 rounded-full focus:outline-none cursor-pointer">
+                            <!-- Populated dynamically -->
+                        </select>
+                    </div>
+                    <div class="flex items-center space-x-4 text-xs">
+                        <span class="text-rose-600 flex items-center"><i class="fa-solid fa-minus mr-1"></i> HEAD Version</span>
+                        <span class="text-emerald-600 flex items-center"><i class="fa-solid fa-plus mr-1"></i> Working Copy</span>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 divide-x divide-gray-200 font-mono text-xs min-h-[400px]">
+                    <div class="p-4 bg-white overflow-x-auto">
+                        <div class="text-gray-400 border-b border-gray-200 pb-1 mb-2 font-bold uppercase text-[10px]">HEAD Commit Version</div>
+                        <div id="diffOriginalLines" class="space-y-0.5"></div>
+                    </div>
+                    <div class="p-4 bg-white overflow-x-auto">
+                        <div class="text-gray-400 border-b border-gray-200 pb-1 mb-2 font-bold uppercase text-[10px]">Working Copy Version</div>
+                        <div id="diffModifiedLines" class="space-y-0.5"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB VIEW 5: CODE EDITOR -->
+        <div id="viewContainerEditor" class="space-y-4 hidden">
+            <div class="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-xs flex flex-col h-[560px]">
+                <div class="h-12 bg-gray-50 border-b border-gray-200 flex items-center justify-between px-6 text-xs font-mono text-gray-500">
+                    <div class="flex items-center space-x-2">
+                        <i class="fa-regular fa-file-code text-gray-400"></i>
+                        <span id="editorFolderPathDisplay" class="text-gray-400">/</span>
+                        <span id="editorFilePathDisplay" class="text-gray-900 font-semibold">index.html</span>
+                    </div>
+                    <button onclick="saveActiveFileFromEditor()" class="rounded-full bg-black hover:bg-gray-800 text-white px-4 py-1 text-xs font-sans font-semibold flex items-center space-x-1.5 transition cursor-pointer">
+                        <i class="fa-solid fa-floppy-disk text-[10px]"></i>
+                        <span>Save</span>
+                    </button>
+                </div>
+                <div class="flex-1 flex overflow-hidden">
+                    <div class="w-64 border-r border-gray-200 p-4 overflow-y-auto space-y-2">
+                        <div class="text-[11px] text-gray-400 font-bold uppercase tracking-wider mb-2">Workspace Files</div>
+                        <div id="fileTreeContainer" class="space-y-1 font-mono text-xs"></div>
+                    </div>
+                    <textarea id="codeEditorArea" oninput="markFileAsModified()" class="flex-1 bg-white p-6 font-mono text-xs text-gray-900 focus:outline-none resize-none leading-relaxed" spellcheck="false"></textarea>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB VIEW 6: LIVE PREVIEW & AUDIT -->
+        <div id="viewContainerPreview" class="space-y-4 hidden">
+            <div class="bg-white border border-gray-200 rounded-2xl p-6 shadow-xs flex flex-col h-[580px]">
+                <div class="flex items-center justify-between border-b border-gray-100 pb-3 mb-4 text-xs">
+                    <div class="flex items-center space-x-2">
+                        <span class="font-semibold text-gray-900">Live Web Sandbox</span>
+                        <select id="previewFileSelect" onchange="updateLivePreviewIframe()" class="bg-gray-50 border border-gray-200 text-gray-900 text-[11px] rounded-full px-3 py-1 focus:outline-none">
+                            <!-- HTML files -->
+                        </select>
+                    </div>
+                    <button onclick="updateLivePreviewIframe()" class="rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700 px-3.5 py-1 text-xs font-medium">Reload Sandbox</button>
+                </div>
+                <div class="flex-1 bg-white border border-gray-200 rounded-xl overflow-hidden relative">
+                    <iframe id="projectLiveIframe" sandbox="allow-scripts allow-modals" class="w-full h-full border-none bg-white"></iframe>
+                </div>
+            </div>
+        </div>
+
     </div>
 
     <!-- ========================================================================= -->
     <!-- MODALS SECTION                                                            -->
     <!-- ========================================================================= -->
 
-    <!-- MODAL 1: CREATE NEW BRANCH (Dark Inverted Pill Modal) -->
-    <div id="newBranchModal" class="fixed inset-0 bg-[#0F0F0F]/80 backdrop-blur-md z-50 flex items-center justify-center hidden" onclick="if(event.target===this)closeNewBranchModal()">
-        <div class="bg-[#141414] border border-zinc-800 w-full max-w-sm rounded-3xl shadow-2xl p-6 space-y-4">
-            <div class="flex items-center justify-between border-b border-zinc-800 pb-3">
-                <h3 class="font-serif font-medium text-white text-lg">Create New Branch</h3>
-                <button onclick="closeNewBranchModal()" class="text-zinc-500 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+    <!-- MODAL 1: COMMIT MODAL (Add Monitor / Quick Commit) -->
+    <div id="commitModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center hidden" onclick="if(event.target===this)closeCommitModal()">
+        <div class="bg-white border border-gray-200 w-full max-w-md rounded-3xl shadow-2xl p-6 space-y-4">
+            <div class="flex items-center justify-between border-b border-gray-100 pb-3">
+                <h3 class="font-serif font-medium text-gray-900 text-xl">Commit Checkpoint</h3>
+                <button onclick="closeCommitModal()" class="text-gray-400 hover:text-black"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            <div class="space-y-2 text-xs">
-                <label class="block text-zinc-400 font-medium">Branch Name</label>
-                <input id="modalBranchNameInput" type="text" placeholder="e.g., feature-auth, fix-typo" class="w-full bg-zinc-900 border border-zinc-800 rounded-full px-4 py-2.5 text-xs text-white focus:outline-none focus:border-white font-mono" onkeydown="if(event.key==='Enter')submitNewBranchModal()">
+            <div class="space-y-3 text-xs">
+                <label class="block text-gray-600 font-medium">Commit Message</label>
+                <textarea id="commitMsgInput" rows="3" placeholder="What changes did you make?" class="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-xs text-gray-900 placeholder-gray-400 focus:outline-none focus:border-black resize-none font-sans"></textarea>
             </div>
             <div class="flex justify-end space-x-2 pt-2 text-xs">
-                <button onclick="closeNewBranchModal()" class="px-4 py-2 rounded-full bg-zinc-900 text-zinc-300 hover:bg-zinc-800 transition font-medium">Cancel</button>
-                <button onclick="submitNewBranchModal()" class="px-5 py-2 rounded-full bg-white text-black hover:bg-zinc-200 transition font-semibold shadow-sm">Create Branch</button>
+                <button onclick="closeCommitModal()" class="px-4 py-2 rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 transition font-medium">Cancel</button>
+                <button onclick="executeGitCommit()" class="px-5 py-2 rounded-full bg-black text-white hover:bg-gray-800 transition font-semibold shadow-xs">Continue &amp; Commit</button>
             </div>
         </div>
     </div>
 
-    <!-- MODAL 2: MERGE BRANCH -->
-    <div id="mergeModal" class="fixed inset-0 bg-[#0F0F0F]/80 backdrop-blur-md z-50 flex items-center justify-center hidden" onclick="if(event.target===this)closeMergeModal()">
-        <div class="bg-[#141414] border border-zinc-800 w-full max-w-sm rounded-3xl shadow-2xl p-6 space-y-4">
-            <div class="flex items-center justify-between border-b border-zinc-800 pb-3">
-                <h3 class="font-serif font-medium text-white text-lg">Merge Branch</h3>
-                <button onclick="closeMergeModal()" class="text-zinc-500 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+    <!-- MODAL 2: CREATE NEW BRANCH -->
+    <div id="newBranchModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center hidden" onclick="if(event.target===this)closeNewBranchModal()">
+        <div class="bg-white border border-gray-200 w-full max-w-sm rounded-3xl shadow-2xl p-6 space-y-4">
+            <div class="flex items-center justify-between border-b border-gray-100 pb-3">
+                <h3 class="font-serif font-medium text-gray-900 text-lg">Create New Branch</h3>
+                <button onclick="closeNewBranchModal()" class="text-gray-400 hover:text-black"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="space-y-2 text-xs">
-                <p class="text-zinc-400">Merge into active branch <span id="mergeTargetActiveBranch" class="text-white font-mono font-bold">main</span>:</p>
-                <select id="modalMergeBranchSelect" class="w-full bg-zinc-900 border border-zinc-800 rounded-full px-4 py-2.5 text-xs text-white focus:outline-none focus:border-white font-mono cursor-pointer">
+                <label class="block text-gray-600 font-medium">Branch Name</label>
+                <input id="modalBranchNameInput" type="text" placeholder="e.g., feature-auth, fix-typo" class="w-full bg-gray-50 border border-gray-200 rounded-full px-4 py-2.5 text-xs text-gray-900 focus:outline-none focus:border-black font-mono" onkeydown="if(event.key==='Enter')submitNewBranchModal()">
+            </div>
+            <div class="flex justify-end space-x-2 pt-2 text-xs">
+                <button onclick="closeNewBranchModal()" class="px-4 py-2 rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 transition font-medium">Cancel</button>
+                <button onclick="submitNewBranchModal()" class="px-5 py-2 rounded-full bg-black text-white hover:bg-gray-800 transition font-semibold shadow-xs">Create Branch</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL 3: MERGE BRANCH -->
+    <div id="mergeModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center hidden" onclick="if(event.target===this)closeMergeModal()">
+        <div class="bg-white border border-gray-200 w-full max-w-sm rounded-3xl shadow-2xl p-6 space-y-4">
+            <div class="flex items-center justify-between border-b border-gray-100 pb-3">
+                <h3 class="font-serif font-medium text-gray-900 text-lg">Merge Branch</h3>
+                <button onclick="closeMergeModal()" class="text-gray-400 hover:text-black"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="space-y-2 text-xs">
+                <p class="text-gray-600">Merge into active branch <span id="mergeTargetActiveBranch" class="text-black font-mono font-bold">main</span>:</p>
+                <select id="modalMergeBranchSelect" class="w-full bg-gray-50 border border-gray-200 rounded-full px-4 py-2.5 text-xs text-gray-900 focus:outline-none focus:border-black font-mono cursor-pointer">
                     <!-- Populated dynamically -->
                 </select>
             </div>
             <div class="flex justify-end space-x-2 pt-2 text-xs">
-                <button onclick="closeMergeModal()" class="px-4 py-2 rounded-full bg-zinc-900 text-zinc-300 hover:bg-zinc-800 transition font-medium">Cancel</button>
-                <button onclick="submitMergeModal()" class="px-5 py-2 rounded-full bg-white text-black hover:bg-zinc-200 transition font-semibold shadow-sm">Confirm Merge</button>
+                <button onclick="closeMergeModal()" class="px-4 py-2 rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 transition font-medium">Cancel</button>
+                <button onclick="submitMergeModal()" class="px-5 py-2 rounded-full bg-black text-white hover:bg-gray-800 transition font-semibold shadow-xs">Confirm Merge</button>
             </div>
         </div>
     </div>
 
-    <!-- MODAL 3: COMMIT DETAIL & ACTION -->
-    <div id="commitActionModal" class="fixed inset-0 bg-[#0F0F0F]/80 backdrop-blur-md z-50 flex items-center justify-center hidden" onclick="if(event.target===this)closeCommitActionModal()">
-        <div class="bg-[#141414] border border-zinc-800 w-full max-w-md rounded-3xl shadow-2xl p-6 space-y-4">
-            <div class="flex items-center justify-between border-b border-zinc-800 pb-3">
-                <h3 class="font-serif font-medium text-white text-lg">Commit Details</h3>
-                <button onclick="closeCommitActionModal()" class="text-zinc-500 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+    <!-- MODAL 4: COMMIT DETAIL & ACTION -->
+    <div id="commitActionModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center hidden" onclick="if(event.target===this)closeCommitActionModal()">
+        <div class="bg-white border border-gray-200 w-full max-w-md rounded-3xl shadow-2xl p-6 space-y-4">
+            <div class="flex items-center justify-between border-b border-gray-100 pb-3">
+                <h3 class="font-serif font-medium text-gray-900 text-lg">Commit Details</h3>
+                <button onclick="closeCommitActionModal()" class="text-gray-400 hover:text-black"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="space-y-3 text-xs">
-                <div class="p-3 bg-zinc-900/70 border border-zinc-800 rounded-2xl space-y-1.5 font-mono">
-                    <div class="flex justify-between"><span class="text-zinc-400">Hash:</span><span id="camHash" class="text-white font-bold"></span></div>
-                    <div class="flex justify-between"><span class="text-zinc-400">Author:</span><span id="camAuthor" class="text-zinc-300"></span></div>
-                    <div class="flex justify-between"><span class="text-zinc-400">Date:</span><span id="camDate" class="text-zinc-400"></span></div>
+                <div class="p-3 bg-gray-50 border border-gray-200 rounded-2xl space-y-1.5 font-mono">
+                    <div class="flex justify-between"><span class="text-gray-400">Hash:</span><span id="camHash" class="text-gray-900 font-bold"></span></div>
+                    <div class="flex justify-between"><span class="text-gray-400">Author:</span><span id="camAuthor" class="text-gray-700"></span></div>
+                    <div class="flex justify-between"><span class="text-gray-400">Date:</span><span id="camDate" class="text-gray-500"></span></div>
                 </div>
-                <div class="p-3 bg-zinc-900/70 border border-zinc-800 rounded-2xl space-y-1">
-                    <div class="text-[10px] text-zinc-500 uppercase font-bold tracking-wider">Commit Message</div>
-                    <div id="camMessage" class="text-white font-medium"></div>
+                <div class="p-3 bg-gray-50 border border-gray-200 rounded-2xl space-y-1">
+                    <div class="text-[10px] text-gray-400 uppercase font-bold tracking-wider">Commit Message</div>
+                    <div id="camMessage" class="text-gray-900 font-medium"></div>
                 </div>
-                <!-- Action Buttons: Switch / Branch / Revert -->
                 <div class="grid grid-cols-3 gap-2 pt-1">
-                    <button onclick="actionCheckoutSelectedCommit()" class="py-2.5 rounded-full bg-zinc-900 hover:bg-zinc-800 text-zinc-200 transition text-xs font-medium cursor-pointer">
+                    <button onclick="actionCheckoutSelectedCommit()" class="py-2.5 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-800 transition text-xs font-medium cursor-pointer">
                         Checkout
                     </button>
-                    <button onclick="actionBranchAtSelectedCommit()" class="py-2.5 rounded-full bg-zinc-900 hover:bg-zinc-800 text-zinc-200 transition text-xs font-medium cursor-pointer">
+                    <button onclick="actionBranchAtSelectedCommit()" class="py-2.5 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-800 transition text-xs font-medium cursor-pointer">
                         New Branch
                     </button>
-                    <button onclick="actionRevertSelectedCommit()" class="py-2.5 rounded-full bg-white hover:bg-zinc-200 text-black transition text-xs font-semibold cursor-pointer">
+                    <button onclick="actionRevertSelectedCommit()" class="py-2.5 rounded-full bg-black hover:bg-gray-800 text-white transition text-xs font-semibold cursor-pointer">
                         Revert
                     </button>
                 </div>
@@ -616,55 +610,49 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- MODAL 4: SERVERLESS P2P & LAN SYNC -->
-    <div id="lanSyncModal" class="fixed inset-0 bg-[#0F0F0F]/80 backdrop-blur-md z-50 flex items-center justify-center hidden" onclick="if(event.target===this)closeLanSyncModal()">
-        <div class="bg-[#141414] border border-zinc-800 w-full max-w-lg rounded-3xl shadow-2xl p-6 space-y-5">
-            <div class="flex items-center justify-between border-b border-zinc-800 pb-3">
+    <!-- MODAL 5: SERVERLESS P2P & LAN SYNC -->
+    <div id="lanSyncModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center hidden" onclick="if(event.target===this)closeLanSyncModal()">
+        <div class="bg-white border border-gray-200 w-full max-w-lg rounded-3xl shadow-2xl p-6 space-y-5">
+            <div class="flex items-center justify-between border-b border-gray-100 pb-3">
                 <div>
-                    <h3 class="font-serif font-medium text-white text-lg">Serverless P2P &amp; LAN Sync</h3>
-                    <p class="text-xs text-zinc-400">Collaborate directly on Wi-Fi without GitHub or cloud accounts</p>
+                    <h3 class="font-serif font-medium text-gray-900 text-lg">Serverless P2P &amp; LAN Sync</h3>
+                    <p class="text-xs text-gray-500">Collaborate directly on Wi-Fi without GitHub or cloud accounts</p>
                 </div>
-                <button onclick="closeLanSyncModal()" class="text-zinc-500 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+                <button onclick="closeLanSyncModal()" class="text-gray-400 hover:text-black"><i class="fa-solid fa-xmark"></i></button>
             </div>
-
-            <!-- Local Node Card -->
-            <div class="p-4 bg-zinc-900/70 border border-zinc-800 rounded-2xl space-y-2">
+            <div class="p-4 bg-gray-50 border border-gray-200 rounded-2xl space-y-2">
                 <div class="flex justify-between items-center text-xs">
-                    <span class="text-zinc-400">Your Local Peer Address</span>
-                    <span class="px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-bold">Active Node</span>
+                    <span class="text-gray-500">Your Local Peer Address</span>
+                    <span class="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-bold">Active Node</span>
                 </div>
-                <div class="flex items-center justify-between bg-zinc-900 px-3 py-2 rounded-xl border border-zinc-800 font-mono text-xs">
-                    <span id="localPeerAddressText" class="text-white">http://localhost:8080</span>
-                    <button onclick="copyLocalPeerAddress()" class="text-zinc-400 hover:text-white text-xs"><i class="fa-regular fa-copy"></i> Copy</button>
+                <div class="flex items-center justify-between bg-white px-3 py-2 rounded-xl border border-gray-200 font-mono text-xs">
+                    <span id="localPeerAddressText" class="text-gray-900 font-semibold">http://localhost:8080</span>
+                    <button onclick="copyLocalPeerAddress()" class="text-gray-500 hover:text-black text-xs"><i class="fa-regular fa-copy"></i> Copy</button>
                 </div>
             </div>
-
-            <!-- Direct Peer Sync (Pull / Push) -->
             <div class="space-y-3">
-                <label class="block text-xs font-medium text-zinc-300">Sync with Teammate over Local Network</label>
-                <input id="lanPeerUrlInput" type="text" placeholder="http://192.168.1.50:8080" class="w-full bg-zinc-900 border border-zinc-800 rounded-full px-4 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-white font-mono">
+                <label class="block text-xs font-medium text-gray-700">Sync with Teammate over Local Network</label>
+                <input id="lanPeerUrlInput" type="text" placeholder="http://192.168.1.50:8080" class="w-full bg-gray-50 border border-gray-200 rounded-full px-4 py-2.5 text-xs text-gray-900 placeholder-gray-400 focus:outline-none focus:border-black font-mono">
                 <div class="grid grid-cols-2 gap-3 pt-1">
-                    <button onclick="executeLanPull()" class="py-2.5 rounded-full bg-white hover:bg-zinc-200 text-black font-semibold text-xs shadow-sm transition flex items-center justify-center space-x-2 cursor-pointer">
+                    <button onclick="executeLanPull()" class="py-2.5 rounded-full bg-black hover:bg-gray-800 text-white font-semibold text-xs shadow-xs transition flex items-center justify-center space-x-2 cursor-pointer">
                         <i class="fa-solid fa-arrow-down text-xs"></i>
                         <span>Pull from Peer</span>
                     </button>
-                    <button onclick="executeLanPush()" class="py-2.5 rounded-full bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 font-medium text-xs transition flex items-center justify-center space-x-2 cursor-pointer">
+                    <button onclick="executeLanPush()" class="py-2.5 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-800 border border-gray-200 font-medium text-xs transition flex items-center justify-center space-x-2 cursor-pointer">
                         <i class="fa-solid fa-arrow-up text-xs"></i>
                         <span>Push to Peer</span>
                     </button>
                 </div>
             </div>
-
-            <!-- Portable Snapshot Bundle (AirDrop / USB / Chat) -->
-            <div class="p-4 bg-zinc-900/40 border border-zinc-800 rounded-2xl space-y-3 text-xs">
-                <div class="font-medium text-white">Portable Snapshot Bundle</div>
-                <p class="text-zinc-400 text-[11px]">Download all objects and history into a standalone file you can airdrop or send over chat.</p>
+            <div class="p-4 bg-gray-50 border border-gray-200 rounded-2xl space-y-3 text-xs">
+                <div class="font-medium text-gray-900">Portable Snapshot Bundle</div>
+                <p class="text-gray-500 text-[11px]">Download all objects and history into a standalone file you can airdrop or send over chat.</p>
                 <div class="flex items-center space-x-2 pt-1">
-                    <button onclick="downloadRepositoryBundle()" class="flex-1 py-2 rounded-full bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 transition text-xs font-medium flex items-center justify-center space-x-1.5 cursor-pointer">
+                    <button onclick="downloadRepositoryBundle()" class="flex-1 py-2 rounded-full bg-white hover:bg-gray-100 text-gray-800 border border-gray-200 transition text-xs font-medium flex items-center justify-center space-x-1.5 cursor-pointer">
                         <i class="fa-solid fa-download text-[11px]"></i>
                         <span>Export Bundle (.json)</span>
                     </button>
-                    <label class="flex-1 py-2 rounded-full bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 transition text-xs font-medium flex items-center justify-center space-x-1.5 cursor-pointer text-center">
+                    <label class="flex-1 py-2 rounded-full bg-white hover:bg-gray-100 text-gray-800 border border-gray-200 transition text-xs font-medium flex items-center justify-center space-x-1.5 cursor-pointer text-center">
                         <i class="fa-solid fa-upload text-[11px]"></i>
                         <span>Import Bundle</span>
                         <input type="file" id="bundleFileInput" accept=".json" onchange="uploadRepositoryBundle(event)" class="hidden">
@@ -674,70 +662,59 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- MODAL 5: SAFETY NET & REFLOG FLIGHT RECORDER -->
-    <div id="safetyNetModal" class="fixed inset-0 bg-[#0F0F0F]/80 backdrop-blur-md z-50 flex items-center justify-center hidden" onclick="if(event.target===this)closeSafetyNetModal()">
-        <div class="bg-[#141414] border border-zinc-800 w-full max-w-xl rounded-3xl shadow-2xl p-6 space-y-4">
-            <div class="flex items-center justify-between border-b border-zinc-800 pb-3">
+    <!-- MODAL 6: SAFETY NET & REFLOG -->
+    <div id="safetyNetModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center hidden" onclick="if(event.target===this)closeSafetyNetModal()">
+        <div class="bg-white border border-gray-200 w-full max-w-xl rounded-3xl shadow-2xl p-6 space-y-4">
+            <div class="flex items-center justify-between border-b border-gray-100 pb-3">
                 <div>
-                    <h3 class="font-serif font-medium text-white text-lg">Safety Flight Recorder &amp; Reflog</h3>
-                    <p class="text-xs text-zinc-400">Every action is recorded. Restore any historical state with 1 click.</p>
+                    <h3 class="font-serif font-medium text-gray-900 text-lg">Safety Flight Recorder &amp; Reflog</h3>
+                    <p class="text-xs text-gray-500">Every action is recorded. Restore any historical state with 1 click.</p>
                 </div>
-                <button onclick="closeSafetyNetModal()" class="text-zinc-500 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+                <button onclick="closeSafetyNetModal()" class="text-gray-400 hover:text-black"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            
             <div class="space-y-2">
-                <div class="flex items-center justify-between text-xs text-zinc-400 px-1">
+                <div class="flex items-center justify-between text-xs text-gray-500 px-1">
                     <span>Recent Actions &amp; Checkpoints</span>
-                    <span id="reflogEntryCountBadge" class="font-mono text-zinc-500">0 records</span>
+                    <span id="reflogEntryCountBadge" class="font-mono text-gray-400">0 records</span>
                 </div>
-                <div id="safetyReflogList" class="max-h-72 overflow-y-auto space-y-2 pr-1 font-mono text-xs">
-                    <!-- Populated dynamically -->
-                </div>
+                <div id="safetyReflogList" class="max-h-72 overflow-y-auto space-y-2 pr-1 font-mono text-xs"></div>
             </div>
-
             <div class="flex justify-end pt-2">
-                <button onclick="closeSafetyNetModal()" class="px-5 py-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 text-xs rounded-full transition font-medium">Close</button>
+                <button onclick="closeSafetyNetModal()" class="px-5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs rounded-full transition font-medium">Close</button>
             </div>
         </div>
     </div>
 
-    <!-- MODAL 6: GIT INTEROPERABILITY BRIDGE -->
-    <div id="gitBridgeModal" class="fixed inset-0 bg-[#0F0F0F]/80 backdrop-blur-md z-50 flex items-center justify-center hidden" onclick="if(event.target===this)closeGitBridgeModal()">
-        <div class="bg-[#141414] border border-zinc-800 w-full max-w-lg rounded-3xl shadow-2xl p-6 space-y-5">
-            <div class="flex items-center justify-between border-b border-zinc-800 pb-3">
+    <!-- MODAL 7: GIT INTEROPERABILITY BRIDGE -->
+    <div id="gitBridgeModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center hidden" onclick="if(event.target===this)closeGitBridgeModal()">
+        <div class="bg-white border border-gray-200 w-full max-w-lg rounded-3xl shadow-2xl p-6 space-y-5">
+            <div class="flex items-center justify-between border-b border-gray-100 pb-3">
                 <div>
-                    <h3 class="font-serif font-medium text-white text-lg">Git Interoperability Bridge</h3>
-                    <p class="text-xs text-zinc-400">Bridge MiniGit with standard Git (.git) repositories</p>
+                    <h3 class="font-serif font-medium text-gray-900 text-lg">Git Interoperability Bridge</h3>
+                    <p class="text-xs text-gray-500">Bridge MiniGit with standard Git (.git) repositories</p>
                 </div>
-                <button onclick="closeGitBridgeModal()" class="text-zinc-500 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+                <button onclick="closeGitBridgeModal()" class="text-gray-400 hover:text-black"><i class="fa-solid fa-xmark"></i></button>
             </div>
-
-            <!-- Status Card -->
-            <div class="p-4 bg-zinc-900/70 border border-zinc-800 rounded-2xl flex items-center justify-between text-xs">
+            <div class="p-4 bg-gray-50 border border-gray-200 rounded-2xl flex items-center justify-between text-xs">
                 <div>
-                    <div class="font-semibold text-white">Standard Git Status</div>
-                    <div id="gitBridgeStatusText" class="text-zinc-400 text-[11px]">Checking repository directory...</div>
+                    <div class="font-semibold text-gray-900">Standard Git Status</div>
+                    <div id="gitBridgeStatusText" class="text-gray-500 text-[11px]">Checking repository directory...</div>
                 </div>
-                <span id="gitBridgeStatusPill" class="px-3 py-1 rounded-full text-xs font-semibold bg-zinc-800 text-zinc-400">Checking...</span>
+                <span id="gitBridgeStatusPill" class="px-3 py-1 rounded-full text-xs font-semibold bg-gray-200 text-gray-700">Checking...</span>
             </div>
-
-            <!-- Two Action Cards -->
             <div class="space-y-3">
-                <!-- Export to Git -->
-                <div class="p-4 bg-zinc-900/40 border border-zinc-800 rounded-2xl space-y-2 text-xs">
-                    <div class="font-semibold text-white">Export to Standard Git (.git)</div>
-                    <p class="text-zinc-400 text-[11px]">Synchronizes current MiniGit commits and tree into standard Git so VS Code, SourceTree, and standard Git CLI can read it.</p>
-                    <button onclick="executeGitBridgeExport()" class="w-full py-2.5 rounded-full bg-white hover:bg-zinc-200 text-black font-semibold text-xs shadow-sm transition flex items-center justify-center space-x-2 cursor-pointer">
+                <div class="p-4 bg-gray-50 border border-gray-200 rounded-2xl space-y-2 text-xs">
+                    <div class="font-semibold text-gray-900">Export to Standard Git (.git)</div>
+                    <p class="text-gray-500 text-[11px]">Syncs all MiniGit commits and working tree into standard Git so VS Code and standard Git CLI can read it.</p>
+                    <button onclick="executeGitBridgeExport()" class="w-full py-2.5 rounded-full bg-black hover:bg-gray-800 text-white font-semibold text-xs shadow-xs transition flex items-center justify-center space-x-2 cursor-pointer">
                         <i class="fa-solid fa-arrow-right-from-bracket text-xs"></i>
                         <span>Export to .git Repository</span>
                     </button>
                 </div>
-
-                <!-- Import from Git -->
-                <div class="p-4 bg-zinc-900/40 border border-zinc-800 rounded-2xl space-y-2 text-xs">
-                    <div class="font-semibold text-white">Import from Standard Git (.git)</div>
-                    <p class="text-zinc-400 text-[11px]">Imports commits and working tree from an existing .git repository into MiniGit studio.</p>
-                    <button onclick="executeGitBridgeImport()" class="w-full py-2.5 rounded-full bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 font-medium text-xs transition flex items-center justify-center space-x-2 cursor-pointer">
+                <div class="p-4 bg-gray-50 border border-gray-200 rounded-2xl space-y-2 text-xs">
+                    <div class="font-semibold text-gray-900">Import from Standard Git (.git)</div>
+                    <p class="text-gray-500 text-[11px]">Imports commits and working tree from an existing .git repository into MiniGit studio.</p>
+                    <button onclick="executeGitBridgeImport()" class="w-full py-2.5 rounded-full bg-white hover:bg-gray-100 text-gray-800 border border-gray-200 font-medium text-xs transition flex items-center justify-center space-x-2 cursor-pointer">
                         <i class="fa-solid fa-arrow-right-to-bracket text-xs"></i>
                         <span>Import from .git Repository</span>
                     </button>
@@ -746,9 +723,9 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- FLOATING TOAST NOTIFICATION (Pill at bottom-center) -->
-    <div id="toastNotification" class="fixed bottom-6 left-1/2 transform -translate-x-1/2 translate-y-12 opacity-0 pointer-events-none transition-all duration-300 flex items-center space-x-2.5 px-5 py-2.5 rounded-full shadow-2xl text-xs font-semibold bg-white text-black z-50">
-        <i id="toastIcon" class="fa-solid fa-circle-check text-black text-xs"></i>
+    <!-- FLOATING TOAST NOTIFICATION -->
+    <div id="toastNotification" class="fixed bottom-6 left-1/2 transform -translate-x-1/2 translate-y-12 opacity-0 pointer-events-none transition-all duration-300 flex items-center space-x-2.5 px-5 py-2.5 rounded-full shadow-2xl text-xs font-semibold bg-black text-white z-50">
+        <i id="toastIcon" class="fa-solid fa-circle-check text-emerald-400 text-xs"></i>
         <span id="toastMessage">Action completed</span>
     </div>
 
@@ -780,10 +757,10 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
         let TIME_TRAVEL_PLAY_TIMER = null;
 
         const DEMO_FILES = {
-            "index.html": "<!DOCTYPE html>\n<html>\n<head>\n  <title>My MiniGit App</title>\n</head>\n<body>\n  <h1>Hello MiniGit!</h1>\n</body>\n</html>",
-            "src/app.js": "// MiniGit Application Entry\nconsole.log('App initialized from src folder');\n\nexport function getVersion() {\n    return 'v2.4';\n}",
-            "styles/style.css": "body {\n  background-color: #0F0F0F;\n  color: #FFFFFF;\n  font-family: sans-serif;\n}",
-            "README.md": "# Mini-Git Project\nAn interactive browser-based Git studio engine with folder and commit tracking."
+            "index.html": "<!DOCTYPE html>\n<html>\n<head>\n  <title>Pulse Monitoring App</title>\n</head>\n<body>\n  <h1>Pulse Live Operational</h1>\n</body>\n</html>",
+            "src/app.js": "// MiniGit Application Entry\nconsole.log('Pulse service initialized');\n\nexport function getStatus() {\n    return '100% Operational';\n}",
+            "styles/style.css": "body {\n  background-color: #F8F9FA;\n  color: #111827;\n  font-family: sans-serif;\n}",
+            "README.md": "# Pulse Project\nReal-time status overview and recent health checks."
         };
 
         /* ---------------------------------------------------------------------
@@ -800,11 +777,11 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                 iconEl.className = 'fa-solid fa-triangle-exclamation text-rose-400 text-xs';
                 toast.className = 'fixed bottom-6 left-1/2 transform -translate-x-1/2 translate-y-0 opacity-100 transition-all duration-300 flex items-center space-x-2.5 px-5 py-2.5 rounded-full shadow-2xl text-xs font-semibold bg-rose-950 text-white border border-rose-800 z-50';
             } else {
-                iconEl.className = 'fa-solid fa-circle-check text-black text-xs';
-                toast.className = 'fixed bottom-6 left-1/2 transform -translate-x-1/2 translate-y-0 opacity-100 transition-all duration-300 flex items-center space-x-2.5 px-5 py-2.5 rounded-full shadow-2xl text-xs font-semibold bg-white text-black z-50';
+                iconEl.className = 'fa-solid fa-circle-check text-emerald-400 text-xs';
+                toast.className = 'fixed bottom-6 left-1/2 transform -translate-x-1/2 translate-y-0 opacity-100 transition-all duration-300 flex items-center space-x-2.5 px-5 py-2.5 rounded-full shadow-2xl text-xs font-semibold bg-black text-white z-50';
             }
             setTimeout(() => {
-                toast.className = 'fixed bottom-6 left-1/2 transform -translate-x-1/2 translate-y-12 opacity-0 pointer-events-none transition-all duration-300 flex items-center space-x-2.5 px-5 py-2.5 rounded-full shadow-2xl text-xs font-semibold bg-white text-black z-50';
+                toast.className = 'fixed bottom-6 left-1/2 transform -translate-x-1/2 translate-y-12 opacity-0 pointer-events-none transition-all duration-300 flex items-center space-x-2.5 px-5 py-2.5 rounded-full shadow-2xl text-xs font-semibold bg-black text-white z-50';
             }, 3000);
         }
 
@@ -884,9 +861,9 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             if (filename.endsWith('.html') || filename.endsWith('.htm')) return '<i class="fa-brands fa-html5 text-orange-500"></i>';
             if (filename.endsWith('.css')) return '<i class="fa-brands fa-css3-alt text-blue-500"></i>';
             if (filename.endsWith('.js') || filename.endsWith('.jsx')) return '<i class="fa-brands fa-square-js text-yellow-500"></i>';
-            if (filename.endsWith('.json')) return '<i class="fa-solid fa-code text-zinc-400"></i>';
-            if (filename.endsWith('.md')) return '<i class="fa-solid fa-file-lines text-zinc-400"></i>';
-            return '<i class="fa-regular fa-file-code text-zinc-400"></i>';
+            if (filename.endsWith('.json')) return '<i class="fa-solid fa-code text-gray-400"></i>';
+            if (filename.endsWith('.md')) return '<i class="fa-solid fa-file-lines text-gray-400"></i>';
+            return '<i class="fa-regular fa-file-code text-gray-400"></i>';
         }
 
         function recordDemoReflog(action, oldHash, newHash, description) {
@@ -934,15 +911,15 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             const commitObj = {
                 tree: treeHash,
                 parent: null,
-                message: "Initial repository setup",
+                message: "System baseline initialized",
                 timestamp: new Date().toISOString(),
-                author: "MiniGit <dev@minigit.local>"
+                author: "Pulse Admin <admin@pulse.io>"
             };
             const commitHash = await sha256(JSON.stringify(commitObj));
             OBJECTS[commitHash] = { type: 'commit', data: commitObj };
             BRANCHES["main"] = commitHash;
 
-            recordDemoReflog("commit", null, commitHash, "Initial repository setup");
+            recordDemoReflog("commit", null, commitHash, "System baseline initialized");
             updateUI();
         }
 
@@ -960,8 +937,6 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             if (!VFS[ACTIVE_FILE]) {
                 ACTIVE_FILE = Object.keys(VFS)[0] || "index.html";
             }
-            const repoDisp = document.getElementById('repoNameDisplay');
-            if (repoDisp) repoDisp.textContent = live.repoName || 'minigit';
             updateUI();
         }
 
@@ -1006,6 +981,19 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
         /* ---------------------------------------------------------------------
          * GIT STAGING & COMMIT OPERATIONS
          * --------------------------------------------------------------------- */
+        function openCommitModal() {
+            const modal = document.getElementById('commitModal');
+            const input = document.getElementById('commitMsgInput');
+            if (input) input.value = '';
+            if (modal) modal.classList.remove('hidden');
+            setTimeout(() => input?.focus(), 50);
+        }
+
+        function closeCommitModal() {
+            const modal = document.getElementById('commitModal');
+            if (modal) modal.classList.add('hidden');
+        }
+
         async function stageFile(filepath) {
             if (IS_SERVER_MODE) {
                 const res = await apiPost('stage', { path: filepath });
@@ -1078,6 +1066,8 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                 return;
             }
 
+            closeCommitModal();
+
             if (IS_SERVER_MODE) {
                 const res = await apiPost('commit', { message });
                 if (res) {
@@ -1117,7 +1107,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                 parent: parentHash,
                 message,
                 timestamp: new Date().toISOString(),
-                author: "MiniGit <dev@minigit.local>"
+                author: "Pulse Admin <admin@pulse.io>"
             };
 
             const commitHash = await sha256(JSON.stringify(commitObj));
@@ -1133,7 +1123,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
         }
 
         /* ---------------------------------------------------------------------
-         * FEATURE 1: VISUAL TIME TRAVEL SLIDER ENGINE
+         * TIME TRAVEL SLIDER ENGINE
          * --------------------------------------------------------------------- */
         function initTimeTravelSlider() {
             TIME_TRAVEL_COMMITS = getChronologicalCommits();
@@ -1178,7 +1168,6 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             const msgEl = document.getElementById('timeTravelCommitMessage');
             if (msgEl) msgEl.textContent = c.message || '';
 
-            // Render historical files at this snapshot
             const listEl = document.getElementById('timeTravelFileList');
             const countEl = document.getElementById('timeTravelFileCount');
             if (listEl) {
@@ -1190,20 +1179,18 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
 
                 filePaths.forEach((fp, i) => {
                     const row = document.createElement('div');
-                    row.className = "flex items-center justify-between py-1.5 px-3 rounded-lg hover:bg-zinc-800 text-zinc-300 hover:text-white cursor-pointer transition";
+                    row.className = "flex items-center justify-between py-1.5 px-3 rounded-lg hover:bg-gray-100 text-gray-700 hover:text-black cursor-pointer transition";
                     row.onclick = () => previewTimeTravelFile(fp, treeData[fp]);
                     row.innerHTML = `
                         <div class="flex items-center space-x-2 truncate">
-                            <i class="fa-regular fa-file-code text-zinc-500"></i>
+                            <i class="fa-regular fa-file-code text-gray-400"></i>
                             <span class="truncate">${fp}</span>
                         </div>
-                        <i class="fa-solid fa-eye text-[10px] text-zinc-500"></i>
+                        <i class="fa-solid fa-eye text-[10px] text-gray-400"></i>
                     `;
                     listEl.appendChild(row);
 
-                    if (i === 0) {
-                        previewTimeTravelFile(fp, treeData[fp]);
-                    }
+                    if (i === 0) previewTimeTravelFile(fp, treeData[fp]);
                 });
             }
         }
@@ -1294,14 +1281,12 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
         }
 
         /* ---------------------------------------------------------------------
-         * FEATURE 2: SERVERLESS P2P & LAN SYNC ENGINE
+         * SERVERLESS P2P & LAN SYNC
          * --------------------------------------------------------------------- */
         function openLanSyncModal() {
             const modal = document.getElementById('lanSyncModal');
             const addrEl = document.getElementById('localPeerAddressText');
-            if (addrEl) {
-                addrEl.textContent = window.location.origin || "http://localhost:8080";
-            }
+            if (addrEl) addrEl.textContent = window.location.origin || "http://localhost:8080";
             if (modal) modal.classList.remove('hidden');
         }
 
@@ -1335,7 +1320,6 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                     const postRes = await apiPost('sync/import-bundle', bundle);
                     if (postRes) showToast("Synchronized with LAN peer successfully!");
                 } else {
-                    // Merge bundle in client mode
                     if (bundle.objects) Object.assign(OBJECTS, bundle.objects);
                     if (bundle.branches) Object.assign(BRANCHES, bundle.branches);
                     recordDemoReflog("p2p_sync", null, null, `Pulled from peer ${peerUrl}`);
@@ -1414,7 +1398,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(bundleObj, null, 2));
             const dlAnchor = document.createElement('a');
             dlAnchor.setAttribute("href", dataStr);
-            dlAnchor.setAttribute("download", `minigit-bundle-${Date.now()}.json`);
+            dlAnchor.setAttribute("download", `pulse-bundle-${Date.now()}.json`);
             document.body.appendChild(dlAnchor);
             dlAnchor.click();
             dlAnchor.remove();
@@ -1447,7 +1431,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
         }
 
         /* ---------------------------------------------------------------------
-         * FEATURE 3: ESSENTIAL EVERYDAY SAFETY NETS & REFLOG
+         * SAFETY NETS & REFLOG
          * --------------------------------------------------------------------- */
         async function executeQuickUndo() {
             if (IS_SERVER_MODE) {
@@ -1456,7 +1440,6 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                 return;
             }
 
-            // Demo Undo
             const curHash = BRANCHES[CURRENT_BRANCH];
             if (!curHash || !OBJECTS[curHash]) {
                 showToast("Nothing to undo", "error");
@@ -1464,7 +1447,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             }
             const parent = OBJECTS[curHash].data.parent;
             if (!parent) {
-                showToast("Cannot undo the initial commit", "error");
+                showToast("Cannot undo the initial baseline", "error");
                 return;
             }
             BRANCHES[CURRENT_BRANCH] = parent;
@@ -1476,10 +1459,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
         async function executeQuickStash() {
             if (IS_SERVER_MODE) {
                 const res = await apiPost('stash/save', { message: 'Quick Stash' });
-                if (res) {
-                    showToast(res.message || "Saved stash checkpoint");
-                    updateStashBadge(true);
-                }
+                if (res) showToast(res.message || "Saved stash checkpoint");
                 return;
             }
 
@@ -1494,7 +1474,6 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                 }
             }
             recordDemoReflog("stash", headHash, headHash, "Saved working directory stash");
-            updateStashBadge(true);
             showToast("Saved working changes into safety stash");
             updateUI();
         }
@@ -1502,10 +1481,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
         async function executePopStash() {
             if (IS_SERVER_MODE) {
                 const res = await apiPost('stash/pop');
-                if (res) {
-                    showToast(res.message || "Stash applied");
-                    updateStashBadge(false);
-                }
+                if (res) showToast(res.message || "Stash applied");
                 return;
             }
 
@@ -1515,18 +1491,9 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             }
             VFS = { ...DEMO_STASH };
             DEMO_STASH = null;
-            updateStashBadge(false);
             recordDemoReflog("stash_pop", null, null, "Restored and popped stash");
             showToast("Restored and applied stash");
             updateUI();
-        }
-
-        function updateStashBadge(hasStash) {
-            const badge = document.getElementById('stashCountBadge');
-            if (badge) {
-                badge.textContent = hasStash ? "1 WIP" : "clean";
-                badge.className = hasStash ? "font-mono text-emerald-400 font-bold" : "font-mono text-zinc-400";
-            }
         }
 
         async function openSafetyNetModal() {
@@ -1535,7 +1502,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             const countBadge = document.getElementById('reflogEntryCountBadge');
             if (!modal || !list) return;
 
-            list.innerHTML = '<div class="text-zinc-500 text-xs py-4 text-center">Loading flight recorder...</div>';
+            list.innerHTML = '<div class="text-gray-400 text-xs py-4 text-center">Loading flight recorder...</div>';
             modal.classList.remove('hidden');
 
             let entries = [];
@@ -1552,25 +1519,25 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             if (countBadge) countBadge.textContent = `${entries.length} records`;
 
             if (entries.length === 0) {
-                list.innerHTML = '<div class="text-zinc-500 text-xs py-4 text-center">No safety log entries yet.</div>';
+                list.innerHTML = '<div class="text-gray-400 text-xs py-4 text-center">No safety log entries yet.</div>';
                 return;
             }
 
             list.innerHTML = '';
             entries.forEach(r => {
                 const row = document.createElement('div');
-                row.className = "p-3 bg-zinc-900 border border-zinc-800 rounded-xl flex items-center justify-between text-xs";
+                row.className = "p-3 bg-gray-50 border border-gray-200 rounded-xl flex items-center justify-between text-xs";
                 row.innerHTML = `
                     <div class="space-y-1">
                         <div class="flex items-center space-x-2">
-                            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-zinc-800 text-white">${r.action}</span>
-                            <span class="text-zinc-500 text-[10px]">${formatCommitDateTime(r.timestamp)}</span>
+                            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-gray-200 text-gray-800">${r.action}</span>
+                            <span class="text-gray-400 text-[10px]">${formatCommitDateTime(r.timestamp)}</span>
                         </div>
-                        <div class="text-zinc-200">${r.description}</div>
-                        <div class="text-[10px] text-zinc-500 font-mono">${r.oldHash.substring(0, 7)} &rarr; ${r.newHash.substring(0, 7)}</div>
+                        <div class="text-gray-800">${r.description}</div>
+                        <div class="text-[10px] text-gray-400 font-mono">${r.oldHash.substring(0, 7)} &rarr; ${r.newHash.substring(0, 7)}</div>
                     </div>
                     ${r.newHash && r.newHash !== '0000000' ? `
-                    <button onclick="restoreSafetyNetCommit('${r.newHash}')" class="px-3 py-1.5 rounded-full bg-white hover:bg-zinc-200 text-black font-semibold text-xs transition cursor-pointer">Restore</button>
+                    <button onclick="restoreSafetyNetCommit('${r.newHash}')" class="px-3 py-1.5 rounded-full bg-black hover:bg-gray-800 text-white font-semibold text-xs transition cursor-pointer">Restore</button>
                     ` : ''}
                 `;
                 list.appendChild(row);
@@ -1595,7 +1562,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
         }
 
         /* ---------------------------------------------------------------------
-         * FEATURE 4: GIT INTEROPERABILITY BRIDGE (.git)
+         * GIT INTEROPERABILITY BRIDGE (.git)
          * --------------------------------------------------------------------- */
         async function openGitBridgeModal() {
             const modal = document.getElementById('gitBridgeModal');
@@ -1611,13 +1578,13 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                         if (statusText) statusText.textContent = "Standard .git directory detected in current workspace.";
                         if (pill) {
                             pill.textContent = "Ready";
-                            pill.className = "px-3 py-1 rounded-full text-xs font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800";
+                            pill.className = "px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800";
                         }
                     } else {
                         if (statusText) statusText.textContent = "No .git folder found. Exporting will initialize a standard Git repo.";
                         if (pill) {
                             pill.textContent = "Not Initialized";
-                            pill.className = "px-3 py-1 rounded-full text-xs font-semibold bg-zinc-800 text-zinc-400";
+                            pill.className = "px-3 py-1 rounded-full text-xs font-semibold bg-gray-200 text-gray-700";
                         }
                     }
                 } catch (e) {}
@@ -1625,7 +1592,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                 if (statusText) statusText.textContent = "Running in browser preview mode. Connect via 'minigit ui' to bridge with system git.";
                 if (pill) {
                     pill.textContent = "Browser Mode";
-                    pill.className = "px-3 py-1 rounded-full text-xs font-semibold bg-zinc-800 text-zinc-400";
+                    pill.className = "px-3 py-1 rounded-full text-xs font-semibold bg-gray-200 text-gray-700";
                 }
             }
         }
@@ -1844,13 +1811,58 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             renderDiffView();
             renderPreviewDashboard();
             initTimeTravelSlider();
+            renderDashboardStream();
 
-            // Subtitle hero strip stats
+            // Stat Cards updates matching the screenshot
+            const commits = getChronologicalCommits();
+            const totalCommitsEl = document.getElementById('cardTotalCommits');
+            if (totalCommitsEl) totalCommitsEl.textContent = commits.length;
+
+            const activeBranchesEl = document.getElementById('cardActiveBranches');
+            if (activeBranchesEl) activeBranchesEl.textContent = Object.keys(BRANCHES).length;
+
+            const totalFilesEl = document.getElementById('cardTotalFiles');
+            if (totalFilesEl) totalFilesEl.textContent = Object.keys(VFS).length;
+
+            // Hero Dark Banner updates
             const curHead = BRANCHES[CURRENT_BRANCH];
-            const headDisp = document.getElementById('stripHeadHash');
-            if (headDisp) headDisp.textContent = curHead ? curHead.substring(0, 7) : 'root';
-            const fCount = document.getElementById('stripFileCount');
-            if (fCount) fCount.textContent = Object.keys(VFS).length;
+            const heroHead = document.getElementById('heroHeadHash');
+            if (heroHead) heroHead.textContent = curHead ? `HEAD: ${curHead.substring(0, 7)}` : 'HEAD: baseline';
+
+            const heroChecks = document.getElementById('heroChecksText');
+            if (heroChecks) heroChecks.textContent = commits.length + DEMO_REFLOG.length;
+        }
+
+        function renderDashboardStream() {
+            const stream = document.getElementById('recentChecksStream');
+            if (!stream) return;
+            stream.innerHTML = '';
+
+            const commits = getChronologicalCommits();
+            if (commits.length === 0) {
+                stream.innerHTML = '<div class="text-xs text-gray-400 py-8 text-center">No recent checks or commits recorded.</div>';
+                return;
+            }
+
+            commits.slice(-5).reverse().forEach(c => {
+                const row = document.createElement('div');
+                row.className = "p-3.5 bg-gray-50 border border-gray-150 rounded-xl hover:bg-gray-100/70 transition flex items-center justify-between text-xs cursor-pointer";
+                row.onclick = () => openCommitDetailModal(c.hash);
+                row.innerHTML = `
+                    <div class="space-y-1 truncate pr-2">
+                        <div class="flex items-center space-x-2">
+                            <span class="font-bold text-gray-900 truncate">${c.message}</span>
+                        </div>
+                        <div class="flex items-center space-x-2 text-[11px] text-gray-400 font-mono">
+                            <span class="text-gray-600 font-bold">[${c.hash.substring(0, 7)}]</span>
+                            <span>&bull;</span>
+                            <span>${c.author}</span>
+                        </div>
+                    </div>
+                    <span class="text-[11px] text-gray-400 shrink-0 font-mono">${formatCommitDateTime(c.timestamp)}</span>
+                `;
+                stream.appendChild(row);
+            });
         }
 
         function renderFileTree() {
@@ -1869,11 +1881,11 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                 if (folderName !== 'root') {
                     const isCollapsed = !!FOLDER_COLLAPSED_STATE[folderName];
                     const folderEl = document.createElement('div');
-                    folderEl.className = "flex items-center space-x-1.5 py-1.5 px-2 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-900 cursor-pointer font-medium text-xs transition";
+                    folderEl.className = "flex items-center space-x-1.5 py-1 px-2 rounded-lg text-gray-600 hover:text-black hover:bg-gray-100 cursor-pointer font-medium text-xs transition";
                     folderEl.onclick = () => toggleFolderCollapse(folderName);
                     folderEl.innerHTML = `
-                        <i class="fa-solid fa-chevron-right text-[9px] transition-transform ${isCollapsed ? '' : 'rotate-90'}"></i>
-                        <i class="fa-regular fa-folder text-zinc-500"></i>
+                        <i class="fa-solid fa-chevron-right text-[8px] transition-transform ${isCollapsed ? '' : 'rotate-90'}"></i>
+                        <i class="fa-regular fa-folder text-gray-400"></i>
                         <span>${folderName}</span>
                     `;
                     container.appendChild(folderEl);
@@ -1885,7 +1897,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                     const { filename } = splitPath(filepath);
                     const isSelected = (filepath === ACTIVE_FILE);
                     const fileEl = document.createElement('div');
-                    fileEl.className = `flex items-center justify-between py-1.5 px-3 rounded-full cursor-pointer transition text-xs ${isSelected ? 'bg-white text-black font-semibold shadow-sm' : 'text-zinc-300 hover:bg-zinc-900 hover:text-white'}`;
+                    fileEl.className = `flex items-center justify-between py-1.5 px-3 rounded-lg cursor-pointer transition text-xs ${isSelected ? 'bg-black text-white font-medium shadow-xs' : 'text-gray-700 hover:bg-gray-100 hover:text-black'}`;
                     fileEl.onclick = () => openFileInEditor(filepath);
                     fileEl.innerHTML = `
                         <div class="flex items-center space-x-2 truncate">
@@ -1903,7 +1915,8 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             const unstagedList = document.getElementById('unstagedList');
             const stagedLabel = document.getElementById('stagedCountLabel');
             const unstagedLabel = document.getElementById('unstagedCountLabel');
-            const sidebarBadge = document.getElementById('sidebarChangesBadge');
+            const cardUnstaged = document.getElementById('cardUnstagedChanges');
+            const cardStaged = document.getElementById('cardStagedFiles');
 
             if (stagedList) stagedList.innerHTML = '';
             if (unstagedList) unstagedList.innerHTML = '';
@@ -1923,13 +1936,13 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                 stagedCount++;
                 if (stagedList) {
                     const item = document.createElement('div');
-                    item.className = "flex items-center justify-between p-2.5 bg-[#141414] border border-zinc-800 rounded-2xl text-xs";
+                    item.className = "flex items-center justify-between p-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs";
                     item.innerHTML = `
                         <div class="flex items-center space-x-2 truncate cursor-pointer" onclick="openFileInEditor('${filepath}')">
-                            <span class="text-xs text-emerald-400 font-bold">A</span>
-                            <span class="truncate text-zinc-100 font-mono">${filepath}</span>
+                            <span class="text-xs text-emerald-600 font-bold">A</span>
+                            <span class="truncate text-gray-900 font-mono">${filepath}</span>
                         </div>
-                        <button onclick="unstageFile('${filepath}')" class="w-6 h-6 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white flex items-center justify-center transition shadow-xs" title="Unstage"><i class="fa-solid fa-minus text-[10px]"></i></button>
+                        <button onclick="unstageFile('${filepath}')" class="w-6 h-6 rounded-full bg-white border border-gray-200 text-gray-600 hover:text-black flex items-center justify-center transition shadow-xs" title="Unstage"><i class="fa-solid fa-minus text-[10px]"></i></button>
                     `;
                     stagedList.appendChild(item);
                 }
@@ -1954,16 +1967,16 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                     unstagedCount++;
                     if (unstagedList) {
                         const item = document.createElement('div');
-                        item.className = "flex items-center justify-between p-2.5 bg-[#141414] border border-zinc-800 rounded-2xl text-xs";
-                        const statusColor = status === 'U' ? 'text-zinc-400' : 'text-zinc-100';
+                        item.className = "flex items-center justify-between p-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs";
+                        const statusColor = status === 'U' ? 'text-gray-500' : 'text-gray-900';
                         item.innerHTML = `
                             <div class="flex items-center space-x-2 truncate cursor-pointer" onclick="openFileInEditor('${filepath}')">
                                 <span class="text-xs ${statusColor} font-bold">${status}</span>
-                                <span class="truncate text-zinc-100 font-mono">${filepath}</span>
+                                <span class="truncate text-gray-900 font-mono">${filepath}</span>
                             </div>
                             <div class="flex items-center space-x-1.5">
-                                <button onclick="discardFile('${filepath}')" class="w-6 h-6 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-500 hover:text-rose-400 flex items-center justify-center transition shadow-xs" title="Discard changes"><i class="fa-solid fa-rotate-left text-[10px]"></i></button>
-                                <button onclick="stageFile('${filepath}')" class="w-6 h-6 rounded-full bg-white text-black hover:bg-zinc-200 flex items-center justify-center transition shadow-xs font-semibold" title="Stage file"><i class="fa-solid fa-plus text-[10px]"></i></button>
+                                <button onclick="discardFile('${filepath}')" class="w-6 h-6 rounded-full bg-white border border-gray-200 text-gray-400 hover:text-rose-600 flex items-center justify-center transition shadow-xs" title="Discard changes"><i class="fa-solid fa-rotate-left text-[10px]"></i></button>
+                                <button onclick="stageFile('${filepath}')" class="w-6 h-6 rounded-full bg-black text-white hover:bg-gray-800 flex items-center justify-center transition shadow-xs font-semibold" title="Stage file"><i class="fa-solid fa-plus text-[10px]"></i></button>
                             </div>
                         `;
                         unstagedList.appendChild(item);
@@ -1973,12 +1986,8 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
 
             if (stagedLabel) stagedLabel.textContent = `(${stagedCount})`;
             if (unstagedLabel) unstagedLabel.textContent = `(${unstagedCount})`;
-            if (sidebarBadge) {
-                const total = stagedCount + unstagedCount;
-                sidebarBadge.textContent = total;
-                if (total > 0) sidebarBadge.classList.remove('hidden');
-                else sidebarBadge.classList.add('hidden');
-            }
+            if (cardStaged) cardStaged.textContent = stagedCount;
+            if (cardUnstaged) cardUnstaged.textContent = unstagedCount;
         }
 
         function updateBranchDropdown() {
@@ -2068,7 +2077,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             let y = 50;
             const x = 70;
             const nodeRadius = 14;
-            const totalHeight = Math.max(360, y + commitNodes.length * 75 + 40);
+            const totalHeight = Math.max(380, y + commitNodes.length * 75 + 40);
             svg.setAttribute('height', totalHeight);
             svg.style.minHeight = `${totalHeight}px`;
 
@@ -2086,7 +2095,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                         line.setAttribute('y1', parentY);
                         line.setAttribute('x2', x);
                         line.setAttribute('y2', nodeY);
-                        line.setAttribute('stroke', '#27272a');
+                        line.setAttribute('stroke', '#E5E7EB');
                         line.setAttribute('stroke-width', '2.5');
                         svg.appendChild(line);
                     }
@@ -2101,8 +2110,8 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                 circle.setAttribute('cx', x);
                 circle.setAttribute('cy', nodeY);
                 circle.setAttribute('r', isHead ? nodeRadius + 1 : nodeRadius);
-                circle.setAttribute('fill', isHead ? '#FFFFFF' : '#18181b');
-                circle.setAttribute('stroke', isHead ? '#FFFFFF' : '#3f3f46');
+                circle.setAttribute('fill', isHead ? '#000000' : '#FFFFFF');
+                circle.setAttribute('stroke', isHead ? '#000000' : '#D1D5DB');
                 circle.setAttribute('stroke-width', isHead ? '3' : '2');
                 group.appendChild(circle);
 
@@ -2110,7 +2119,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                 const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
                 text.setAttribute('x', x + 30);
                 text.setAttribute('y', nodeY + 4);
-                text.setAttribute('fill', isHead ? '#FFFFFF' : '#d4d4d8');
+                text.setAttribute('fill', '#111827');
                 text.setAttribute('font-size', '12px');
                 text.setAttribute('font-family', 'JetBrains Mono, monospace');
                 text.setAttribute('font-weight', isHead ? '600' : '400');
@@ -2129,14 +2138,14 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                         rect.setAttribute('width', bWidth);
                         rect.setAttribute('height', 20);
                         rect.setAttribute('rx', 10);
-                        rect.setAttribute('fill', isCur ? '#FFFFFF' : '#18181b');
-                        rect.setAttribute('stroke', isCur ? '#FFFFFF' : '#27272a');
+                        rect.setAttribute('fill', isCur ? '#000000' : '#F3F4F6');
+                        rect.setAttribute('stroke', isCur ? '#000000' : '#E5E7EB');
                         group.appendChild(rect);
 
                         const bText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
                         bText.setAttribute('x', labelOffset + bWidth / 2);
                         bText.setAttribute('y', nodeY + 4);
-                        bText.setAttribute('fill', isCur ? '#0F0F0F' : '#a1a1aa');
+                        bText.setAttribute('fill', isCur ? '#FFFFFF' : '#4B5563');
                         bText.setAttribute('font-size', '10px');
                         bText.setAttribute('font-family', 'Inter, sans-serif');
                         bText.setAttribute('text-anchor', 'middle');
@@ -2156,118 +2165,53 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
          * TAB SWITCHERS & PREVIEW
          * --------------------------------------------------------------------- */
         function switchViewTab(view) {
-            const editorView = document.getElementById('viewContainerEditor');
-            const diffView = document.getElementById('viewContainerDiff');
+            const dashView = document.getElementById('viewContainerDashboard');
             const graphView = document.getElementById('viewContainerGraph');
             const timelineView = document.getElementById('viewContainerTimeline');
+            const diffView = document.getElementById('viewContainerDiff');
+            const editorView = document.getElementById('viewContainerEditor');
             const previewView = document.getElementById('viewContainerPreview');
 
-            const tabEditor = document.getElementById('viewTabEditor');
-            const tabDiff = document.getElementById('viewTabDiff');
+            const tabDash = document.getElementById('viewTabDashboard');
             const tabGraph = document.getElementById('viewTabGraph');
             const tabTimeline = document.getElementById('viewTabTimeline');
+            const tabDiff = document.getElementById('viewTabDiff');
+            const tabEditor = document.getElementById('viewTabEditor');
             const tabPreview = document.getElementById('viewTabPreview');
 
-            [editorView, diffView, graphView, timelineView, previewView].forEach(v => v?.classList.add('hidden'));
-            [tabEditor, tabDiff, tabGraph, tabTimeline, tabPreview].forEach(t => {
-                if (t) t.className = "px-4 py-1.5 rounded-full text-xs font-medium text-zinc-400 hover:text-white transition flex items-center space-x-1.5 cursor-pointer";
+            [dashView, graphView, timelineView, diffView, editorView, previewView].forEach(v => v?.classList.add('hidden'));
+            [tabDash, tabGraph, tabTimeline, tabDiff, tabEditor, tabPreview].forEach(t => {
+                if (t) t.className = "px-4 py-2 rounded-full text-xs font-medium text-gray-600 hover:text-black hover:bg-gray-100 flex items-center space-x-2 cursor-pointer transition";
             });
 
-            if (view === 'editor') {
-                editorView?.classList.remove('hidden');
-                if (tabEditor) tabEditor.className = "px-4 py-1.5 rounded-full text-xs font-semibold bg-white text-black shadow-sm transition flex items-center space-x-1.5 cursor-pointer";
+            if (view === 'dashboard') {
+                dashView?.classList.remove('hidden');
+                if (tabDash) tabDash.className = "px-4 py-2 rounded-full text-xs font-semibold bg-black text-white flex items-center space-x-2 cursor-pointer shadow-xs transition";
+                renderDashboardStream();
+            } else if (view === 'graph') {
+                graphView?.classList.remove('hidden');
+                if (tabGraph) tabGraph.className = "px-4 py-2 rounded-full text-xs font-semibold bg-black text-white flex items-center space-x-2 cursor-pointer shadow-xs transition";
+                renderCommitDagGraph();
             } else if (view === 'timeline') {
                 timelineView?.classList.remove('hidden');
-                if (tabTimeline) tabTimeline.className = "px-4 py-1.5 rounded-full text-xs font-semibold bg-white text-black shadow-sm transition flex items-center space-x-1.5 cursor-pointer";
+                if (tabTimeline) tabTimeline.className = "px-4 py-2 rounded-full text-xs font-semibold bg-black text-white flex items-center space-x-2 cursor-pointer shadow-xs transition";
                 initTimeTravelSlider();
             } else if (view === 'diff') {
                 diffView?.classList.remove('hidden');
-                if (tabDiff) tabDiff.className = "px-4 py-1.5 rounded-full text-xs font-semibold bg-white text-black shadow-sm transition flex items-center space-x-1.5 cursor-pointer";
+                if (tabDiff) tabDiff.className = "px-4 py-2 rounded-full text-xs font-semibold bg-black text-white flex items-center space-x-2 cursor-pointer shadow-xs transition";
                 populateDiffFileSelect();
                 renderDiffView();
-            } else if (view === 'graph') {
-                graphView?.classList.remove('hidden');
-                if (tabGraph) tabGraph.className = "px-4 py-1.5 rounded-full text-xs font-semibold bg-white text-black shadow-sm transition flex items-center space-x-1.5 cursor-pointer";
-                renderCommitDagGraph();
+            } else if (view === 'editor') {
+                editorView?.classList.remove('hidden');
+                if (tabEditor) tabEditor.className = "px-4 py-2 rounded-full text-xs font-semibold bg-black text-white flex items-center space-x-2 cursor-pointer shadow-xs transition";
             } else if (view === 'preview') {
                 previewView?.classList.remove('hidden');
-                if (tabPreview) tabPreview.className = "px-4 py-1.5 rounded-full text-xs font-semibold bg-white text-black shadow-sm transition flex items-center space-x-1.5 cursor-pointer";
+                if (tabPreview) tabPreview.className = "px-4 py-2 rounded-full text-xs font-semibold bg-black text-white flex items-center space-x-2 cursor-pointer shadow-xs transition";
                 renderPreviewDashboard();
             }
         }
 
-        function switchSidebarTab(tab) {
-            const filesPanel = document.getElementById('tabFilesPanel');
-            const gitPanel = document.getElementById('tabGitPanel');
-            const btnFiles = document.getElementById('btnNavFiles');
-            const btnGit = document.getElementById('btnNavGit');
-
-            if (tab === 'files') {
-                filesPanel?.classList.remove('hidden');
-                gitPanel?.classList.add('hidden');
-                if (btnFiles) btnFiles.className = "flex-1 py-1 text-center font-semibold rounded-full bg-white text-black shadow-sm transition";
-                if (btnGit) btnGit.className = "flex-1 py-1 text-center font-medium text-zinc-400 hover:text-white transition rounded-full flex items-center justify-center space-x-1";
-            } else {
-                filesPanel?.classList.add('hidden');
-                gitPanel?.classList.remove('hidden');
-                if (btnGit) btnGit.className = "flex-1 py-1 text-center font-semibold rounded-full bg-white text-black shadow-sm transition flex items-center justify-center space-x-1";
-                if (btnFiles) btnFiles.className = "flex-1 py-1 text-center font-medium text-zinc-400 hover:text-white transition rounded-full";
-                renderSourceControlLists();
-            }
-        }
-
-        function switchPreviewSubTab(subtab) {
-            const dash = document.getElementById('previewSubViewDashboard');
-            const feed = document.getElementById('previewSubViewFeedback');
-            const btnDash = document.getElementById('previewSubBtnDashboard');
-            const btnFeed = document.getElementById('previewSubBtnFeedback');
-
-            if (subtab === 'dashboard') {
-                dash?.classList.remove('hidden');
-                feed?.classList.add('hidden');
-                if (btnDash) btnDash.className = "px-4 py-1 rounded-full text-xs font-semibold bg-white text-black transition";
-                if (btnFeed) btnFeed.className = "px-4 py-1 rounded-full text-xs font-medium text-zinc-400 hover:text-white transition";
-            } else {
-                dash?.classList.add('hidden');
-                feed?.classList.remove('hidden');
-                if (btnFeed) btnFeed.className = "px-4 py-1 rounded-full text-xs font-semibold bg-white text-black transition";
-                if (btnDash) btnDash.className = "px-4 py-1 rounded-full text-xs font-medium text-zinc-400 hover:text-white transition";
-            }
-        }
-
         function renderPreviewDashboard() {
-            const commits = Object.values(OBJECTS).filter(o => o.type === 'commit');
-            const cCount = document.getElementById('metricTotalCommits');
-            if (cCount) cCount.textContent = commits.length;
-
-            const bCount = document.getElementById('metricTotalBranches');
-            if (bCount) bCount.textContent = Object.keys(BRANCHES).length;
-
-            const fCount = document.getElementById('metricTotalFiles');
-            if (fCount) fCount.textContent = Object.keys(VFS).length;
-
-            const curHead = document.getElementById('metricCurrentHead');
-            if (curHead) curHead.textContent = CURRENT_BRANCH;
-
-            // Activity stream
-            const stream = document.getElementById('previewActivityStream');
-            if (stream) {
-                stream.innerHTML = '';
-                commits.slice(-6).reverse().forEach(c => {
-                    const el = document.createElement('div');
-                    el.className = "p-3 bg-zinc-900/60 border border-zinc-800 rounded-xl space-y-1";
-                    el.innerHTML = `
-                        <div class="flex justify-between items-center text-xs">
-                            <span class="font-bold text-white">${c.data.message}</span>
-                            <span class="text-zinc-500 text-[10px]">${formatCommitDateTime(c.data.timestamp)}</span>
-                        </div>
-                        <div class="text-[11px] text-zinc-400">${c.data.author}</div>
-                    `;
-                    stream.appendChild(el);
-                });
-            }
-
-            // Populate sandbox preview file dropdown
             const pSelect = document.getElementById('previewFileSelect');
             if (pSelect) {
                 pSelect.innerHTML = '';
@@ -2290,32 +2234,6 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             const file = pSelect?.value || 'index.html';
             const html = VFS[file] || '<div style="padding:20px;font-family:sans-serif;color:#333;">No preview file selected</div>';
             iframe.srcdoc = html;
-        }
-
-        function submitUserFeedback() {
-            const input = document.getElementById('feedbackCommentInput');
-            const authorInput = document.getElementById('feedbackAuthorInput');
-            const comment = input?.value?.trim();
-            if (!comment) {
-                showToast("Please enter feedback", "error");
-                return;
-            }
-            const author = authorInput?.value?.trim() || "Anonymous";
-            const container = document.getElementById('feedbackListContainer');
-            if (container) {
-                const item = document.createElement('div');
-                item.className = "p-3.5 bg-zinc-900/60 border border-zinc-800 rounded-2xl text-xs space-y-1";
-                item.innerHTML = `
-                    <div class="flex justify-between text-zinc-400 text-[11px]">
-                        <span class="font-semibold text-white">${author}</span>
-                        <span>Just now</span>
-                    </div>
-                    <p class="text-zinc-200">${comment}</p>
-                `;
-                container.prepend(item);
-            }
-            if (input) input.value = '';
-            showToast("Feedback submitted. Thank you!");
         }
 
         /* ---------------------------------------------------------------------
@@ -2350,7 +2268,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             }
 
             openFileInEditor(Object.keys(VFS)[0] || 'index.html');
-            switchViewTab('graph');
+            switchViewTab('dashboard');
         };
     </script>
 </body>
