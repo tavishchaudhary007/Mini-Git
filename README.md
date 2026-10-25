@@ -61,7 +61,7 @@ Put `setup.bat` / `setup.sh` in the project root (next to `src/` and `include/`)
 | Windows | `setup.bat` (or double-click it) |
 | Linux / macOS / Git Bash | `bash setup.sh` |
 
-It builds the executable, creates a `minigit-demo` folder next to the project, and runs `init`, `add`, `commit` and `log` on a sample file. Use that folder to try the other commands. The full manual steps are below if you want them.
+It builds the executable, automatically registers Mini-Git to your User PATH on Windows, creates a `minigit-demo` folder next to the project, and runs `init`, `add`, `commit` and `log` on a sample file. Use that folder to try the other commands. The full manual steps are below if you want them.
 
 ## Build
 
@@ -99,14 +99,14 @@ Runs a scripted session (init, add, commit, branch, checkout, merge, error cases
 
 ### Step 0: set up a test folder
 
-**Windows (PowerShell)**
-```
-# run from the folder that contains the minigit folder
+If you ran `setup.bat`, `minigit` is already configured in your PATH! Open a new terminal and you can run `minigit` from any folder:
+
+**Windows (PowerShell or cmd)**
+```powershell
 mkdir test
-copy minigit\minigit.exe test
 cd test
 ```
-Use `.\minigit` in PowerShell, or `minigit` in cmd. The examples below write `minigit`.
+*(If you built manually without `setup.bat`, either copy `minigit.exe` into your test folder or add the repository folder to your PATH.)*
 
 **Linux / macOS**
 ```bash
