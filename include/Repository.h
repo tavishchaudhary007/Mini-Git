@@ -71,6 +71,8 @@ public:
     std::vector<std::string> branches() const { return refs_.listBranches(); }
     std::string currentBranch() const { return refs_.currentBranch(); }
     Hash head() const { return refs_.headCommit(); }
+    Hash branchTip(const std::string& name) const { return refs_.branchTip(name); }
+    bool branchExists(const std::string& name) const { return refs_.branchExists(name); }
     void checkout(const std::string& target);
     std::string merge(const std::string& branch);
 

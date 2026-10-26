@@ -6,6 +6,8 @@
 #include <sstream>
 #include "DiffEngine.h"
 #include "HtmlExporter.h"
+#include "Base64.h"
+#include "Json.h"
 
 Repository::Repository(const fs::path& root)
     : root_(root), gitDir_(root / ".minigit"), store_(gitDir_ / "objects"),
@@ -424,94 +426,288 @@ std::string Repository::stashPop() {
 }
 
 std::string Repository::exportBundleJson() const {
-    return HtmlExporter::toJson(snapshot(), root_.filename().string());
+    return HtmlExporter::toJson(snapshot(), root_.filename().string(), true);
+}
+
+static std::time_t parseIsoTimestamp(const std::string& iso) {
+    if (iso.size() < 19) return 0;
+    try {
+        std::tm tm{};
+        tm.tm_year = std::stoi(iso.substr(0, 4)) - 1900;
+        tm.tm_mon  = std::stoi(iso.substr(5, 2)) - 1;
+        tm.tm_mday = std::stoi(iso.substr(8, 2));
+        tm.tm_hour = std::stoi(iso.substr(11, 2));
+        tm.tm_min  = std::stoi(iso.substr(14, 2));
+        tm.tm_sec  = std::stoi(iso.substr(17, 2));
+#if defined(_WIN32)
+        return _mkgmtime(&tm);
+#else
+        return timegm(&tm);
+#endif
+    } catch (...) {
+        return 0;
+    }
 }
 
 std::string Repository::importBundleJson(const std::string& bundleJson) {
-    // Parse objects from bundle JSON
-    size_t objPos = bundleJson.find("\"objects\":{");
-    if (objPos != std::string::npos) {
-        size_t start = objPos + 11;
-        while (start < bundleJson.size()) {
-            size_t hashStart = bundleJson.find('"', start);
-            if (hashStart == std::string::npos) break;
-            size_t hashEnd = bundleJson.find('"', hashStart + 1);
-            if (hashEnd == std::string::npos) break;
-            std::string hashStr = bundleJson.substr(hashStart + 1, hashEnd - hashStart - 1);
-            if (hashStr.size() >= 40) {
-                size_t typePos = bundleJson.find("\"type\":\"", hashEnd);
-                if (typePos != std::string::npos && typePos < hashEnd + 50) {
-                    size_t typeEnd = bundleJson.find('"', typePos + 8);
-                    std::string type = bundleJson.substr(typePos + 8, typeEnd - typePos - 8);
-                    if (type == "blob") {
-                        size_t cPos = bundleJson.find("\"content\":\"", typeEnd);
-                        if (cPos != std::string::npos) {
-                            size_t cStart = cPos + 11;
-                            std::string content;
-                            for (size_t i = cStart; i < bundleJson.size(); ++i) {
-                                if (bundleJson[i] == '\\' && i + 1 < bundleJson.size()) {
-                                    char next = bundleJson[++i];
-                                    if (next == 'n') content += '\n';
-                                    else if (next == 'r') content += '\r';
-                                    else if (next == 't') content += '\t';
-                                    else if (next == '"') content += '"';
-                                    else if (next == '\\') content += '\\';
-                                    else content += next;
-                                } else if (bundleJson[i] == '"') {
-                                    break;
-                                } else {
-                                    content += bundleJson[i];
-                                }
-                            }
-                            store_.save(Blob(content));
-                        }
-                    }
+    std::string parseErr;
+    JsonValue root = JsonValue::parse(bundleJson, &parseErr);
+    if (!root.is_object()) {
+        std::map<std::string, JsonValue> errRes;
+        errRes["ok"] = JsonValue(false);
+        errRes["error"] = JsonValue("Malformed JSON bundle: " + (parseErr.empty() ? "expected JSON object" : parseErr));
+        errRes["objectsImported"] = JsonValue(0);
+        errRes["objectsPresent"] = JsonValue(0);
+        errRes["objectsRejected"] = JsonValue(0);
+        return JsonValue(errRes).serialize();
+    }
+
+    if (!root.contains("objects") || !root["objects"].is_object()) {
+        std::map<std::string, JsonValue> errRes;
+        errRes["ok"] = JsonValue(false);
+        errRes["error"] = JsonValue("Invalid bundle: missing 'objects' dictionary");
+        errRes["objectsImported"] = JsonValue(0);
+        errRes["objectsPresent"] = JsonValue(0);
+        errRes["objectsRejected"] = JsonValue(0);
+        return JsonValue(errRes).serialize();
+    }
+
+    struct BlobItem { Hash hash; std::string content; };
+    struct TreeItem { Hash hash; Tree tree; };
+    struct CommitItem { Hash hash; Commit commit; };
+
+    std::vector<BlobItem> verifiedBlobs;
+    std::vector<TreeItem> verifiedTrees;
+    std::vector<CommitItem> verifiedCommits;
+
+    int objectsRejected = 0;
+    const auto& objs = root["objects"].as_object();
+    for (const auto& [hashStr, objVal] : objs) {
+        if (hashStr.size() != 40 || !objVal.is_object()) {
+            objectsRejected++;
+            continue;
+        }
+        Hash expectedHash(hashStr);
+        std::string type = objVal["type"].as_string();
+
+        if (type == "blob") {
+            std::string content;
+            if (objVal.contains("encoding") && objVal["encoding"].as_string() == "base64") {
+                std::string decErr;
+                if (!Base64::decode(objVal["content"].as_string(), content, decErr)) {
+                    objectsRejected++;
+                    continue;
+                }
+            } else {
+                content = objVal["content"].as_string();
+            }
+            Blob b(content);
+            if (b.hash() != expectedHash) {
+                objectsRejected++;
+            } else {
+                verifiedBlobs.push_back({expectedHash, std::move(content)});
+            }
+        } else if (type == "tree") {
+            Tree t;
+            if (objVal.contains("data") && objVal["data"].is_object()) {
+                for (const auto& [p, hVal] : objVal["data"].as_object()) {
+                    t.set(p, Hash(hVal.as_string()));
                 }
             }
-            size_t nextObj = bundleJson.find("},\"", hashEnd);
-            if (nextObj == std::string::npos || nextObj > bundleJson.find("},\"files\"", hashEnd)) {
-                break;
+            if (t.hash() != expectedHash) {
+                objectsRejected++;
+            } else {
+                verifiedTrees.push_back({expectedHash, std::move(t)});
             }
-            start = nextObj + 2;
+        } else if (type == "commit") {
+            if (objVal.contains("data") && objVal["data"].is_object()) {
+                const auto& d = objVal["data"];
+                std::string treeStr = d["tree"].as_string();
+                std::string parentStr = (d.contains("parent") && !d["parent"].is_null()) ? d["parent"].as_string() : "";
+                std::string authorStr = d["author"].as_string();
+                std::string messageStr = d["message"].as_string();
+                std::time_t t = 0;
+                if (d.contains("time") && d["time"].is_number()) {
+                    t = static_cast<std::time_t>(d["time"].as_int64());
+                } else if (d.contains("timestamp") && d["timestamp"].is_string()) {
+                    t = parseIsoTimestamp(d["timestamp"].as_string());
+                }
+                Commit c(Hash(treeStr), Hash(parentStr), authorStr, messageStr, t);
+                if (c.hash() != expectedHash) {
+                    objectsRejected++;
+                } else {
+                    verifiedCommits.push_back({expectedHash, std::move(c)});
+                }
+            } else {
+                objectsRejected++;
+            }
+        } else {
+            objectsRejected++;
         }
     }
 
-    // Parse branches from bundle JSON
-    size_t bPos = bundleJson.find("\"branches\":{");
-    if (bPos != std::string::npos) {
-        size_t bEnd = bundleJson.find('}', bPos);
-        std::string bSection = bundleJson.substr(bPos + 12, bEnd - bPos - 12);
-        std::stringstream ss(bSection);
-        std::string pair;
-        while (std::getline(ss, pair, ',')) {
-            size_t q1 = pair.find('"');
-            size_t q2 = pair.find('"', q1 + 1);
-            size_t q3 = pair.find('"', q2 + 1);
-            size_t q4 = pair.find('"', q3 + 1);
-            if (q1 != std::string::npos && q2 != std::string::npos && q3 != std::string::npos && q4 != std::string::npos) {
-                std::string bName = pair.substr(q1 + 1, q2 - q1 - 1);
-                std::string bHashStr = pair.substr(q3 + 1, q4 - q3 - 1);
-                if (!bName.empty() && bHashStr.size() >= 40) {
-                    Hash h(bHashStr);
-                    if (store_.exists(h)) {
-                        if (!refs_.branchExists(bName)) {
-                            refs_.createBranch(bName, h);
-                        } else if (isAncestor(refs_.branchTip(bName), h)) {
-                            if (refs_.currentBranch() == bName) {
-                                restoreCommit(h);
-                                refs_.updateHead(h);
-                            } else {
-                                refs_.createBranch(bName, h);
-                            }
+    if (objectsRejected > 0) {
+        std::map<std::string, JsonValue> errRes;
+        errRes["ok"] = JsonValue(false);
+        errRes["error"] = JsonValue("Hash verification failed: " + std::to_string(objectsRejected) + " object(s) rejected; refs untouched.");
+        errRes["objectsImported"] = JsonValue(0);
+        errRes["objectsPresent"] = JsonValue(0);
+        errRes["objectsRejected"] = JsonValue(objectsRejected);
+        return JsonValue(errRes).serialize();
+    }
+
+    // Save in dependency order: Blobs, Trees, Commits
+    int objectsImported = 0;
+    int objectsPresent = 0;
+
+    for (const auto& item : verifiedBlobs) {
+        if (store_.exists(item.hash)) {
+            objectsPresent++;
+        } else {
+            store_.save(Blob(item.content));
+            objectsImported++;
+        }
+    }
+
+    for (const auto& item : verifiedTrees) {
+        if (store_.exists(item.hash)) {
+            objectsPresent++;
+        } else {
+            store_.save(item.tree);
+            objectsImported++;
+        }
+    }
+
+    for (const auto& item : verifiedCommits) {
+        if (store_.exists(item.hash)) {
+            objectsPresent++;
+        } else {
+            store_.save(item.commit);
+            objectsImported++;
+        }
+    }
+
+    // Process Branches
+    std::vector<std::string> branchesCreated;
+    std::vector<std::string> branchesFastForwarded;
+    std::vector<std::string> branchesSkippedDiverged;
+    std::vector<std::string> branchesUpToDate;
+    bool activeBranchDirtyRefused = false;
+    std::string refuseReason;
+
+    if (root.contains("branches") && root["branches"].is_object()) {
+        for (const auto& [bName, tipVal] : root["branches"].as_object()) {
+            if (tipVal.is_null() || !tipVal.is_string()) continue;
+            std::string hStr = tipVal.as_string();
+            if (hStr.size() != 40) continue;
+            Hash target(hStr);
+            if (!store_.exists(target)) continue;
+
+            if (!refs_.branchExists(bName)) {
+                refs_.createBranch(bName, target);
+                if (refs_.currentBranch() == bName) {
+                    restoreCommit(target);
+                }
+                branchesCreated.push_back(bName);
+                recordReflog("p2p_sync", Hash(), target, "P2P LAN Sync: created branch " + bName + " at " + target.shortStr());
+            } else {
+                Hash curTip = refs_.branchTip(bName);
+                if (curTip == target) {
+                    branchesUpToDate.push_back(bName);
+                } else if (isAncestor(target, curTip)) {
+                    branchesUpToDate.push_back(bName + " (local ahead)");
+                } else if (isAncestor(curTip, target)) {
+                    // Fast-forward candidate
+                    if (refs_.currentBranch() == bName) {
+                        if (isDirty()) {
+                            activeBranchDirtyRefused = true;
+                            refuseReason = "Cannot fast-forward active branch '" + bName + "': working tree or index has uncommitted changes.";
+                            continue;
                         }
+                        restoreCommit(target);
+                        refs_.updateHead(target);
+                        recordReflog("p2p_sync", curTip, target, "P2P LAN Sync: fast-forward " + bName + " to " + target.shortStr());
+                        branchesFastForwarded.push_back(bName);
+                    } else {
+                        refs_.createBranch(bName, target);
+                        recordReflog("p2p_sync", curTip, target, "P2P LAN Sync: fast-forward " + bName + " to " + target.shortStr());
+                        branchesFastForwarded.push_back(bName);
                     }
+                } else {
+                    // Diverged
+                    branchesSkippedDiverged.push_back(bName);
                 }
             }
         }
     }
 
-    recordReflog("p2p_sync", head(), head(), "P2P LAN Sync Bundle Imported");
-    return "P2P LAN Sync complete: verified objects and updated branches.";
+    bool ok = true;
+    std::string message;
+
+    if (activeBranchDirtyRefused) {
+        ok = false;
+        message = refuseReason;
+    } else if (!branchesSkippedDiverged.empty() && branchesCreated.empty() && branchesFastForwarded.empty()) {
+        ok = false;
+        std::string divList;
+        for (size_t i = 0; i < branchesSkippedDiverged.size(); ++i) {
+            if (i > 0) divList += ", ";
+            divList += branchesSkippedDiverged[i];
+        }
+        message = "Branch(es) diverged (" + divList + "), merge needed; tip unchanged.";
+    } else if (objectsImported == 0 && objectsPresent == 0 && branchesCreated.empty() && branchesFastForwarded.empty() && branchesUpToDate.empty()) {
+        ok = false;
+        message = "No objects or branches could be imported from bundle.";
+    } else {
+        ok = true;
+        message = "P2P LAN Sync complete: " + std::to_string(objectsImported) + " object(s) imported, " +
+                  std::to_string(objectsPresent) + " already present.";
+        if (!branchesCreated.empty()) {
+            message += " Created branch: ";
+            for (size_t i = 0; i < branchesCreated.size(); ++i) {
+                if (i > 0) message += ", ";
+                message += branchesCreated[i];
+            }
+            message += ".";
+        }
+        if (!branchesFastForwarded.empty()) {
+            message += " Fast-forwarded: ";
+            for (size_t i = 0; i < branchesFastForwarded.size(); ++i) {
+                if (i > 0) message += ", ";
+                message += branchesFastForwarded[i];
+            }
+            message += ".";
+        }
+        if (!branchesSkippedDiverged.empty()) {
+            message += " Skipped diverged: ";
+            for (size_t i = 0; i < branchesSkippedDiverged.size(); ++i) {
+                if (i > 0) message += ", ";
+                message += branchesSkippedDiverged[i];
+            }
+            message += " (merge needed).";
+        }
+    }
+
+    std::map<std::string, JsonValue> resObj;
+    resObj["ok"] = JsonValue(ok);
+    resObj["message"] = JsonValue(message);
+    if (!ok) resObj["error"] = JsonValue(message);
+    resObj["objectsImported"] = JsonValue(objectsImported);
+    resObj["objectsPresent"] = JsonValue(objectsPresent);
+    resObj["objectsRejected"] = JsonValue(objectsRejected);
+
+    auto makeJsonArr = [](const std::vector<std::string>& vec) {
+        std::vector<JsonValue> arr;
+        for (const auto& s : vec) arr.push_back(JsonValue(s));
+        return JsonValue(std::move(arr));
+    };
+
+    resObj["branchesCreated"] = makeJsonArr(branchesCreated);
+    resObj["branchesFastForwarded"] = makeJsonArr(branchesFastForwarded);
+    resObj["branchesDiverged"] = makeJsonArr(branchesSkippedDiverged);
+    resObj["branchesUpToDate"] = makeJsonArr(branchesUpToDate);
+
+    return JsonValue(resObj).serialize();
 }
 
 std::string Repository::gitStatus() const {

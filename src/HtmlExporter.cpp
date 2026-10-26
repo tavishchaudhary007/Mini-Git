@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <ctime>
 #include <sstream>
+#include "Base64.h"
 #include "FrontendTemplate.h"
 
 namespace {
@@ -41,7 +42,7 @@ void jsonHashOrNull(std::ostream& os, const Hash& h) {
 
 }  // namespace
 
-std::string HtmlExporter::toJson(const Snapshot& snap, const std::string& repoName) {
+std::string HtmlExporter::toJson(const Snapshot& snap, const std::string& repoName, bool isSyncBundle) {
     std::ostringstream o;
 
     // The page needs a "current branch" entry even before the first commit or when detached.
@@ -70,11 +71,16 @@ std::string HtmlExporter::toJson(const Snapshot& snap, const std::string& repoNa
         jsonString(o, obj->hash().str());
         o << ":{\"type\":"; jsonString(o, obj->type());
         if (const auto* b = dynamic_cast<const Blob*>(obj.get())) {
-            o << ",\"content\":";
-            if (b->content().find('\0') != std::string::npos) {
-                jsonString(o, "[binary file]");
+            if (isSyncBundle && b->content().find('\0') != std::string::npos) {
+                o << ",\"encoding\":"; jsonString(o, "base64");
+                o << ",\"content\":";  jsonString(o, Base64::encode(b->content()));
             } else {
-                jsonString(o, b->content());
+                o << ",\"content\":";
+                if (b->content().find('\0') != std::string::npos) {
+                    jsonString(o, "[binary file]");
+                } else {
+                    jsonString(o, b->content());
+                }
             }
         } else if (const auto* t = dynamic_cast<const Tree*>(obj.get())) {
             o << ",\"data\":{";
@@ -90,21 +96,27 @@ std::string HtmlExporter::toJson(const Snapshot& snap, const std::string& repoNa
             o << ",\"parent\":";           jsonHashOrNull(o, c->parent());
             o << ",\"message\":";          jsonString(o, c->message());
             o << ",\"timestamp\":";        jsonString(o, isoTime(c->time()));
+            o << ",\"time\":";             o << static_cast<long long>(c->time());
             o << ",\"author\":";           jsonString(o, c->author());
             o << '}';
         }
         o << '}';
     }
 
-    o << "},\"files\":{";
-    first = true;
-    for (const auto& [path, content] : snap.files) {
-        if (!first) o << ',';
-        first = false;
-        jsonString(o, path); o << ':'; jsonString(o, content);
+    o << "}";
+
+    if (!isSyncBundle) {
+        o << ",\"files\":{";
+        first = true;
+        for (const auto& [path, content] : snap.files) {
+            if (!first) o << ',';
+            first = false;
+            jsonString(o, path); o << ':'; jsonString(o, content);
+        }
+        o << "}";
     }
 
-    o << "},\"staged\":{";
+    o << ",\"staged\":{";
     first = true;
     for (const auto& [path, h] : snap.staged) {
         if (!first) o << ',';

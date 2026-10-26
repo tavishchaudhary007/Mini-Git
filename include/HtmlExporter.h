@@ -6,6 +6,6 @@
 // the repository data (as JSON) into the embedded web UI template.
 class HtmlExporter {
 public:
-    static std::string toJson(const Snapshot& snap, const std::string& repoName);
+    static std::string toJson(const Snapshot& snap, const std::string& repoName, bool isSyncBundle = false);
     static std::string render(const Snapshot& snap, const std::string& repoName);
 };
