@@ -10,6 +10,7 @@
 #include "HtmlExporter.h"
 #include "Exceptions.h"
 #include "Json.h"
+#include "PairingManager.h"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -46,16 +47,6 @@ bool openBrowserUrl(const std::string& url) {
     std::string cmd = "xdg-open \"" + url + "\" >/dev/null 2>&1";
 #endif
     return std::system(cmd.c_str()) == 0;
-}
-
-std::string generatePairingToken() {
-    static const char chars[] = "0123456789abcdef";
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<> dis(0, 15);
-    std::string token = "mg_";
-    for (int i = 0; i < 24; ++i) token += chars[dis(gen)];
-    return token;
 }
 
 std::string getLocalLanIp() {
@@ -118,6 +109,16 @@ std::string getHeaderValue(const std::string& request, const std::string& header
     return val;
 }
 
+std::string getQueryParam(const std::string& query, const std::string& key) {
+    std::string needle = key + "=";
+    size_t pos = query.find(needle);
+    if (pos == std::string::npos) return "";
+    size_t start = pos + needle.size();
+    size_t end = query.find('&', start);
+    if (end == std::string::npos) end = query.size();
+    return query.substr(start, end - start);
+}
+
 std::string getJsonString(const std::string& json, const std::string& key) {
     std::string needle = "\"" + key + "\"";
     size_t pos = json.find(needle);
@@ -151,13 +152,13 @@ void sendAll(socket_t sock, const std::string& data) {
 
 void sendHttpResponse(socket_t sock, int statusCode, const std::string& statusText,
                       const std::string& contentType, const std::string& body,
-                      const std::string& origin = "", bool isSyncEndpoint = false,
+                      const std::string& origin = "", bool isSyncOrPairEndpoint = false,
                       bool lan = false) {
     std::ostringstream oss;
     oss << "HTTP/1.1 " << statusCode << " " << statusText << "\r\n"
         << "Content-Type: " << contentType << "\r\n"
         << "Content-Length: " << body.size() << "\r\n";
-    if (lan && isSyncEndpoint && !origin.empty()) {
+    if (lan && isSyncOrPairEndpoint && !origin.empty()) {
         oss << "Access-Control-Allow-Origin: " << origin << "\r\n"
             << "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
             << "Access-Control-Allow-Headers: Content-Type, X-MiniGit-Token\r\n"
@@ -177,6 +178,8 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
         throw MiniGitException("failed to initialize Windows sockets");
     }
 #endif
+
+    PairingManager pairingMgr;
 
     socket_t serverSock = INVALID_SOCKET;
     int boundPort = -1;
@@ -221,7 +224,6 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
     std::string serverUrl = "http://127.0.0.1:" + std::to_string(boundPort) + "/";
     std::string lanIp = lan ? getLocalLanIp() : "127.0.0.1";
     std::string lanUrl = "http://" + lanIp + ":" + std::to_string(boundPort) + "/";
-    std::string token = lan ? generatePairingToken() : "";
 
     std::cout << "\n============================================================\n"
               << "  Mini-Git Web Studio & Interactive Local Server\n"
@@ -231,7 +233,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
     if (lan) {
         std::cout << "  * P2P / LAN:  Enabled (0.0.0.0:" << boundPort << ")\n"
                   << "  * LAN URL:    " << lanUrl << "\n"
-                  << "  * Pair Token: " << token << "\n";
+                  << "  * Pair Code:  " << pairingMgr.currentCode() << " (expires in 5 min)\n";
     } else {
         std::cout << "  * P2P / LAN:  Disabled (local only). Pass --lan to enable.\n";
     }
@@ -255,6 +257,9 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
 #endif
         socket_t clientSock = accept(serverSock, (struct sockaddr*)&clientAddr, &clientLen);
         if (!ISVALIDSOCKET(clientSock)) break;
+
+        char clientIpStr[INET_ADDRSTRLEN] = "127.0.0.1";
+        inet_ntop(AF_INET, &clientAddr.sin_addr, clientIpStr, sizeof(clientIpStr));
 
         uint32_t clientIp = ntohl(clientAddr.sin_addr.s_addr);
         bool isLoopback = ((clientIp >> 24) == 127) || (clientIp == 0);
@@ -304,6 +309,14 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
         std::string method, uri, version;
         reqStream >> method >> uri >> version;
 
+        std::string path = uri;
+        std::string query;
+        size_t qPos = uri.find('?');
+        if (qPos != std::string::npos) {
+            path = uri.substr(0, qPos);
+            query = uri.substr(qPos + 1);
+        }
+
         // Extract body
         std::string body;
         size_t bodyPos = request.find("\r\n\r\n");
@@ -312,120 +325,250 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
         }
 
         std::string origin = getHeaderValue(request, "Origin");
-        bool isSyncEndpoint = (uri == "/api/sync/bundle" || uri == "/api/sync/import-bundle");
+        bool isSyncEndpoint = (path == "/api/sync/bundle" || path == "/api/sync/import-bundle");
+        bool isPairEndpoint = (path == "/api/pair" || path == "/api/pair/status");
+        bool isSyncOrPairEndpoint = (isSyncEndpoint || isPairEndpoint);
 
         if (method == "OPTIONS") {
-            sendHttpResponse(clientSock, 204, "No Content", "text/plain", "", origin, isSyncEndpoint, lan);
+            sendHttpResponse(clientSock, 204, "No Content", "text/plain", "", origin, isSyncOrPairEndpoint, lan);
             CLOSESOCKET(clientSock);
             continue;
         }
 
         if (!isLoopback) {
-            if (!isSyncEndpoint) {
+            if (!isSyncOrPairEndpoint) {
                 sendHttpResponse(clientSock, 403, "Forbidden", "application/json",
-                                 "{\"ok\":false,\"error\":\"Forbidden: non-loopback access restricted to sync endpoints\"}",
-                                 origin, isSyncEndpoint, lan);
+                                 "{\"ok\":false,\"error\":\"Forbidden: non-loopback access restricted to sync/pair endpoints\"}",
+                                 origin, isSyncOrPairEndpoint, lan);
                 CLOSESOCKET(clientSock);
                 continue;
             }
-            std::string clientToken = getHeaderValue(request, "X-MiniGit-Token");
-            if (token.empty() || clientToken != token) {
-                sendHttpResponse(clientSock, 401, "Unauthorized", "application/json",
-                                 "{\"ok\":false,\"error\":\"Unauthorized: invalid or missing X-MiniGit-Token\"}",
-                                 origin, isSyncEndpoint, lan);
-                CLOSESOCKET(clientSock);
-                continue;
+            if (isSyncEndpoint) {
+                std::string clientToken = getHeaderValue(request, "X-MiniGit-Token");
+                if (!pairingMgr.isValidSessionToken(clientToken)) {
+                    sendHttpResponse(clientSock, 401, "Unauthorized", "application/json",
+                                     "{\"ok\":false,\"error\":\"Unauthorized: invalid or revoked session token. Please pair with host.\"}",
+                                     origin, isSyncOrPairEndpoint, lan);
+                    CLOSESOCKET(clientSock);
+                    continue;
+                }
             }
         }
 
         try {
-            if (method == "GET" && (uri == "/" || uri == "/index.html")) {
+            if (method == "GET" && (path == "/" || path == "/index.html")) {
                 std::string html = HtmlExporter::render(repo->snapshot(), repoName);
-                sendHttpResponse(clientSock, 200, "OK", "text/html; charset=utf-8", html, origin, isSyncEndpoint, lan);
-            } else if (method == "GET" && uri == "/api/token") {
+                sendHttpResponse(clientSock, 200, "OK", "text/html; charset=utf-8", html, origin, isSyncOrPairEndpoint, lan);
+            } else if (method == "GET" && path == "/api/token") {
                 if (!isLoopback) {
                     sendHttpResponse(clientSock, 403, "Forbidden", "application/json",
-                                     "{\"ok\":false,\"error\":\"Forbidden\"}", origin, isSyncEndpoint, lan);
+                                     "{\"ok\":false,\"error\":\"Forbidden\"}", origin, isSyncOrPairEndpoint, lan);
                 } else {
-                    std::string tokenJson = "{\"ok\":true,\"token\":\"" + token +
-                                            "\",\"lan\":" + (lan ? "true" : "false") +
+                    std::string tokenJson = "{\"ok\":true,\"code\":\"" + pairingMgr.currentCode() +
+                                            "\",\"remainingSeconds\":" + std::to_string(pairingMgr.remainingSeconds()) +
+                                            ",\"isExpired\":" + (pairingMgr.isExpired() ? "true" : "false") +
+                                            ",\"isLocked\":" + (pairingMgr.isLocked() ? "true" : "false") +
+                                            ",\"isUsed\":" + (pairingMgr.isUsed() ? "true" : "false") +
+                                            ",\"lan\":" + (lan ? "true" : "false") +
                                             ",\"lanUrl\":\"" + lanUrl + "\"}";
-                    sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8", tokenJson, origin, isSyncEndpoint, lan);
+                    sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8", tokenJson, origin, isSyncOrPairEndpoint, lan);
                 }
-            } else if (method == "GET" && uri == "/api/snapshot") {
+            } else if (method == "GET" && path == "/api/pair/code") {
+                if (!isLoopback) {
+                    sendHttpResponse(clientSock, 403, "Forbidden", "application/json",
+                                     "{\"ok\":false,\"error\":\"Forbidden\"}", origin, isSyncOrPairEndpoint, lan);
+                } else {
+                    std::string codeJson = "{\"ok\":true,\"code\":\"" + pairingMgr.currentCode() +
+                                           "\",\"remainingSeconds\":" + std::to_string(pairingMgr.remainingSeconds()) +
+                                           ",\"isExpired\":" + (pairingMgr.isExpired() ? "true" : "false") +
+                                           ",\"isLocked\":" + (pairingMgr.isLocked() ? "true" : "false") +
+                                           ",\"isUsed\":" + (pairingMgr.isUsed() ? "true" : "false") +
+                                           ",\"failedAttempts\":" + std::to_string(pairingMgr.failedAttempts()) +
+                                           ",\"lan\":" + (lan ? "true" : "false") +
+                                           ",\"lanUrl\":\"" + lanUrl + "\"}";
+                    sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8", codeJson, origin, isSyncOrPairEndpoint, lan);
+                }
+            } else if (method == "POST" && path == "/api/pair/generate-code") {
+                if (!isLoopback) {
+                    sendHttpResponse(clientSock, 403, "Forbidden", "application/json",
+                                     "{\"ok\":false,\"error\":\"Forbidden\"}", origin, isSyncOrPairEndpoint, lan);
+                } else {
+                    std::string newCode = pairingMgr.generateNewCode();
+                    std::string codeJson = "{\"ok\":true,\"code\":\"" + newCode +
+                                           "\",\"remainingSeconds\":" + std::to_string(pairingMgr.remainingSeconds()) +
+                                           ",\"isExpired\":false,\"isLocked\":false,\"isUsed\":false,\"failedAttempts\":0}";
+                    sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8", codeJson, origin, isSyncOrPairEndpoint, lan);
+                }
+            } else if (method == "POST" && path == "/api/pair") {
+                if (!lan) {
+                    sendHttpResponse(clientSock, 403, "Forbidden", "application/json",
+                                     "{\"ok\":false,\"error\":\"LAN mode is not enabled on host\"}", origin, isSyncOrPairEndpoint, lan);
+                } else {
+                    std::string code = getJsonString(body, "code");
+                    std::string peerName = getJsonString(body, "peerName");
+                    auto res = pairingMgr.submitCode(code, clientIpStr, peerName);
+                    if (res.success) {
+                        sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
+                                         "{\"ok\":true,\"status\":\"pending\",\"requestId\":\"" + res.requestId +
+                                         "\",\"message\":\"Pairing request submitted. Waiting for host approval.\"}",
+                                         origin, isSyncOrPairEndpoint, lan);
+                    } else {
+                        int sc = res.locked ? 403 : 401;
+                        sendHttpResponse(clientSock, sc, sc == 403 ? "Forbidden" : "Unauthorized", "application/json; charset=utf-8",
+                                         "{\"ok\":false,\"error\":\"" + res.error + "\",\"locked\":" + (res.locked ? "true" : "false") +
+                                         ",\"remainingAttempts\":" + std::to_string(res.remainingAttempts) + "}",
+                                         origin, isSyncOrPairEndpoint, lan);
+                    }
+                }
+            } else if (method == "GET" && path == "/api/pair/status") {
+                std::string reqId = getQueryParam(query, "requestId");
+                if (reqId.empty()) reqId = getJsonString(body, "requestId");
+                auto statusReq = pairingMgr.getRequestStatus(reqId);
+                if (statusReq.status == PendingPairRequest::PENDING) {
+                    sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
+                                     "{\"ok\":true,\"status\":\"pending\"}", origin, isSyncOrPairEndpoint, lan);
+                } else if (statusReq.status == PendingPairRequest::APPROVED) {
+                    sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
+                                     "{\"ok\":true,\"status\":\"approved\",\"token\":\"" + statusReq.sessionToken + "\"}",
+                                     origin, isSyncOrPairEndpoint, lan);
+                } else {
+                    sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
+                                     "{\"ok\":false,\"status\":\"denied\",\"error\":\"Host denied the pairing request.\"}",
+                                     origin, isSyncOrPairEndpoint, lan);
+                }
+            } else if (method == "GET" && path == "/api/pair/pending") {
+                if (!isLoopback) {
+                    sendHttpResponse(clientSock, 403, "Forbidden", "application/json",
+                                     "{\"ok\":false,\"error\":\"Forbidden\"}", origin, isSyncOrPairEndpoint, lan);
+                } else {
+                    auto pending = pairingMgr.pendingRequests();
+                    std::ostringstream oss;
+                    oss << "{\"ok\":true,\"pending\":[";
+                    for (size_t i = 0; i < pending.size(); ++i) {
+                        if (i > 0) oss << ",";
+                        oss << "{\"id\":\"" << pending[i].requestId << "\",\"ip\":\"" << pending[i].clientIp
+                            << "\",\"peerName\":\"" << pending[i].peerName << "\",\"code\":\"" << pending[i].code << "\"}";
+                    }
+                    oss << "]}";
+                    sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8", oss.str(), origin, isSyncOrPairEndpoint, lan);
+                }
+            } else if (method == "POST" && path == "/api/pair/decide") {
+                if (!isLoopback) {
+                    sendHttpResponse(clientSock, 403, "Forbidden", "application/json",
+                                     "{\"ok\":false,\"error\":\"Forbidden\"}", origin, isSyncOrPairEndpoint, lan);
+                } else {
+                    std::string reqId = getJsonString(body, "requestId");
+                    std::string action = getJsonString(body, "action");
+                    std::string label = getJsonString(body, "label");
+                    bool allowed = (action == "allow" || action == "approve");
+                    bool ok = pairingMgr.decideRequest(reqId, allowed, label);
+                    sendHttpResponse(clientSock, ok ? 200 : 400, ok ? "OK" : "Bad Request", "application/json; charset=utf-8",
+                                     "{\"ok\":" + std::string(ok ? "true" : "false") + ",\"action\":\"" + action + "\"}",
+                                     origin, isSyncOrPairEndpoint, lan);
+                }
+            } else if (method == "GET" && path == "/api/pair/peers") {
+                if (!isLoopback) {
+                    sendHttpResponse(clientSock, 403, "Forbidden", "application/json",
+                                     "{\"ok\":false,\"error\":\"Forbidden\"}", origin, isSyncOrPairEndpoint, lan);
+                } else {
+                    auto peers = pairingMgr.listPeers();
+                    std::ostringstream oss;
+                    oss << "{\"ok\":true,\"peers\":[";
+                    for (size_t i = 0; i < peers.size(); ++i) {
+                        if (i > 0) oss << ",";
+                        oss << "{\"id\":\"" << peers[i].id << "\",\"ip\":\"" << peers[i].clientIp
+                            << "\",\"peerName\":\"" << peers[i].peerName << "\",\"pairedAt\":\"" << peers[i].pairedAt << "\"}";
+                    }
+                    oss << "]}";
+                    sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8", oss.str(), origin, isSyncOrPairEndpoint, lan);
+                }
+            } else if (method == "POST" && path == "/api/pair/revoke") {
+                if (!isLoopback) {
+                    sendHttpResponse(clientSock, 403, "Forbidden", "application/json",
+                                     "{\"ok\":false,\"error\":\"Forbidden\"}", origin, isSyncOrPairEndpoint, lan);
+                } else {
+                    std::string id = getJsonString(body, "id");
+                    std::string tok = getJsonString(body, "token");
+                    bool ok = pairingMgr.revokePeer(!id.empty() ? id : tok);
+                    sendHttpResponse(clientSock, ok ? 200 : 404, ok ? "OK" : "Not Found", "application/json; charset=utf-8",
+                                     "{\"ok\":" + std::string(ok ? "true" : "false") + ",\"message\":\"" +
+                                     (ok ? "Peer access revoked" : "Peer not found") + "\"}",
+                                     origin, isSyncOrPairEndpoint, lan);
+                }
+            } else if (method == "GET" && path == "/api/snapshot") {
                 std::string json = HtmlExporter::toJson(repo->snapshot(), repoName);
-                sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8", json, origin, isSyncEndpoint, lan);
-            } else if (method == "POST" && uri == "/api/stage") {
-                std::string path = getJsonString(body, "path");
-                repo->add(path);
+                sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8", json, origin, isSyncOrPairEndpoint, lan);
+            } else if (method == "POST" && path == "/api/stage") {
+                std::string p = getJsonString(body, "path");
+                repo->add(p);
                 std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
                 sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
-                                 "{\"ok\":true,\"message\":\"staged\",\"snapshot\":" + snap + "}", origin, isSyncEndpoint, lan);
-            } else if (method == "POST" && uri == "/api/unstage") {
-                std::string path = getJsonString(body, "path");
-                repo->unstage(path);
+                                 "{\"ok\":true,\"message\":\"staged\",\"snapshot\":" + snap + "}", origin, isSyncOrPairEndpoint, lan);
+            } else if (method == "POST" && path == "/api/unstage") {
+                std::string p = getJsonString(body, "path");
+                repo->unstage(p);
                 std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
                 sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
-                                 "{\"ok\":true,\"message\":\"unstaged\",\"snapshot\":" + snap + "}", origin, isSyncEndpoint, lan);
-            } else if (method == "POST" && uri == "/api/discard") {
-                std::string path = getJsonString(body, "path");
-                repo->discard(path);
+                                 "{\"ok\":true,\"message\":\"unstaged\",\"snapshot\":" + snap + "}", origin, isSyncOrPairEndpoint, lan);
+            } else if (method == "POST" && path == "/api/discard") {
+                std::string p = getJsonString(body, "path");
+                repo->discard(p);
                 std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
                 sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
-                                 "{\"ok\":true,\"message\":\"discarded\",\"snapshot\":" + snap + "}", origin, isSyncEndpoint, lan);
-            } else if (method == "POST" && uri == "/api/commit") {
+                                 "{\"ok\":true,\"message\":\"discarded\",\"snapshot\":" + snap + "}", origin, isSyncOrPairEndpoint, lan);
+            } else if (method == "POST" && path == "/api/commit") {
                 std::string msg = getJsonString(body, "message");
                 Hash h = repo->commit(msg);
                 std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
                 sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
-                                 "{\"ok\":true,\"hash\":\"" + h.str() + "\",\"snapshot\":" + snap + "}", origin, isSyncEndpoint, lan);
-            } else if (method == "POST" && uri == "/api/branch/create") {
+                                 "{\"ok\":true,\"hash\":\"" + h.str() + "\",\"snapshot\":" + snap + "}", origin, isSyncOrPairEndpoint, lan);
+            } else if (method == "POST" && path == "/api/branch/create") {
                 std::string name = getJsonString(body, "name");
                 repo->createBranch(name);
                 std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
                 sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
-                                 "{\"ok\":true,\"message\":\"created branch\",\"snapshot\":" + snap + "}", origin, isSyncEndpoint, lan);
-            } else if (method == "POST" && uri == "/api/branch/delete") {
+                                 "{\"ok\":true,\"message\":\"created branch\",\"snapshot\":" + snap + "}", origin, isSyncOrPairEndpoint, lan);
+            } else if (method == "POST" && path == "/api/branch/delete") {
                 std::string name = getJsonString(body, "name");
                 repo->deleteBranch(name);
                 std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
                 sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
-                                 "{\"ok\":true,\"message\":\"deleted branch\",\"snapshot\":" + snap + "}", origin, isSyncEndpoint, lan);
-            } else if (method == "POST" && uri == "/api/checkout") {
+                                 "{\"ok\":true,\"message\":\"deleted branch\",\"snapshot\":" + snap + "}", origin, isSyncOrPairEndpoint, lan);
+            } else if (method == "POST" && path == "/api/checkout") {
                 std::string target = getJsonString(body, "target");
                 repo->checkout(target);
                 std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
                 sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
-                                 "{\"ok\":true,\"message\":\"checked out\",\"snapshot\":" + snap + "}", origin, isSyncEndpoint, lan);
-            } else if (method == "POST" && uri == "/api/merge") {
+                                 "{\"ok\":true,\"message\":\"checked out\",\"snapshot\":" + snap + "}", origin, isSyncOrPairEndpoint, lan);
+            } else if (method == "POST" && path == "/api/merge") {
                 std::string branch = getJsonString(body, "branch");
                 std::string msg = repo->merge(branch);
                 std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
                 sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
-                                 "{\"ok\":true,\"result\":\"" + msg + "\",\"snapshot\":" + snap + "}", origin, isSyncEndpoint, lan);
-            } else if (method == "POST" && uri == "/api/revert") {
+                                 "{\"ok\":true,\"result\":\"" + msg + "\",\"snapshot\":" + snap + "}", origin, isSyncOrPairEndpoint, lan);
+            } else if (method == "POST" && path == "/api/revert") {
                 std::string hash = getJsonString(body, "hash");
                 Hash h = repo->revert(Hash(hash));
                 std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
                 sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
-                                 "{\"ok\":true,\"hash\":\"" + h.str() + "\",\"snapshot\":" + snap + "}", origin, isSyncEndpoint, lan);
-            } else if (method == "POST" && uri == "/api/undo") {
+                                 "{\"ok\":true,\"hash\":\"" + h.str() + "\",\"snapshot\":" + snap + "}", origin, isSyncOrPairEndpoint, lan);
+            } else if (method == "POST" && path == "/api/undo") {
                 std::string resMsg = repo->undo();
                 std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
                 sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
-                                 "{\"ok\":true,\"message\":\"" + resMsg + "\",\"snapshot\":" + snap + "}", origin, isSyncEndpoint, lan);
-            } else if (method == "POST" && uri == "/api/stash/save") {
+                                 "{\"ok\":true,\"message\":\"" + resMsg + "\",\"snapshot\":" + snap + "}", origin, isSyncOrPairEndpoint, lan);
+            } else if (method == "POST" && path == "/api/stash/save") {
                 std::string msg = getJsonString(body, "message");
                 std::string resMsg = repo->stashSave(msg);
                 std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
                 sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
-                                 "{\"ok\":true,\"message\":\"" + resMsg + "\",\"snapshot\":" + snap + "}", origin, isSyncEndpoint, lan);
-            } else if (method == "POST" && uri == "/api/stash/pop") {
+                                 "{\"ok\":true,\"message\":\"" + resMsg + "\",\"snapshot\":" + snap + "}", origin, isSyncOrPairEndpoint, lan);
+            } else if (method == "POST" && path == "/api/stash/pop") {
                 std::string resMsg = repo->stashPop();
                 std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
                 sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
-                                 "{\"ok\":true,\"message\":\"" + resMsg + "\",\"snapshot\":" + snap + "}", origin, isSyncEndpoint, lan);
-            } else if (method == "GET" && uri == "/api/reflog") {
+                                 "{\"ok\":true,\"message\":\"" + resMsg + "\",\"snapshot\":" + snap + "}", origin, isSyncOrPairEndpoint, lan);
+            } else if (method == "GET" && path == "/api/reflog") {
                 auto entries = repo->reflog();
                 std::ostringstream json;
                 json << "{\"ok\":true,\"reflog\":[";
@@ -440,17 +583,17 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                          << "\"description\":\"" << r.description << "\"}";
                 }
                 json << "]}";
-                sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8", json.str(), origin, isSyncEndpoint, lan);
-            } else if (method == "POST" && uri == "/api/reflog/restore") {
+                sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8", json.str(), origin, isSyncOrPairEndpoint, lan);
+            } else if (method == "POST" && path == "/api/reflog/restore") {
                 std::string hash = getJsonString(body, "hash");
                 repo->checkout(hash);
                 std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
                 sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
-                                 "{\"ok\":true,\"message\":\"Restored to checkpoint " + hash.substr(0, 7) + "\",\"snapshot\":" + snap + "}", origin, isSyncEndpoint, lan);
-            } else if (method == "GET" && uri == "/api/sync/bundle") {
+                                 "{\"ok\":true,\"message\":\"Restored to checkpoint " + hash.substr(0, 7) + "\",\"snapshot\":" + snap + "}", origin, isSyncOrPairEndpoint, lan);
+            } else if (method == "GET" && path == "/api/sync/bundle") {
                 std::string bundle = repo->exportBundleJson();
-                sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8", bundle, origin, isSyncEndpoint, lan);
-            } else if (method == "POST" && uri == "/api/sync/import-bundle") {
+                sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8", bundle, origin, isSyncOrPairEndpoint, lan);
+            } else if (method == "POST" && path == "/api/sync/import-bundle") {
                 std::string resJson = repo->importBundleJson(body);
                 JsonValue parsedRes = JsonValue::parse(resJson);
                 bool isOk = parsedRes.is_object() && parsedRes.contains("ok") && parsedRes["ok"].as_bool();
@@ -459,41 +602,41 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                     std::string msg = parsedRes["message"].as_string();
                     sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
                                      "{\"ok\":true,\"message\":\"" + msg + "\",\"result\":" + resJson + ",\"snapshot\":" + snap + "}",
-                                     origin, isSyncEndpoint, lan);
+                                     origin, isSyncOrPairEndpoint, lan);
                 } else {
                     std::string err = parsedRes.contains("error") ? parsedRes["error"].as_string() : "Import failed";
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
                                      "{\"ok\":false,\"error\":\"" + err + "\",\"result\":" + resJson + "}",
-                                     origin, isSyncEndpoint, lan);
+                                     origin, isSyncOrPairEndpoint, lan);
                 }
-            } else if (method == "GET" && uri == "/api/git/status") {
+            } else if (method == "GET" && path == "/api/git/status") {
                 std::string statusJson = repo->gitStatus();
-                sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8", statusJson, origin, isSyncEndpoint, lan);
-            } else if (method == "POST" && uri == "/api/git/export") {
+                sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8", statusJson, origin, isSyncOrPairEndpoint, lan);
+            } else if (method == "POST" && path == "/api/git/export") {
                 std::string resMsg = repo->exportToGit();
                 std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
                 sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
-                                 "{\"ok\":true,\"message\":\"" + resMsg + "\",\"snapshot\":" + snap + "}", origin, isSyncEndpoint, lan);
-            } else if (method == "POST" && uri == "/api/git/import") {
+                                 "{\"ok\":true,\"message\":\"" + resMsg + "\",\"snapshot\":" + snap + "}", origin, isSyncOrPairEndpoint, lan);
+            } else if (method == "POST" && path == "/api/git/import") {
                 std::string resMsg = repo->importFromGit();
                 std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
                 sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
-                                 "{\"ok\":true,\"message\":\"" + resMsg + "\",\"snapshot\":" + snap + "}", origin, isSyncEndpoint, lan);
+                                 "{\"ok\":true,\"message\":\"" + resMsg + "\",\"snapshot\":" + snap + "}", origin, isSyncOrPairEndpoint, lan);
             } else {
-                sendHttpResponse(clientSock, 404, "Not Found", "application/json", "{\"ok\":false,\"error\":\"endpoint not found\"}", origin, isSyncEndpoint, lan);
+                sendHttpResponse(clientSock, 404, "Not Found", "application/json", "{\"ok\":false,\"error\":\"endpoint not found\"}", origin, isSyncOrPairEndpoint, lan);
             }
         } catch (const MiniGitException& e) {
             std::string err = e.what();
             std::string cleanErr;
             for (char c : err) { if (c == '"') cleanErr += "\\\""; else cleanErr += c; }
             sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                             "{\"ok\":false,\"error\":\"" + cleanErr + "\"}", origin, isSyncEndpoint, lan);
+                             "{\"ok\":false,\"error\":\"" + cleanErr + "\"}", origin, isSyncOrPairEndpoint, lan);
         } catch (const std::exception& e) {
             std::string err = e.what();
             std::string cleanErr;
             for (char c : err) { if (c == '"') cleanErr += "\\\""; else cleanErr += c; }
             sendHttpResponse(clientSock, 500, "Internal Server Error", "application/json; charset=utf-8",
-                             "{\"ok\":false,\"error\":\"" + cleanErr + "\"}", origin, isSyncEndpoint, lan);
+                             "{\"ok\":false,\"error\":\"" + cleanErr + "\"}", origin, isSyncOrPairEndpoint, lan);
         }
 
         CLOSESOCKET(clientSock);
