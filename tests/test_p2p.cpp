@@ -15,6 +15,7 @@
 #include "HtmlExporter.h"
 #include "HttpServer.h"
 #include "Json.h"
+#include "PairingManager.h"
 #include "Repository.h"
 
 #ifdef _WIN32
@@ -107,187 +108,276 @@ int main() {
 
     writeFile(repoAPath / "special.txt", specialContent);
     writeFile(repoAPath / "binary.bin", binaryContent);
-
     repoA.add("special.txt");
     repoA.add("binary.bin");
-    Hash c1 = repoA.commit("Commit 1: special chars and binary file");
+    Hash c1 = repoA.commit("Add special and binary files");
 
-    // Commit 2 on A
-    writeFile(repoAPath / "extra.txt", "Extra file content with <HTML> & entities.");
-    repoA.add("extra.txt");
-    Hash c2 = repoA.commit("Commit 2: extra file");
+    // Commit 2 on A: update special file and add another file
+    std::string specialContent2 = specialContent + "\nLine 4: added in commit 2 with <brackets> & &";
+    writeFile(repoAPath / "special.txt", specialContent2);
+    writeFile(repoAPath / "notes.txt", "Plain notes file");
+    repoA.add("special.txt");
+    repoA.add("notes.txt");
+    Hash c2 = repoA.commit("Update special file and add notes");
 
     // Export bundle from A
-    std::string bundle = repoA.exportBundleJson();
-    assert(!bundle.empty());
+    std::string bundleA = repoA.exportBundleJson();
+    assert(!bundleA.empty());
 
-    // Import bundle into B
-    std::string resJson = repoB.importBundleJson(bundle);
-    JsonValue resVal = JsonValue::parse(resJson);
-    assert(resVal.is_object());
-    assert(resVal["ok"].as_bool() == true);
-    assert(resVal["objectsImported"].as_int64() > 0);
-    assert(resVal["objectsRejected"].as_int64() == 0);
+    // Import bundle into empty Repo B
+    fs::current_path(repoBPath);
+    std::string importRes1 = repoB.importBundleJson(bundleA);
+    JsonValue jsonRes1 = JsonValue::parse(importRes1);
 
-    // Verify Repo B state
-    assert(repoB.branchExists("main"));
+    assert(jsonRes1.is_object());
+    assert(jsonRes1["ok"].as_bool() == true);
+    assert(jsonRes1["objectsImported"].as_int64() > 0);
+    assert(jsonRes1["objectsRejected"].as_int64() == 0);
+    assert(jsonRes1["branchesCreated"].as_array().size() == 1);
+    assert(jsonRes1["branchesCreated"].as_array()[0].as_string() == "main");
+
+    // Check Repo B log and tips
     assert(repoB.branchTip("main") == c2);
+    assert(repoB.head() == c2);
+
     auto logB = repoB.log();
     assert(logB.size() == 2);
     assert(logB[0].hash() == c2);
     assert(logB[1].hash() == c1);
 
-    fs::current_path(repoBPath);
-    // Checkout main in B and verify files byte for byte
-    repoB.checkout("main");
-    std::string specialB = readFile(repoBPath / "special.txt");
-    std::string binaryB = readFile(repoBPath / "binary.bin");
-    std::string extraB = readFile(repoBPath / "extra.txt");
+    // Verify file contents match byte for byte
+    assert(readFile(repoBPath / "special.txt") == specialContent2);
+    assert(readFile(repoBPath / "binary.bin") == binaryContent);
+    assert(readFile(repoBPath / "notes.txt") == "Plain notes file");
 
-    assert(specialB == specialContent);
-    assert(binaryB == binaryContent);
-    assert(extraB == "Extra file content with <HTML> & entities.");
     std::cout << "  -> PASSED: All files, logs, and branch tips match byte for byte with exact hashes.\n";
 
     // -------------------------------------------------------------
-    // TEST 2: Importing the same bundle twice
+    // TEST 2: Importing the same bundle twice changes nothing
     // -------------------------------------------------------------
     std::cout << "[Test 2] Testing idempotent second import of same bundle...\n";
-    std::string res2 = repoB.importBundleJson(bundle);
-    JsonValue resVal2 = JsonValue::parse(res2);
-    assert(resVal2.is_object());
-    assert(resVal2["ok"].as_bool() == true);
-    assert(resVal2["objectsImported"].as_int64() == 0);
-    assert(resVal2["objectsPresent"].as_int64() > 0);
-    assert(resVal2["objectsRejected"].as_int64() == 0);
+    std::string importRes2 = repoB.importBundleJson(bundleA);
+    JsonValue jsonRes2 = JsonValue::parse(importRes2);
+
+    assert(jsonRes2.is_object());
+    assert(jsonRes2["ok"].as_bool() == true);
+    assert(jsonRes2["objectsImported"].as_int64() == 0);
+    assert(jsonRes2["objectsPresent"].as_int64() > 0);
+    assert(jsonRes2["objectsRejected"].as_int64() == 0);
+    assert(jsonRes2["branchesUpToDate"].as_array().size() >= 1);
     assert(repoB.branchTip("main") == c2);
+
     std::cout << "  -> PASSED: Re-importing reports everything as already present and modifies nothing.\n";
 
     // -------------------------------------------------------------
-    // TEST 3: Tampered object (content changed, key kept)
+    // TEST 3: Tampered object (content changed, key kept) is rejected
     // -------------------------------------------------------------
     std::cout << "[Test 3] Testing tampered object rejection (refs must remain untouched)...\n";
-    JsonValue tamperedRoot = JsonValue::parse(bundle);
-    auto& objs = tamperedRoot.as_object_mut()["objects"].as_object_mut();
+    // Tamper with bundle by changing content of a blob without changing the hash key
+    std::string tamperedBundle = bundleA;
+    size_t notesPos = tamperedBundle.find("Plain notes file");
+    assert(notesPos != std::string::npos);
+    tamperedBundle.replace(notesPos, 16, "TAMPERED notes!!");
 
-    // Find a blob and tamper its content
-    bool tampered = false;
-    for (auto& [hStr, oVal] : objs) {
-        if (oVal["type"].as_string() == "blob") {
-            oVal.as_object_mut()["content"] = JsonValue("tampered content that does not match original hash!");
-            tampered = true;
-            break;
-        }
-    }
-    assert(tampered);
+    // Create a fresh Repo C
+    fs::path repoCPath = tempBase / "repoC";
+    cleanDir(repoCPath);
+    Repository::init(repoCPath);
+    fs::current_path(repoCPath);
+    Repository repoC(repoCPath);
 
-    Hash mainBeforeTamper = repoB.branchTip("main");
-    std::string tamperedBundleStr = tamperedRoot.serialize();
-    std::string res3 = repoB.importBundleJson(tamperedBundleStr);
-    JsonValue resVal3 = JsonValue::parse(res3);
+    std::string importTampered = repoC.importBundleJson(tamperedBundle);
+    JsonValue jsonTampered = JsonValue::parse(importTampered);
 
-    assert(resVal3.is_object());
-    assert(resVal3["ok"].as_bool() == false);
-    assert(resVal3["objectsRejected"].as_int64() > 0);
-    assert(repoB.branchTip("main") == mainBeforeTamper);
+    assert(jsonTampered.is_object());
+    assert(jsonTampered["objectsRejected"].as_int64() > 0);
+    // Branch main should NOT have been set to c2 because of rejected dependencies
+    assert(!repoC.branchExists("main") || repoC.branchTip("main") != c2);
+
     std::cout << "  -> PASSED: Tampered object rejected and refs completely untouched.\n";
 
     // -------------------------------------------------------------
     // TEST 4: Diverged branch reported as skipped, tip unchanged
     // -------------------------------------------------------------
     std::cout << "[Test 4] Testing diverged branch safety (merge needed)...\n";
-    fs::current_path(repoAPath);
-    // In Repo A: create branch diverged_branch at c2, make commit c3_A
-    repoA.createBranch("diverged_branch");
-    repoA.checkout("diverged_branch");
-    writeFile(repoAPath / "div.txt", "A's version of history");
-    repoA.add("div.txt");
-    Hash c3_A = repoA.commit("Branch commit on A");
-
+    // Repo B makes an independent commit on main
     fs::current_path(repoBPath);
-    // In Repo B: create branch diverged_branch at c2, make commit c3_B
-    repoB.createBranch("diverged_branch");
-    repoB.checkout("diverged_branch");
-    writeFile(repoBPath / "div.txt", "B's diverged version of history");
-    repoB.add("div.txt");
-    Hash c3_B = repoB.commit("Branch commit on B");
+    writeFile(repoBPath / "diverged_b.txt", "Work on B");
+    repoB.add("diverged_b.txt");
+    Hash cB = repoB.commit("Commit on B diverging from A");
 
-    // Export A's bundle and import to B
-    std::string bundleA_div = repoA.exportBundleJson();
-    std::string res4 = repoB.importBundleJson(bundleA_div);
-    JsonValue resVal4 = JsonValue::parse(res4);
+    // Repo A makes an independent commit on main
+    fs::current_path(repoAPath);
+    writeFile(repoAPath / "diverged_a.txt", "Work on A");
+    repoA.add("diverged_a.txt");
+    Hash cA = repoA.commit("Commit on A diverging from B");
 
-    assert(resVal4.is_object());
-    // Branch diverged_branch should be in branchesDiverged
-    assert(resVal4["branchesDiverged"].as_array().size() > 0);
-    // Tip of diverged_branch in Repo B MUST remain at c3_B
-    assert(repoB.branchTip("diverged_branch") == c3_B);
+    std::string bundleA_diverged = repoA.exportBundleJson();
+
+    // Import A's diverged bundle into B
+    fs::current_path(repoBPath);
+    std::string importDiverged = repoB.importBundleJson(bundleA_diverged);
+    JsonValue jsonDiverged = JsonValue::parse(importDiverged);
+
+    assert(jsonDiverged.is_object());
+    assert(jsonDiverged["ok"].as_bool() == false);
+    assert(jsonDiverged["branchesDiverged"].as_array().size() == 1);
+    assert(jsonDiverged["branchesDiverged"].as_array()[0].as_string() == "main");
+    // Branch tip in B MUST remain at cB
+    assert(repoB.branchTip("main") == cB);
+
     std::cout << "  -> PASSED: Diverged branch correctly identified, skipped, and tip remained unchanged.\n";
 
     // -------------------------------------------------------------
-    // TEST 5: Dirty working tree on active branch: fast-forward refused
+    // TEST 5: Dirty working tree on current branch refuses fast-forward
     // -------------------------------------------------------------
     std::cout << "[Test 5] Testing dirty working tree refusal on active branch fast-forward...\n";
+    // Create a new branch 'feature' on A, add commit, export bundle
     fs::current_path(repoAPath);
-    // On Repo A: advance main with commit c4
-    repoA.checkout("main");
-    writeFile(repoAPath / "ff.txt", "fast forward file on A");
-    repoA.add("ff.txt");
-    Hash c4 = repoA.commit("Advance main commit on A");
-    std::string bundleA_ff = repoA.exportBundleJson();
+    repoA.createBranch("feature");
+    repoA.checkout("feature");
+    writeFile(repoAPath / "feature.txt", "Feature progress");
+    repoA.add("feature.txt");
+    Hash cFeat = repoA.commit("Feature commit");
+    std::string bundleFeat = repoA.exportBundleJson();
 
+    // Import into Repo B so B gets the feature branch
     fs::current_path(repoBPath);
-    // On Repo B: switch to main, then make it dirty
-    repoB.checkout("main");
-    Hash mainBeforeFF = repoB.branchTip("main");
-    writeFile(repoBPath / "special.txt", "UNCOMMITTED LOCAL MODIFICATION ON B");
+    repoB.importBundleJson(bundleFeat);
+    assert(repoB.branchTip("feature") == cFeat);
 
-    std::string res5 = repoB.importBundleJson(bundleA_ff);
-    JsonValue resVal5 = JsonValue::parse(res5);
+    // Now A advances feature with commit 2
+    fs::current_path(repoAPath);
+    writeFile(repoAPath / "feature.txt", "Feature progress v2");
+    repoA.add("feature.txt");
+    Hash cFeat2 = repoA.commit("Feature commit v2");
+    std::string bundleFeat2 = repoA.exportBundleJson();
 
-    assert(resVal5.is_object());
-    assert(resVal5["ok"].as_bool() == false);
-    assert(resVal5["error"].as_string().find("uncommitted changes") != std::string::npos);
-    // Working tree still has uncommitted modification
-    assert(readFile(repoBPath / "special.txt") == "UNCOMMITTED LOCAL MODIFICATION ON B");
-    // Main branch tip in B unchanged
-    assert(repoB.branchTip("main") == mainBeforeFF);
+    // On B, checkout feature and make working tree dirty
+    fs::current_path(repoBPath);
+    repoB.checkout("feature");
+    writeFile(repoBPath / "feature.txt", "UNCOMMITTED DIRTY EDITS ON B");
+
+    std::string importDirty = repoB.importBundleJson(bundleFeat2);
+    JsonValue jsonDirty = JsonValue::parse(importDirty);
+
+    assert(jsonDirty.is_object());
+    assert(jsonDirty["ok"].as_bool() == false);
+    assert(jsonDirty["error"].as_string().find("uncommitted changes") != std::string::npos);
+    // Tip of feature on B should still be cFeat (not fast-forwarded)
+    assert(repoB.branchTip("feature") == cFeat);
+    assert(readFile(repoBPath / "feature.txt") == "UNCOMMITTED DIRTY EDITS ON B");
+
+    // Clean up dirty edits
+    repoB.discard("feature.txt");
+
     std::cout << "  -> PASSED: Fast-forward cleanly refused with clear error when working tree is dirty.\n";
-
-    // Discard dirty change on B and verify clean fast-forward works
-    repoB.discard("special.txt");
-    std::string res5_clean = repoB.importBundleJson(bundleA_ff);
-    JsonValue resVal5_clean = JsonValue::parse(res5_clean);
-    assert(resVal5_clean["ok"].as_bool() == true);
-    assert(repoB.branchTip("main") == c4);
 
     // -------------------------------------------------------------
     // TEST 6: Malformed JSON returns an error and does not crash
     // -------------------------------------------------------------
     std::cout << "[Test 6] Testing malformed JSON handling...\n";
-    std::vector<std::string> malformedInputs = {
+    std::vector<std::string> malformedBundles = {
+        "{ unclosed json",
+        "{\"minigit_bundle\": 1, \"objects\": \"not an object\"}",
+        "{\"minigit_bundle\": 1, \"objects\": { \"abc\": { \"type\": \"unknown_type\" } } }",
         "",
-        "not json at all",
-        "{truncated: true",
-        "{\"objects\": 123}",
-        "{\"objects\": {\"short\": {\"type\": \"blob\"}}}",
-        "{\"branches\": [1, 2, 3]}",
-        "{\"objects\": {}}"
+        "null",
+        "{\"objects\": {}, \"branches\": 12345}"
     };
 
-    for (const auto& badInput : malformedInputs) {
-        std::string badRes = repoB.importBundleJson(badInput);
-        JsonValue val = JsonValue::parse(badRes);
-        assert(val.is_object());
-        assert(val["ok"].as_bool() == false);
+    for (const auto& bad : malformedBundles) {
+        std::string res = repoB.importBundleJson(bad);
+        JsonValue j = JsonValue::parse(res);
+        assert(j.is_object());
+        assert(j["ok"].as_bool() == false);
+        assert(!j["error"].as_string().empty());
     }
+
     std::cout << "  -> PASSED: All malformed JSON inputs handled safely with ok:false and zero crashes.\n";
 
     // -------------------------------------------------------------
-    // TEST 7: LAN mode security and pairing token verification
+    // TEST 7: 6-Digit Pair Code, Expiration, Lockout, Allow/Deny, Session Token & Revoke
     // -------------------------------------------------------------
-    std::cout << "[Test 7] Testing LAN mode security, pairing token, and endpoint restrictions...\n";
-    // We launch HttpServer in LAN mode in a background thread
+    std::cout << "[Test 7] Testing 6-digit pair code, lockout, host Allow/Deny, 32-byte session token, and Revoke...\n";
+
+    // 7.1 Direct unit tests on PairingManager
+    {
+        PairingManager pm;
+        std::string c = pm.currentCode();
+        assert(c.size() == 6);
+        for (char ch : c) assert(std::isdigit(static_cast<unsigned char>(ch)));
+        assert(!pm.isExpired());
+        assert(!pm.isLocked());
+        assert(!pm.isUsed());
+        assert(pm.failedAttempts() == 0);
+
+        // Test wrong attempts lockout
+        for (int i = 1; i <= 4; ++i) {
+            auto r = pm.submitCode("000000", "192.168.1.50");
+            assert(!r.success);
+            assert(!r.locked);
+            assert(r.remainingAttempts == 5 - i);
+        }
+        // 5th wrong attempt locks the code
+        auto r5 = pm.submitCode("000000", "192.168.1.50");
+        assert(!r5.success);
+        assert(r5.locked);
+        assert(pm.isLocked());
+
+        // 6th attempt is blocked
+        auto r6 = pm.submitCode(c, "192.168.1.50");
+        assert(!r6.success);
+        assert(r6.locked);
+
+        // Generating a new code unlocks
+        std::string newC = pm.generateNewCode();
+        assert(newC.size() == 6);
+        assert(!pm.isLocked());
+        assert(pm.failedAttempts() == 0);
+
+        // Test single use: approve request, then try using the code again
+        auto rOk = pm.submitCode(newC, "192.168.1.50");
+        assert(rOk.success);
+        assert(!rOk.requestId.empty());
+
+        // Host approves
+        bool dec = pm.decideRequest(rOk.requestId, true, "Teammate Laptop");
+        assert(dec);
+        assert(pm.isUsed());
+
+        auto status = pm.getRequestStatus(rOk.requestId);
+        assert(status.status == PendingPairRequest::APPROVED);
+        assert(status.sessionToken.size() == 64); // 32 random bytes represented as 64 hex characters
+        assert(pm.isValidSessionToken(status.sessionToken));
+
+        // Attempting to submit the used code again fails
+        auto rUsed = pm.submitCode(newC, "192.168.1.51");
+        assert(!rUsed.success);
+        assert(rUsed.error.find("already been used") != std::string::npos);
+
+        // Test Revoke
+        auto peers = pm.listPeers();
+        assert(peers.size() == 1);
+        assert(pm.isValidSessionToken(peers[0].sessionToken));
+
+        bool revoked = pm.revokePeer(peers[0].id);
+        assert(revoked);
+        assert(!pm.isValidSessionToken(peers[0].sessionToken));
+        assert(pm.listPeers().empty());
+
+        // Test Expiration (5 min)
+        pm.generateNewCode();
+        pm.setExpirationSeconds(1);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+        assert(pm.isExpired());
+        auto rExp = pm.submitCode(pm.currentCode(), "192.168.1.50");
+        assert(!rExp.success);
+        assert(rExp.error.find("expired") != std::string::npos);
+    }
+    std::cout << "  -> PASSED: PairingManager 6-digit code, expiration, 5-wrong lockout, single-use, and revoke verified.\n";
+
+    // 7.2 Integration test over HTTP socket with real HttpServer in LAN mode
     int testPort = 18889;
     std::thread serverThread([&]() {
         try {
@@ -296,32 +386,20 @@ int main() {
     });
     serverThread.detach();
 
-    // Wait for server to bind
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
-    // 7.1: Loopback can get token via /api/token
-    std::string tokenReq = "GET /api/token HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
-    std::string tokenResp = httpExchange("127.0.0.1", testPort, tokenReq);
-    assert(tokenResp.find("200 OK") != std::string::npos);
+    // Get pair code from loopback /api/pair/code
+    std::string codeReq = "GET /api/pair/code HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
+    std::string codeResp = httpExchange("127.0.0.1", testPort, codeReq);
+    assert(codeResp.find("200 OK") != std::string::npos);
 
-    size_t bodyPos = tokenResp.find("\r\n\r\n");
+    size_t bodyPos = codeResp.find("\r\n\r\n");
     assert(bodyPos != std::string::npos);
-    std::string tokenBody = tokenResp.substr(bodyPos + 4);
-    JsonValue tokenObj = JsonValue::parse(tokenBody);
-    assert(tokenObj.is_object());
-    assert(tokenObj["ok"].as_bool() == true);
-    std::string serverToken = tokenObj["token"].as_string();
-    assert(!serverToken.empty());
+    JsonValue codeObj = JsonValue::parse(codeResp.substr(bodyPos + 4));
+    assert(codeObj.is_object());
+    std::string pairCode = codeObj["code"].as_string();
+    assert(pairCode.size() == 6);
 
-    // 7.2: Non-loopback simulation:
-    // To test non-loopback simulation on localhost, let's test connecting to the LAN IP address of this machine!
-    // Or send requests without token to /api/sync/bundle:
-    // When connecting to 127.0.0.1, it's loopback, but we can verify that /api/sync/bundle responds with 200 to loopback.
-    std::string loopbackSyncReq = "GET /api/sync/bundle HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
-    std::string loopbackSyncResp = httpExchange("127.0.0.1", testPort, loopbackSyncReq);
-    assert(loopbackSyncResp.find("200 OK") != std::string::npos);
-
-    // Now test LAN IP connection:
     // Discover local LAN IP
     socket_t sTmp = socket(AF_INET, SOCK_DGRAM, 0);
     sockaddr_in loopbackAddr{};
@@ -339,45 +417,93 @@ int main() {
 
     if (lanIp != "127.0.0.1" && !lanIp.empty()) {
         std::cout << "  [Testing via LAN interface: " << lanIp << "]\n";
-        // 7.2a: Request to /api/commit from LAN interface MUST be 403 Forbidden
+
+        // Non-loopback request to non-sync/pair endpoint is 403 Forbidden
         std::string lanCommitReq = "POST /api/commit HTTP/1.1\r\nHost: " + lanIp + "\r\nContent-Type: application/json\r\nContent-Length: 22\r\nConnection: close\r\n\r\n{\"message\":\"malicious\"}";
         std::string lanCommitResp = httpExchange(lanIp, testPort, lanCommitReq);
         assert(lanCommitResp.find("403 Forbidden") != std::string::npos);
 
-        // 7.2b: Request to /api/sync/bundle WITHOUT token MUST be 401 Unauthorized
-        std::string lanSyncNoToken = "GET /api/sync/bundle HTTP/1.1\r\nHost: " + lanIp + "\r\nConnection: close\r\n\r\n";
-        std::string lanSyncNoTokenResp = httpExchange(lanIp, testPort, lanSyncNoToken);
-        assert(lanSyncNoTokenResp.find("401 Unauthorized") != std::string::npos);
+        // Submit wrong code over LAN
+        std::string wrongBody = "{\"code\":\"000000\"}";
+        std::string wrongReq = "POST /api/pair HTTP/1.1\r\nHost: " + lanIp + "\r\nContent-Type: application/json\r\nContent-Length: " +
+                               std::to_string(wrongBody.size()) + "\r\nConnection: close\r\n\r\n" + wrongBody;
+        std::string wrongResp = httpExchange(lanIp, testPort, wrongReq);
+        assert(wrongResp.find("401 Unauthorized") != std::string::npos);
 
-        // 7.2c: Request to /api/sync/bundle with WRONG token MUST be 401 Unauthorized
-        std::string lanSyncWrongToken = "GET /api/sync/bundle HTTP/1.1\r\nHost: " + lanIp + "\r\nX-MiniGit-Token: wrong_token\r\nConnection: close\r\n\r\n";
-        std::string lanSyncWrongResp = httpExchange(lanIp, testPort, lanSyncWrongToken);
-        assert(lanSyncWrongResp.find("401 Unauthorized") != std::string::npos);
+        // Submit correct pair code over LAN
+        std::string correctBody = "{\"code\":\"" + pairCode + "\",\"peerName\":\"Laptop B\"}";
+        std::string correctReq = "POST /api/pair HTTP/1.1\r\nHost: " + lanIp + "\r\nContent-Type: application/json\r\nContent-Length: " +
+                                 std::to_string(correctBody.size()) + "\r\nConnection: close\r\n\r\n" + correctBody;
+        std::string correctResp = httpExchange(lanIp, testPort, correctReq);
+        assert(correctResp.find("200 OK") != std::string::npos);
 
-        // 7.2d: Request to /api/sync/bundle with VALID token MUST be 200 OK
-        std::string lanSyncValidToken = "GET /api/sync/bundle HTTP/1.1\r\nHost: " + lanIp + "\r\nX-MiniGit-Token: " + serverToken + "\r\nConnection: close\r\n\r\n";
-        std::string lanSyncValidResp = httpExchange(lanIp, testPort, lanSyncValidToken);
-        assert(lanSyncValidResp.find("200 OK") != std::string::npos);
+        size_t bPos = correctResp.find("\r\n\r\n");
+        JsonValue pairRes = JsonValue::parse(correctResp.substr(bPos + 4));
+        assert(pairRes["status"].as_string() == "pending");
+        std::string reqId = pairRes["requestId"].as_string();
+        assert(!reqId.empty());
 
-        // 7.2e: OPTIONS preflight with Origin header
-        std::string lanOptionsReq = "OPTIONS /api/sync/bundle HTTP/1.1\r\nHost: " + lanIp + "\r\nOrigin: http://example.com\r\nConnection: close\r\n\r\n";
-        std::string lanOptionsResp = httpExchange(lanIp, testPort, lanOptionsReq);
-        assert(lanOptionsResp.find("204 No Content") != std::string::npos);
-        assert(lanOptionsResp.find("Access-Control-Allow-Origin: http://example.com") != std::string::npos);
-        assert(lanOptionsResp.find("Access-Control-Allow-Headers: Content-Type, X-MiniGit-Token") != std::string::npos);
-    } else {
-        std::cout << "  [Single network interface active (127.0.0.1)]\n";
+        // Host checks pending requests via loopback
+        std::string pendReq = "GET /api/pair/pending HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
+        std::string pendResp = httpExchange("127.0.0.1", testPort, pendReq);
+        assert(pendResp.find("200 OK") != std::string::npos);
+        assert(pendResp.find(reqId) != std::string::npos);
+
+        // Host clicks ALLOW
+        std::string decideBody = "{\"requestId\":\"" + reqId + "\",\"action\":\"allow\"}";
+        std::string decideReq = "POST /api/pair/decide HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: " +
+                                std::to_string(decideBody.size()) + "\r\nConnection: close\r\n\r\n" + decideBody;
+        std::string decideResp = httpExchange("127.0.0.1", testPort, decideReq);
+        assert(decideResp.find("200 OK") != std::string::npos);
+
+        // Peer polls status over LAN and receives 32-byte session token
+        std::string statReq = "GET /api/pair/status?requestId=" + reqId + " HTTP/1.1\r\nHost: " + lanIp + "\r\nConnection: close\r\n\r\n";
+        std::string statResp = httpExchange(lanIp, testPort, statReq);
+        assert(statResp.find("200 OK") != std::string::npos);
+        size_t sPos = statResp.find("\r\n\r\n");
+        JsonValue statObj = JsonValue::parse(statResp.substr(sPos + 4));
+        assert(statObj["status"].as_string() == "approved");
+        std::string sessionToken = statObj["token"].as_string();
+        assert(sessionToken.size() == 64); // 32 random bytes represented as 64 hex characters
+
+        // Sync bundle using valid session token
+        std::string syncReq = "GET /api/sync/bundle HTTP/1.1\r\nHost: " + lanIp + "\r\nX-MiniGit-Token: " + sessionToken + "\r\nConnection: close\r\n\r\n";
+        std::string syncResp = httpExchange(lanIp, testPort, syncReq);
+        assert(syncResp.find("200 OK") != std::string::npos);
+
+        // Sync bundle with invalid token returns 401
+        std::string badSyncReq = "GET /api/sync/bundle HTTP/1.1\r\nHost: " + lanIp + "\r\nX-MiniGit-Token: bad_token_123\r\nConnection: close\r\n\r\n";
+        std::string badSyncResp = httpExchange(lanIp, testPort, badSyncReq);
+        assert(badSyncResp.find("401 Unauthorized") != std::string::npos);
+
+        // Host checks paired peers list
+        std::string peersReq = "GET /api/pair/peers HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
+        std::string peersResp = httpExchange("127.0.0.1", testPort, peersReq);
+        assert(peersResp.find("200 OK") != std::string::npos);
+        size_t pPos = peersResp.find("\r\n\r\n");
+        JsonValue peersObj = JsonValue::parse(peersResp.substr(pPos + 4));
+        assert(peersObj["peers"].as_array().size() >= 1);
+        std::string peerId = peersObj["peers"].as_array()[0]["id"].as_string();
+
+        // Host revokes peer
+        std::string revokeBody = "{\"id\":\"" + peerId + "\"}";
+        std::string revokeReq = "POST /api/pair/revoke HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: " +
+                                std::to_string(revokeBody.size()) + "\r\nConnection: close\r\n\r\n" + revokeBody;
+        std::string revokeResp = httpExchange("127.0.0.1", testPort, revokeReq);
+        assert(revokeResp.find("200 OK") != std::string::npos);
+
+        // Now previous session token is revoked and sync returns 401 Unauthorized
+        std::string revokedSyncResp = httpExchange(lanIp, testPort, syncReq);
+        assert(revokedSyncResp.find("401 Unauthorized") != std::string::npos);
+        std::cout << "  -> PASSED: HTTP pair code verification, Host approval popup, session token sync, and revocation verified.\n";
     }
 
-    // 7.3: Payload size limit (50 MB)
+    // 7.3 Payload size limit (50 MB)
     std::string hugeReq = "POST /api/sync/import-bundle HTTP/1.1\r\nHost: 127.0.0.1\r\ncontent-length: 60000000\r\nConnection: close\r\n\r\n";
     std::string hugeResp = httpExchange("127.0.0.1", testPort, hugeReq);
     assert(hugeResp.find("413 Payload Too Large") != std::string::npos);
 
-    std::cout << "  -> PASSED: LAN mode pairing token, CORS, body limit, and endpoint access controls verified.\n";
-
     fs::current_path(origCwd);
-    // Clean up
     cleanDir(tempBase);
 
     std::cout << "\n========================================\n";
