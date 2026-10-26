@@ -41,6 +41,7 @@ class Repository {
     RefManager refs_;
 
     std::string relPath(const fs::path& p) const;
+    bool isIgnored(const fs::path& fullPath, const std::string& relPath, bool isDir = false) const;
     std::vector<std::string> workingFiles() const;
     std::map<std::string, Hash> headTree() const;
     Hash hashWorking(const std::string& rel) const;

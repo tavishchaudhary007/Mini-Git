@@ -45,11 +45,66 @@ std::string Repository::relPath(const fs::path& p) const {
     return s;
 }
 
+bool Repository::isIgnored(const fs::path& fullPath, const std::string& relPath, bool isDir) const {
+    std::string fname = fullPath.filename().generic_string();
+    if (fname == ".git" || fname == ".minigit" || fname == "node_modules" ||
+        fname == "minigit.exe" || fname == "minigit") {
+        return true;
+    }
+    if (relPath == ".git" || relPath.rfind(".git/", 0) == 0 ||
+        relPath == ".minigit" || relPath.rfind(".minigit/", 0) == 0 ||
+        relPath == "node_modules" || relPath.rfind("node_modules/", 0) == 0 ||
+        relPath == "minigit.exe" || relPath == "minigit") {
+        return true;
+    }
+
+    fs::path ignPath = root_ / ".minigitignore";
+    if (fs::exists(ignPath)) {
+        std::ifstream ifs(ignPath);
+        std::string line;
+        while (std::getline(ifs, line)) {
+            while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t')) line.pop_back();
+            while (!line.empty() && (line.front() == ' ' || line.front() == '\t')) line.erase(line.begin());
+            if (line.empty() || line.front() == '#') continue;
+
+            if (line.back() == '/') {
+                std::string dirPattern = line.substr(0, line.size() - 1);
+                if (fname == dirPattern || relPath == dirPattern || relPath.rfind(dirPattern + "/", 0) == 0) {
+                    return true;
+                }
+                if (relPath.find("/" + dirPattern + "/") != std::string::npos ||
+                    (relPath.size() >= dirPattern.size() + 1 && relPath.substr(relPath.size() - dirPattern.size() - 1) == "/" + dirPattern)) {
+                    return true;
+                }
+            } else if (line.rfind("*.", 0) == 0) {
+                std::string ext = line.substr(1);
+                if (fname.size() >= ext.size() && fname.substr(fname.size() - ext.size()) == ext) {
+                    return true;
+                }
+            } else {
+                if (fname == line || relPath == line) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
 std::vector<std::string> Repository::workingFiles() const {
     std::vector<std::string> files;
     for (auto it = fs::recursive_directory_iterator(root_); it != fs::recursive_directory_iterator(); ++it) {
-        if (it->path().filename() == ".minigit") { it.disable_recursion_pending(); continue; }
-        if (it->is_regular_file()) files.push_back(it->path().lexically_relative(root_).generic_string());
+        std::string rel = it->path().lexically_relative(root_).generic_string();
+        if (it->is_directory()) {
+            if (isIgnored(it->path(), rel, true)) {
+                it.disable_recursion_pending();
+                continue;
+            }
+        } else if (it->is_regular_file()) {
+            if (!isIgnored(it->path(), rel, false)) {
+                files.push_back(rel);
+            }
+        }
     }
     std::sort(files.begin(), files.end());
     return files;
@@ -716,38 +771,67 @@ std::string Repository::gitStatus() const {
 }
 
 std::string Repository::exportToGit() {
-    fs::path gitDir = root_ / ".git";
-    std::string rootStr = root_.string();
     std::string headMsg = "MiniGit snapshot sync";
     if (!head().empty()) {
         try {
             headMsg = store_.loadAs<Commit>(head())->message();
         } catch (...) {}
     }
-    std::string safeMsg;
-    for (char c : headMsg) { if (c == '"') safeMsg += "'"; else safeMsg += c; }
 
-    std::string cmd;
-    if (!fs::exists(gitDir)) {
-#ifdef _WIN32
-        cmd = "cd /d \"" + rootStr + "\" && git init && git add -A && git commit -m \"" + safeMsg + "\"";
-#else
-        cmd = "cd \"" + rootStr + "\" && git init && git add -A && git commit -m \"" + safeMsg + "\"";
-#endif
-    } else {
-#ifdef _WIN32
-        cmd = "cd /d \"" + rootStr + "\" && git add -A && git commit -m \"" + safeMsg + "\"";
-#else
-        cmd = "cd \"" + rootStr + "\" && git add -A && git commit -m \"" + safeMsg + "\"";
-#endif
+    std::error_code ec;
+    fs::path tempDir = fs::temp_directory_path(ec);
+    if (ec) tempDir = root_;
+    fs::path tmpMsgFile = tempDir / ("mg_exp_" + std::to_string(std::time(nullptr)) + "_" + std::to_string(std::rand()) + ".txt");
+    writeFile(tmpMsgFile, headMsg);
+
+    fs::path gitIgnore = root_ / ".gitignore";
+    std::string giContent;
+    if (fs::exists(gitIgnore)) {
+        try { giContent = readFile(gitIgnore); } catch (...) {}
+    }
+    if (giContent.find(".minigit") == std::string::npos) {
+        if (!giContent.empty() && giContent.back() != '\n') giContent += "\n";
+        giContent += ".minigit/\n";
+        writeFile(gitIgnore, giContent);
     }
 
-    int ret = std::system(cmd.c_str());
+    std::string rootArg = "\"" + root_.string() + "\"";
+    std::string msgFileArg = "\"" + tmpMsgFile.string() + "\"";
+
+    int retCheck = std::system("git --version >nul 2>&1");
+#ifndef _WIN32
+    retCheck = std::system("git --version >/dev/null 2>&1");
+#endif
+    if (retCheck != 0) {
+        fs::remove(tmpMsgFile, ec);
+        throw MiniGitException("git is not installed or not available in PATH");
+    }
+
+    if (!fs::exists(root_ / ".git")) {
+        std::string cmdInit = "git -C " + rootArg + " init";
+        int retInit = std::system(cmdInit.c_str());
+        if (retInit != 0) {
+            fs::remove(tmpMsgFile, ec);
+            throw MiniGitException("git init failed with exit code " + std::to_string(retInit));
+        }
+    }
+
+    std::string cmdAdd = "git -C " + rootArg + " add -A";
+    int retAdd = std::system(cmdAdd.c_str());
+    if (retAdd != 0) {
+        fs::remove(tmpMsgFile, ec);
+        throw MiniGitException("git add failed with exit code " + std::to_string(retAdd));
+    }
+
+    std::string cmdCommit = "git -C " + rootArg + " commit -F " + msgFileArg;
+    int retCommit = std::system(cmdCommit.c_str());
+    fs::remove(tmpMsgFile, ec);
+    if (retCommit != 0) {
+        throw MiniGitException("git commit failed with exit code " + std::to_string(retCommit));
+    }
+
     recordReflog("git_export", head(), head(), "Exported to standard Git (.git)");
-    if (ret == 0) {
-        return "Exported to standard Git repository successfully.";
-    }
-    return "Git export executed (exit code " + std::to_string(ret) + ").";
+    return "Exported to standard Git repository successfully.";
 }
 
 std::string Repository::importFromGit() {
