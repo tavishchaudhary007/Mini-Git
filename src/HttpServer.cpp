@@ -116,7 +116,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser) {
 
         sockaddr_in addr{};
         addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+        addr.sin_addr.s_addr = htonl(INADDR_ANY);
         addr.sin_port = htons(static_cast<uint16_t>(port));
 
         if (bind(s, (struct sockaddr*)&addr, sizeof(addr)) == 0 && listen(s, 10) == 0) {
@@ -143,6 +143,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser) {
               << "============================================================\n"
               << "  * Repository: " << repoName << "\n"
               << "  * Studio URL: " << serverUrl << "\n"
+              << "  * P2P / LAN:  Listening on 0.0.0.0:" << boundPort << " (Wi-Fi sync ready)\n"
               << "  * Mode:       Point-and-click (Zero CLI commands required)\n"
               << "------------------------------------------------------------\n"
               << "  Ready! You can stage, commit, branch, diff and merge\n"

@@ -146,10 +146,6 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                     <i class="fa-solid fa-code-compare text-[11px]"></i>
                     <span>Diff</span>
                 </button>
-                <button id="viewTabEditor" onclick="switchViewTab('editor')" class="px-4 py-2 rounded-full font-medium text-theme-muted hover:text-theme-text transition flex items-center space-x-2 cursor-pointer">
-                    <i class="fa-solid fa-code text-[11px]"></i>
-                    <span id="activeEditorFileName">Editor</span>
-                </button>
             </nav>
         </div>
 
@@ -616,6 +612,10 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                             <i class="fa-solid fa-floppy-disk text-[10px]"></i>
                             <span>Save</span>
                         </button>
+                        <button onclick="switchViewTab('dashboard')" class="rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-theme-text px-3 py-1 text-xs font-sans font-medium flex items-center space-x-1 transition cursor-pointer">
+                            <i class="fa-solid fa-xmark text-[10px]"></i>
+                            <span>Close</span>
+                        </button>
                     </div>
                 </div>
                 <!-- Textarea Editor -->
@@ -721,6 +721,10 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                     <span id="localPeerAddressText" class="text-theme-text">http://localhost:8080</span>
                     <button onclick="copyLocalPeerAddress()" class="text-theme-muted hover:text-theme-text text-xs"><i class="fa-regular fa-copy"></i> Copy</button>
                 </div>
+                <p class="text-[11px] text-theme-muted">
+                    <i class="fa-solid fa-circle-info text-[10px] mr-1"></i>
+                    To sync from another device on Wi-Fi/LAN, replace <code class="px-1 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 font-mono text-[10px]">localhost</code> with your PC's Wi-Fi IPv4 address (from <code class="px-1 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 font-mono text-[10px]">ipconfig</code>).
+                </p>
             </div>
 
             <!-- Direct Peer Sync (Pull / Push) -->
