@@ -709,40 +709,92 @@
             </div>
 
             <!-- Local Node Card -->
-            <div class="p-4 bg-zinc-50 dark:bg-zinc-900/70 border border-theme-border rounded-2xl space-y-2">
+            <div class="p-4 bg-zinc-50 dark:bg-zinc-900/70 border border-theme-border rounded-2xl space-y-3">
                 <div class="flex justify-between items-center text-xs">
                     <span class="text-theme-muted">Your Local Peer Address</span>
                     <span id="localNodeStatusBadge" class="px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800 text-[10px] font-bold">Active Node</span>
                 </div>
                 <div class="flex items-center justify-between bg-theme-card px-3.5 py-2 rounded-xl border border-theme-border font-mono text-xs">
-                    <span id="localPeerAddressText" class="text-theme-text">http://localhost:8080</span>
+                    <span id="localPeerAddressText" class="text-theme-text font-semibold">http://localhost:8080</span>
                     <button onclick="copyLocalPeerAddress()" class="text-theme-muted hover:text-theme-text text-xs cursor-pointer"><i class="fa-regular fa-copy"></i> Copy</button>
                 </div>
-                <div id="localPeerTokenContainer" class="hidden space-y-1 pt-1">
+
+                <!-- 6-Digit Pair Code Card (LAN Mode) -->
+                <div id="localPairCodeContainer" class="hidden p-3.5 bg-theme-card border border-theme-border rounded-xl space-y-2">
                     <div class="flex justify-between items-center text-xs">
-                        <span class="text-theme-muted">Your Pairing Token (required by peers)</span>
+                        <span class="font-semibold text-theme-text">Your 6-Digit Pairing Code</span>
+                        <span id="pairCodeCountdownBadge" class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-theme-muted">5:00</span>
                     </div>
-                    <div class="flex items-center justify-between bg-theme-card px-3.5 py-1.5 rounded-xl border border-theme-border font-mono text-xs">
-                        <span id="localPeerTokenText" class="text-theme-text font-semibold"></span>
-                        <button onclick="copyLocalPeerToken()" class="text-theme-muted hover:text-theme-text text-xs cursor-pointer"><i class="fa-regular fa-copy"></i> Copy</button>
+                    <div class="flex items-center justify-between">
+                        <div class="space-y-0.5">
+                            <span id="localPairCodeText" class="font-mono text-2xl font-black tracking-widest text-theme-text">------</span>
+                            <div id="pairCodeStatusText" class="text-[10px] text-theme-muted">Single-use • Expires in 5 min</div>
+                        </div>
+                        <div class="flex items-center space-x-1.5">
+                            <button onclick="copyPairCode()" class="px-2.5 py-1.5 text-xs rounded-xl border border-theme-border text-theme-muted hover:text-theme-text cursor-pointer" title="Copy Code"><i class="fa-regular fa-copy"></i> Copy</button>
+                            <button onclick="generateNewPairCode()" class="px-2.5 py-1.5 text-xs rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-theme-text font-medium cursor-pointer" title="Generate New Code"><i class="fa-solid fa-arrows-rotate mr-1"></i> New Code</button>
+                        </div>
                     </div>
                 </div>
+
                 <p id="localLanHintText" class="text-[11px] text-theme-muted">
                     <i class="fa-solid fa-circle-info text-[10px] mr-1"></i>
-                    To sync over Wi-Fi, start server with <code class="px-1 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 font-mono text-[10px]">minigit ui --lan</code> and share your IP and token with your peer.
+                    To sync over Wi-Fi, start server with <code class="px-1 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 font-mono text-[10px]">minigit ui --lan</code> and share your IP and 6-digit code with your peer.
                 </p>
+            </div>
+
+            <!-- Paired Devices List (Host) -->
+            <div id="pairedDevicesContainer" class="hidden p-4 bg-zinc-50 dark:bg-zinc-900/70 border border-theme-border rounded-2xl space-y-2.5">
+                <div class="flex justify-between items-center text-xs">
+                    <span class="font-semibold text-theme-text">Paired Devices</span>
+                    <button onclick="refreshPairedPeersList()" class="text-[11px] text-theme-muted hover:text-theme-text cursor-pointer"><i class="fa-solid fa-arrows-rotate"></i> Refresh</button>
+                </div>
+                <div id="pairedDevicesList" class="space-y-1.5 max-h-36 overflow-y-auto">
+                    <!-- Populated dynamically -->
+                </div>
             </div>
 
             <!-- Direct Peer Sync (Pull / Push) -->
             <div class="space-y-3">
                 <div>
                     <label class="block text-xs font-semibold text-theme-text mb-1">Teammate's Peer Address</label>
-                    <input id="lanPeerUrlInput" type="text" placeholder="http://192.168.1.50:8080" class="w-full bg-zinc-50 dark:bg-zinc-900 border border-theme-border rounded-full px-4 py-2.5 text-xs text-theme-text placeholder-theme-muted focus:outline-none focus:border-black dark:focus:border-white font-mono">
+                    <input id="lanPeerUrlInput" oninput="onPeerAddressChanged()" type="text" placeholder="http://192.168.1.50:8080" class="w-full bg-zinc-50 dark:bg-zinc-900 border border-theme-border rounded-full px-4 py-2 text-xs text-theme-text placeholder-theme-muted focus:outline-none focus:border-black dark:focus:border-white font-mono">
                 </div>
-                <div>
-                    <label class="block text-xs font-semibold text-theme-text mb-1">Teammate's Pairing Token</label>
-                    <input id="lanPeerTokenInput" type="text" placeholder="mg_... (from teammate's terminal or UI)" class="w-full bg-zinc-50 dark:bg-zinc-900 border border-theme-border rounded-full px-4 py-2 text-xs text-theme-text placeholder-theme-muted focus:outline-none focus:border-black dark:focus:border-white font-mono">
+
+                <!-- Peer Authentication & Code Section -->
+                <div id="peerPairingStatusCard" class="p-3.5 bg-zinc-50 dark:bg-zinc-900/70 border border-theme-border rounded-2xl space-y-2">
+                    <div id="peerAuthStatusActive" class="hidden flex items-center justify-between text-xs py-1">
+                        <div class="flex items-center space-x-2 text-emerald-600 dark:text-emerald-400 font-semibold">
+                            <i class="fa-solid fa-shield-check text-sm"></i>
+                            <span>Authenticated Session Active</span>
+                        </div>
+                        <button onclick="forgetPeerSession()" class="text-[11px] text-theme-muted hover:text-rose-500 underline cursor-pointer">Unpair</button>
+                    </div>
+
+                    <div id="peerPairInputSection" class="space-y-2">
+                        <div class="flex justify-between items-center text-xs">
+                            <span class="font-semibold text-theme-text">Enter Teammate's 6-Digit Code</span>
+                            <button onclick="toggleManualTokenInput()" class="text-[10px] text-theme-muted hover:underline cursor-pointer">Manual token</button>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <input id="peerPairCodeInput" type="text" maxlength="6" placeholder="123456" class="w-28 text-center bg-theme-card border border-theme-border rounded-xl px-2 py-1.5 text-sm font-mono tracking-widest text-theme-text font-bold focus:outline-none focus:border-black dark:focus:border-white">
+                            <button id="btnSubmitPairCode" onclick="submitPairCodeToPeer()" class="flex-1 py-2 rounded-xl bg-black hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-black font-semibold text-xs transition flex items-center justify-center space-x-1.5 cursor-pointer shadow-xs">
+                                <i class="fa-solid fa-link text-xs"></i>
+                                <span>Pair Device</span>
+                            </button>
+                        </div>
+                        <div id="pairWaitingNotice" class="hidden flex items-center space-x-2 text-[11px] text-amber-600 dark:text-amber-400 pt-1">
+                            <i class="fa-solid fa-circle-notch fa-spin"></i>
+                            <span>Code sent! Waiting for host to click Allow...</span>
+                        </div>
+                    </div>
+
+                    <div id="manualTokenContainer" class="hidden pt-1 border-t border-theme-border space-y-1">
+                        <label class="block text-[10px] text-theme-muted">Manual Session Token (X-MiniGit-Token)</label>
+                        <input id="lanPeerTokenInput" type="text" placeholder="32-byte session token" class="w-full bg-theme-card border border-theme-border rounded-xl px-3 py-1.5 text-xs text-theme-text placeholder-theme-muted font-mono focus:outline-none">
+                    </div>
                 </div>
+
                 <div class="grid grid-cols-2 gap-3 pt-1">
                     <button onclick="executeLanPull()" class="py-2.5 rounded-full bg-black hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-black font-semibold text-xs shadow-sm transition flex items-center justify-center space-x-2 cursor-pointer">
                         <i class="fa-solid fa-arrow-down text-xs"></i>
@@ -840,6 +892,46 @@
                         <span>Import from .git Repository</span>
                     </button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL 7: HOST PAIRING APPROVAL POPUP -->
+    <div id="hostPairApprovalModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+        <div class="bg-theme-card border border-theme-border w-full max-w-sm rounded-3xl shadow-2xl p-6 space-y-4">
+            <div class="flex items-center space-x-3">
+                <div class="w-10 h-10 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-500 flex items-center justify-center text-lg">
+                    <i class="fa-solid fa-shield-halved"></i>
+                </div>
+                <div>
+                    <h3 class="font-serif font-bold text-theme-text text-base">Pairing Request</h3>
+                    <p class="text-[11px] text-theme-muted">Incoming peer connection</p>
+                </div>
+            </div>
+            <div class="p-3.5 bg-zinc-50 dark:bg-zinc-900/60 rounded-2xl border border-theme-border space-y-1.5 text-xs">
+                <div class="flex justify-between items-center">
+                    <span class="text-theme-muted">Peer Address:</span>
+                    <span id="approvalPeerIp" class="font-mono font-bold text-theme-text">192.168.1.50</span>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="text-theme-muted">Device / Label:</span>
+                    <span id="approvalPeerName" class="font-medium text-theme-text">Teammate</span>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="text-theme-muted">Code Verified:</span>
+                    <span id="approvalPeerCode" class="font-mono font-bold text-emerald-600 dark:text-emerald-400">123456</span>
+                </div>
+            </div>
+            <p class="text-[11px] text-theme-muted leading-relaxed">
+                Allow this peer to receive a 32-byte session token and synchronize Git history with your repository?
+            </p>
+            <div class="grid grid-cols-2 gap-3 pt-1">
+                <button onclick="respondToPendingPairRequest(false)" class="py-2.5 rounded-full border border-theme-border hover:bg-zinc-100 dark:hover:bg-zinc-800 text-theme-text font-semibold text-xs transition cursor-pointer">
+                    Deny
+                </button>
+                <button onclick="respondToPendingPairRequest(true)" class="py-2.5 rounded-full bg-black hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-black font-semibold text-xs shadow-sm transition cursor-pointer">
+                    Allow & Pair
+                </button>
             </div>
         </div>
     </div>
@@ -1557,39 +1649,334 @@
         /* ---------------------------------------------------------------------
          * P2P & LAN SYNC ENGINE
          * --------------------------------------------------------------------- */
-        let LOCAL_PEER_TOKEN = "";
+        let LOCAL_PAIR_CODE = "";
+        let LOCAL_PAIR_TIMER = null;
+        let LOCAL_CODE_EXPIRES_AT = 0;
+        let ACTIVE_PENDING_REQUEST_ID = null;
+        let PEER_PAIR_STATUS_INTERVAL = null;
+
+        function cleanPeerUrl(url) {
+            let u = (url || '').trim();
+            if (!u.startsWith('http://') && !u.startsWith('https://')) {
+                u = 'http://' + u;
+            }
+            return u.replace(/\/+$/, '');
+        }
+
+        function checkPeerAuthStatus() {
+            const input = document.getElementById('lanPeerUrlInput');
+            const url = cleanPeerUrl(input ? input.value : '');
+            const activeCard = document.getElementById('peerAuthStatusActive');
+            const inputSec = document.getElementById('peerPairInputSection');
+            const savedToken = localStorage.getItem('minigit_token_' + url);
+
+            if (savedToken) {
+                if (activeCard) activeCard.classList.remove('hidden');
+                if (inputSec) inputSec.classList.add('hidden');
+            } else {
+                if (activeCard) activeCard.classList.add('hidden');
+                if (inputSec) inputSec.classList.remove('hidden');
+            }
+        }
+
+        function onPeerAddressChanged() {
+            checkPeerAuthStatus();
+        }
+
+        function forgetPeerSession() {
+            const input = document.getElementById('lanPeerUrlInput');
+            const url = cleanPeerUrl(input ? input.value : '');
+            localStorage.removeItem('minigit_token_' + url);
+            showToast("Forgot saved session token for this peer");
+            checkPeerAuthStatus();
+        }
+
+        function toggleManualTokenInput() {
+            const c = document.getElementById('manualTokenContainer');
+            if (c) c.classList.toggle('hidden');
+        }
+
+        function copyPairCode() {
+            const code = document.getElementById('localPairCodeText')?.textContent?.trim();
+            if (code && code !== '------') {
+                navigator.clipboard.writeText(code);
+                showToast("Copied 6-digit pair code: " + code);
+            }
+        }
+
+        async function generateNewPairCode() {
+            if (!IS_SERVER_MODE) return;
+            try {
+                const res = await fetch('/api/pair/generate-code', { method: 'POST' });
+                if (res.ok) {
+                    showToast("Generated new 6-digit pair code");
+                    await openLanSyncModal();
+                }
+            } catch (e) {
+                showToast("Failed to generate code: " + e.message, "error");
+            }
+        }
+
+        async function refreshPairedPeersList() {
+            if (!IS_SERVER_MODE) return;
+            const container = document.getElementById('pairedDevicesList');
+            if (!container) return;
+            try {
+                const res = await fetch('/api/pair/peers');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.ok && Array.isArray(data.peers)) {
+                        if (data.peers.length === 0) {
+                            container.innerHTML = '<p class="text-[11px] text-theme-muted italic py-1">No devices currently paired.</p>';
+                        } else {
+                            container.innerHTML = '';
+                            data.peers.forEach(peer => {
+                                const row = document.createElement('div');
+                                row.className = "flex items-center justify-between bg-theme-card px-3.5 py-1.5 rounded-xl border border-theme-border text-xs";
+                                row.innerHTML = `
+                                    <div class="flex items-center space-x-2 truncate">
+                                        <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                                        <span class="font-mono font-semibold text-theme-text truncate">${peer.ip}</span>
+                                        <span class="text-[10px] text-theme-muted">(${peer.pairedAt || 'active'})</span>
+                                    </div>
+                                    <button onclick="revokePeer('${peer.id}')" class="px-2.5 py-0.5 rounded-full text-[10px] font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-rose-200 dark:border-rose-900/50 cursor-pointer">Revoke</button>
+                                `;
+                                container.appendChild(row);
+                            });
+                        }
+                    }
+                }
+            } catch (e) {}
+        }
+
+        async function revokePeer(peerId) {
+            if (!IS_SERVER_MODE) return;
+            try {
+                const res = await fetch('/api/pair/revoke', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: peerId })
+                });
+                const data = await res.json();
+                if (res.ok && data.ok) {
+                    showToast("Peer access revoked");
+                    await refreshPairedPeersList();
+                } else {
+                    showToast(data.error || "Failed to revoke peer", "error");
+                }
+            } catch (e) {
+                showToast("Failed to revoke peer: " + e.message, "error");
+            }
+        }
+
+        async function pollPendingPairRequests() {
+            if (!IS_SERVER_MODE || document.hidden) return;
+            try {
+                const res = await fetch('/api/pair/pending');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.ok && Array.isArray(data.pending) && data.pending.length > 0) {
+                        const req = data.pending[0];
+                        ACTIVE_PENDING_REQUEST_ID = req.id;
+                        const ipEl = document.getElementById('approvalPeerIp');
+                        const nameEl = document.getElementById('approvalPeerName');
+                        const codeEl = document.getElementById('approvalPeerCode');
+                        if (ipEl) ipEl.textContent = req.ip || 'unknown';
+                        if (nameEl) nameEl.textContent = req.peerName || 'Teammate Device';
+                        if (codeEl) codeEl.textContent = req.code || '';
+                        const modal = document.getElementById('hostPairApprovalModal');
+                        if (modal) modal.classList.remove('hidden');
+                    }
+                }
+            } catch (e) {}
+        }
+
+        async function respondToPendingPairRequest(allow) {
+            const modal = document.getElementById('hostPairApprovalModal');
+            if (modal) modal.classList.add('hidden');
+            if (!ACTIVE_PENDING_REQUEST_ID) return;
+
+            try {
+                const res = await fetch('/api/pair/decide', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        requestId: ACTIVE_PENDING_REQUEST_ID,
+                        action: allow ? 'allow' : 'deny'
+                    })
+                });
+                if (allow) {
+                    showToast("Device paired successfully! Session token granted.");
+                    await refreshPairedPeersList();
+                    await openLanSyncModal();
+                } else {
+                    showToast("Pairing request denied.");
+                }
+            } catch (e) {
+                showToast("Failed to respond to pairing: " + e.message, "error");
+            }
+            ACTIVE_PENDING_REQUEST_ID = null;
+        }
+
+        async function submitPairCodeToPeer() {
+            const urlInput = document.getElementById('lanPeerUrlInput');
+            const codeInput = document.getElementById('peerPairCodeInput');
+            const peerUrl = cleanPeerUrl(urlInput ? urlInput.value : '');
+            const code = (codeInput ? codeInput.value : '').trim();
+
+            if (!peerUrl) {
+                showToast("Please enter teammate's peer address (e.g. http://192.168.1.50:8080)", "error");
+                return;
+            }
+            if (!/^\d{6}$/.test(code)) {
+                showToast("Please enter the 6-digit pair code shown on teammate's screen", "error");
+                return;
+            }
+
+            const btn = document.getElementById('btnSubmitPairCode');
+            const waiting = document.getElementById('pairWaitingNotice');
+            if (btn) btn.disabled = true;
+            if (waiting) waiting.classList.remove('hidden');
+
+            try {
+                const res = await fetch(peerUrl + '/api/pair', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code: code, peerName: 'Browser Peer' }),
+                    mode: 'cors'
+                });
+                const data = await res.json();
+
+                if (!res.ok || !data.ok) {
+                    if (btn) btn.disabled = false;
+                    if (waiting) waiting.classList.add('hidden');
+                    showToast(data.error || "Pairing failed", "error");
+                    return;
+                }
+
+                const requestId = data.requestId;
+                let pollAttempts = 0;
+                if (PEER_PAIR_STATUS_INTERVAL) clearInterval(PEER_PAIR_STATUS_INTERVAL);
+
+                PEER_PAIR_STATUS_INTERVAL = setInterval(async () => {
+                    pollAttempts++;
+                    if (pollAttempts > 60) {
+                        clearInterval(PEER_PAIR_STATUS_INTERVAL);
+                        if (btn) btn.disabled = false;
+                        if (waiting) waiting.classList.add('hidden');
+                        showToast("Pairing timed out waiting for teammate's approval", "error");
+                        return;
+                    }
+
+                    try {
+                        const sRes = await fetch(peerUrl + '/api/pair/status?requestId=' + encodeURIComponent(requestId), { mode: 'cors' });
+                        if (sRes.ok) {
+                            const sData = await sRes.json();
+                            if (sData.status === 'approved' && sData.token) {
+                                clearInterval(PEER_PAIR_STATUS_INTERVAL);
+                                if (btn) btn.disabled = false;
+                                if (waiting) waiting.classList.add('hidden');
+                                localStorage.setItem('minigit_token_' + peerUrl, sData.token);
+                                showToast("Pairing approved! You are connected to teammate.");
+                                checkPeerAuthStatus();
+                            } else if (sData.status === 'denied') {
+                                clearInterval(PEER_PAIR_STATUS_INTERVAL);
+                                if (btn) btn.disabled = false;
+                                if (waiting) waiting.classList.add('hidden');
+                                showToast("Teammate denied the pairing request", "error");
+                            }
+                        }
+                    } catch (e) {}
+                }, 1000);
+
+            } catch (err) {
+                if (btn) btn.disabled = false;
+                if (waiting) waiting.classList.add('hidden');
+                showToast("Cannot reach teammate: " + err.message, "error");
+            }
+        }
 
         async function openLanSyncModal() {
             const modal = document.getElementById('lanSyncModal');
             const addrEl = document.getElementById('localPeerAddressText');
-            const tokenContainer = document.getElementById('localPeerTokenContainer');
-            const tokenText = document.getElementById('localPeerTokenText');
-            const hintText = document.getElementById('localLanHintText');
+            const codeContainer = document.getElementById('localPairCodeContainer');
+            const codeText = document.getElementById('localPairCodeText');
+            const codeBadge = document.getElementById('pairCodeCountdownBadge');
+            const codeStatus = document.getElementById('pairCodeStatusText');
+            const pairedContainer = document.getElementById('pairedDevicesContainer');
             const statusBadge = document.getElementById('localNodeStatusBadge');
+            const hintText = document.getElementById('localLanHintText');
 
             if (addrEl) {
                 addrEl.textContent = window.location.origin || "http://localhost:8080";
             }
+            checkPeerAuthStatus();
 
             if (IS_SERVER_MODE) {
                 try {
-                    const res = await fetch('/api/token');
+                    const res = await fetch('/api/pair/code');
                     if (res.ok) {
                         const data = await res.json();
                         if (data.ok) {
-                            LOCAL_PEER_TOKEN = data.token || "";
+                            LOCAL_PAIR_CODE = data.code || "";
                             if (data.lan) {
-                                if (tokenContainer) tokenContainer.classList.remove('hidden');
-                                if (tokenText) tokenText.textContent = data.token;
+                                if (codeContainer) codeContainer.classList.remove('hidden');
+                                if (pairedContainer) pairedContainer.classList.remove('hidden');
+                                if (codeText) codeText.textContent = data.code;
                                 if (statusBadge) {
                                     statusBadge.textContent = "LAN Active";
                                     statusBadge.className = "px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800 text-[10px] font-bold";
                                 }
                                 if (hintText) {
-                                    hintText.innerHTML = `<i class="fa-solid fa-circle-info text-[10px] mr-1"></i>LAN mode active! Share your LAN URL (${data.lanUrl || 'see terminal'}) and pairing token with peers.`;
+                                    hintText.innerHTML = `<i class="fa-solid fa-circle-info text-[10px] mr-1"></i>LAN active! Share your LAN URL (${data.lanUrl || 'see terminal'}) and 6-digit code with peers.`;
                                 }
+
+                                if (LOCAL_PAIR_TIMER) clearInterval(LOCAL_PAIR_TIMER);
+
+                                if (data.isLocked) {
+                                    if (codeBadge) {
+                                        codeBadge.textContent = "Locked";
+                                        codeBadge.className = "text-[10px] font-mono px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950 text-rose-600 dark:text-rose-400 font-bold";
+                                    }
+                                    if (codeStatus) codeStatus.textContent = "Locked after 5 failed tries. Click New Code to reset.";
+                                } else if (data.isExpired) {
+                                    if (codeBadge) {
+                                        codeBadge.textContent = "Expired";
+                                        codeBadge.className = "text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-600 dark:text-amber-400 font-bold";
+                                    }
+                                    if (codeStatus) codeStatus.textContent = "Code expired. Click New Code.";
+                                } else if (data.isUsed) {
+                                    if (codeBadge) {
+                                        codeBadge.textContent = "Used";
+                                        codeBadge.className = "text-[10px] font-mono px-2 py-0.5 rounded-full bg-zinc-200 dark:bg-zinc-800 text-theme-muted";
+                                    }
+                                    if (codeStatus) codeStatus.textContent = "Code consumed. Click New Code for next peer.";
+                                } else {
+                                    LOCAL_CODE_EXPIRES_AT = Date.now() + ((data.remainingSeconds || 300) * 1000);
+                                    const updateCountdown = () => {
+                                        const left = Math.max(0, Math.floor((LOCAL_CODE_EXPIRES_AT - Date.now()) / 1000));
+                                        const m = Math.floor(left / 60);
+                                        const s = left % 60;
+                                        if (codeBadge) {
+                                            codeBadge.textContent = `${m}:${s < 10 ? '0' : ''}${s}`;
+                                            codeBadge.className = "text-[10px] font-mono px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-theme-muted";
+                                        }
+                                        if (codeStatus) codeStatus.textContent = "Single-use • Expires in 5 min";
+                                        if (left <= 0) {
+                                            clearInterval(LOCAL_PAIR_TIMER);
+                                            if (codeBadge) {
+                                                codeBadge.textContent = "Expired";
+                                                codeBadge.className = "text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-600 dark:text-amber-400 font-bold";
+                                            }
+                                        }
+                                    };
+                                    updateCountdown();
+                                    LOCAL_PAIR_TIMER = setInterval(updateCountdown, 1000);
+                                }
+                                await refreshPairedPeersList();
                             } else {
-                                if (tokenContainer) tokenContainer.classList.add('hidden');
+                                if (codeContainer) codeContainer.classList.add('hidden');
+                                if (pairedContainer) pairedContainer.classList.add('hidden');
                                 if (statusBadge) {
                                     statusBadge.textContent = "Local Only";
                                     statusBadge.className = "px-2.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-400 border border-amber-300 dark:border-amber-800 text-[10px] font-bold";
@@ -1608,6 +1995,7 @@
         function closeLanSyncModal() {
             const modal = document.getElementById('lanSyncModal');
             if (modal) modal.classList.add('hidden');
+            if (LOCAL_PAIR_TIMER) clearInterval(LOCAL_PAIR_TIMER);
         }
 
         function copyLocalPeerAddress() {
@@ -1616,32 +2004,32 @@
             showToast("Copied peer address to clipboard");
         }
 
-        function copyLocalPeerToken() {
-            if (LOCAL_PEER_TOKEN) {
-                navigator.clipboard.writeText(LOCAL_PEER_TOKEN);
-                showToast("Copied pairing token to clipboard");
-            }
+        function getPeerSessionToken(peerUrl) {
+            const cleanUrl = cleanPeerUrl(peerUrl);
+            const manual = document.getElementById('lanPeerTokenInput')?.value.trim();
+            if (manual) return manual;
+            return localStorage.getItem('minigit_token_' + cleanUrl) || '';
         }
 
         async function executeLanPull() {
             const input = document.getElementById('lanPeerUrlInput');
-            const tokenInput = document.getElementById('lanPeerTokenInput');
-            let peerUrl = (input ? input.value : '').trim();
-            const peerToken = (tokenInput ? tokenInput.value : '').trim();
+            let peerUrl = cleanPeerUrl(input ? input.value : '');
 
             if (!peerUrl) {
-                showToast("Please enter peer address (e.g. http://192.168.1.5:8080)", "error");
+                showToast("Please enter peer address (e.g. http://192.168.1.50:8080)", "error");
                 return;
             }
-            if (!peerUrl.startsWith('http')) peerUrl = 'http://' + peerUrl;
 
+            const token = getPeerSessionToken(peerUrl);
             showToast("Connecting to peer over LAN...");
             try {
-                const headers = peerToken ? { 'X-MiniGit-Token': peerToken } : {};
+                const headers = token ? { 'X-MiniGit-Token': token } : {};
                 const res = await fetch(peerUrl + '/api/sync/bundle', { headers, mode: 'cors' });
                 if (!res.ok) {
                     if (res.status === 401 || res.status === 403) {
-                        throw new Error("Peer rejected connection: pairing token missing or incorrect.");
+                        localStorage.removeItem('minigit_token_' + peerUrl);
+                        checkPeerAuthStatus();
+                        throw new Error("Peer rejected connection: pairing required or token revoked.");
                     }
                     throw new Error("Peer returned HTTP " + res.status);
                 }
@@ -1670,16 +2058,14 @@
 
         async function executeLanPush() {
             const input = document.getElementById('lanPeerUrlInput');
-            const tokenInput = document.getElementById('lanPeerTokenInput');
-            let peerUrl = (input ? input.value : '').trim();
-            const peerToken = (tokenInput ? tokenInput.value : '').trim();
+            let peerUrl = cleanPeerUrl(input ? input.value : '');
 
             if (!peerUrl) {
-                showToast("Please enter peer address (e.g. http://192.168.1.5:8080)", "error");
+                showToast("Please enter peer address (e.g. http://192.168.1.50:8080)", "error");
                 return;
             }
-            if (!peerUrl.startsWith('http')) peerUrl = 'http://' + peerUrl;
 
+            const token = getPeerSessionToken(peerUrl);
             showToast("Pushing snapshot bundle to LAN peer...");
             try {
                 let bundleData = null;
@@ -1697,7 +2083,7 @@
                 }
 
                 const headers = { 'Content-Type': 'application/json' };
-                if (peerToken) headers['X-MiniGit-Token'] = peerToken;
+                if (token) headers['X-MiniGit-Token'] = token;
 
                 const postRes = await fetch(peerUrl + '/api/sync/import-bundle', {
                     method: 'POST',
@@ -1710,6 +2096,10 @@
                     showToast(resJson.message || "Successfully pushed bundle to LAN peer!");
                     closeLanSyncModal();
                 } else {
+                    if (postRes.status === 401 || postRes.status === 403) {
+                        localStorage.removeItem('minigit_token_' + peerUrl);
+                        checkPeerAuthStatus();
+                    }
                     showToast(resJson.error || resJson.message || ("Peer rejected bundle (HTTP " + postRes.status + ")"), "error");
                 }
             } catch (err) {
@@ -2550,6 +2940,7 @@
                     badge.classList.add('flex');
                 }
                 await refreshRepositorySnapshot(true);
+                setInterval(pollPendingPairRequests, 1500);
                 setInterval(async () => {
                     if (!document.hidden) {
                         try {
