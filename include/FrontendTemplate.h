@@ -715,22 +715,37 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             <div class="p-4 bg-zinc-50 dark:bg-zinc-900/70 border border-theme-border rounded-2xl space-y-2">
                 <div class="flex justify-between items-center text-xs">
                     <span class="text-theme-muted">Your Local Peer Address</span>
-                    <span class="px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800 text-[10px] font-bold">Active Node</span>
+                    <span id="localNodeStatusBadge" class="px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800 text-[10px] font-bold">Active Node</span>
                 </div>
                 <div class="flex items-center justify-between bg-theme-card px-3.5 py-2 rounded-xl border border-theme-border font-mono text-xs">
                     <span id="localPeerAddressText" class="text-theme-text">http://localhost:8080</span>
-                    <button onclick="copyLocalPeerAddress()" class="text-theme-muted hover:text-theme-text text-xs"><i class="fa-regular fa-copy"></i> Copy</button>
+                    <button onclick="copyLocalPeerAddress()" class="text-theme-muted hover:text-theme-text text-xs cursor-pointer"><i class="fa-regular fa-copy"></i> Copy</button>
                 </div>
-                <p class="text-[11px] text-theme-muted">
+                <div id="localPeerTokenContainer" class="hidden space-y-1 pt-1">
+                    <div class="flex justify-between items-center text-xs">
+                        <span class="text-theme-muted">Your Pairing Token (required by peers)</span>
+                    </div>
+                    <div class="flex items-center justify-between bg-theme-card px-3.5 py-1.5 rounded-xl border border-theme-border font-mono text-xs">
+                        <span id="localPeerTokenText" class="text-theme-text font-semibold"></span>
+                        <button onclick="copyLocalPeerToken()" class="text-theme-muted hover:text-theme-text text-xs cursor-pointer"><i class="fa-regular fa-copy"></i> Copy</button>
+                    </div>
+                </div>
+                <p id="localLanHintText" class="text-[11px] text-theme-muted">
                     <i class="fa-solid fa-circle-info text-[10px] mr-1"></i>
-                    To sync from another device on Wi-Fi/LAN, replace <code class="px-1 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 font-mono text-[10px]">localhost</code> with your PC's Wi-Fi IPv4 address (from <code class="px-1 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 font-mono text-[10px]">ipconfig</code>).
+                    To sync over Wi-Fi, start server with <code class="px-1 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 font-mono text-[10px]">minigit ui --lan</code> and share your IP and token with your peer.
                 </p>
             </div>
 
             <!-- Direct Peer Sync (Pull / Push) -->
             <div class="space-y-3">
-                <label class="block text-xs font-semibold text-theme-text">Sync with Teammate over Local Network</label>
-                <input id="lanPeerUrlInput" type="text" placeholder="http://192.168.1.50:8080" class="w-full bg-zinc-50 dark:bg-zinc-900 border border-theme-border rounded-full px-4 py-2.5 text-xs text-theme-text placeholder-theme-muted focus:outline-none focus:border-black dark:focus:border-white font-mono">
+                <div>
+                    <label class="block text-xs font-semibold text-theme-text mb-1">Teammate's Peer Address</label>
+                    <input id="lanPeerUrlInput" type="text" placeholder="http://192.168.1.50:8080" class="w-full bg-zinc-50 dark:bg-zinc-900 border border-theme-border rounded-full px-4 py-2.5 text-xs text-theme-text placeholder-theme-muted focus:outline-none focus:border-black dark:focus:border-white font-mono">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-theme-text mb-1">Teammate's Pairing Token</label>
+                    <input id="lanPeerTokenInput" type="text" placeholder="mg_... (from teammate's terminal or UI)" class="w-full bg-zinc-50 dark:bg-zinc-900 border border-theme-border rounded-full px-4 py-2 text-xs text-theme-text placeholder-theme-muted focus:outline-none focus:border-black dark:focus:border-white font-mono">
+                </div>
                 <div class="grid grid-cols-2 gap-3 pt-1">
                     <button onclick="executeLanPull()" class="py-2.5 rounded-full bg-black hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-black font-semibold text-xs shadow-sm transition flex items-center justify-center space-x-2 cursor-pointer">
                         <i class="fa-solid fa-arrow-down text-xs"></i>
@@ -1328,6 +1343,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             if (!svg) return;
             svg.innerHTML = '';
 
+            const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
             const commits = getChronologicalCommits();
             const xStep = 90;
             const y = 80;
@@ -1347,7 +1363,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                     line.setAttribute('y1', y);
                     line.setAttribute('x2', nodeX);
                     line.setAttribute('y2', y);
-                    line.setAttribute('stroke', '#A1A1AA');
+                    line.setAttribute('stroke', isDark ? '#3F3F46' : '#A1A1AA');
                     line.setAttribute('stroke-width', '2');
                     svg.appendChild(line);
                 }
@@ -1361,8 +1377,8 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                 circle.setAttribute('cx', nodeX);
                 circle.setAttribute('cy', y);
                 circle.setAttribute('r', isHead ? nodeRadius + 2 : nodeRadius);
-                circle.setAttribute('fill', isHead ? '#000000' : '#FFFFFF');
-                circle.setAttribute('stroke', '#000000');
+                circle.setAttribute('fill', isDark ? (isHead ? '#FFFFFF' : '#18181B') : (isHead ? '#000000' : '#FFFFFF'));
+                circle.setAttribute('stroke', isDark ? (isHead ? '#FFFFFF' : '#A1A1AA') : '#000000');
                 circle.setAttribute('stroke-width', '2.5');
                 group.appendChild(circle);
 
@@ -1370,7 +1386,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                 const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
                 text.setAttribute('x', nodeX);
                 text.setAttribute('y', y + 26);
-                text.setAttribute('fill', '#6B7280');
+                text.setAttribute('fill', isDark ? '#E4E4E7' : '#6B7280');
                 text.setAttribute('font-size', '10px');
                 text.setAttribute('font-family', 'JetBrains Mono, monospace');
                 text.setAttribute('text-anchor', 'middle');
@@ -1544,11 +1560,50 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
         /* ---------------------------------------------------------------------
          * P2P & LAN SYNC ENGINE
          * --------------------------------------------------------------------- */
-        function openLanSyncModal() {
+        let LOCAL_PEER_TOKEN = "";
+
+        async function openLanSyncModal() {
             const modal = document.getElementById('lanSyncModal');
             const addrEl = document.getElementById('localPeerAddressText');
+            const tokenContainer = document.getElementById('localPeerTokenContainer');
+            const tokenText = document.getElementById('localPeerTokenText');
+            const hintText = document.getElementById('localLanHintText');
+            const statusBadge = document.getElementById('localNodeStatusBadge');
+
             if (addrEl) {
                 addrEl.textContent = window.location.origin || "http://localhost:8080";
+            }
+
+            if (IS_SERVER_MODE) {
+                try {
+                    const res = await fetch('/api/token');
+                    if (res.ok) {
+                        const data = await res.json();
+                        if (data.ok) {
+                            LOCAL_PEER_TOKEN = data.token || "";
+                            if (data.lan) {
+                                if (tokenContainer) tokenContainer.classList.remove('hidden');
+                                if (tokenText) tokenText.textContent = data.token;
+                                if (statusBadge) {
+                                    statusBadge.textContent = "LAN Active";
+                                    statusBadge.className = "px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800 text-[10px] font-bold";
+                                }
+                                if (hintText) {
+                                    hintText.innerHTML = `<i class="fa-solid fa-circle-info text-[10px] mr-1"></i>LAN mode active! Share your LAN URL (${data.lanUrl || 'see terminal'}) and pairing token with peers.`;
+                                }
+                            } else {
+                                if (tokenContainer) tokenContainer.classList.add('hidden');
+                                if (statusBadge) {
+                                    statusBadge.textContent = "Local Only";
+                                    statusBadge.className = "px-2.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-400 border border-amber-300 dark:border-amber-800 text-[10px] font-bold";
+                                }
+                                if (hintText) {
+                                    hintText.innerHTML = `<i class="fa-solid fa-circle-exclamation text-[10px] mr-1 text-amber-500"></i>Local only. To allow other devices on Wi-Fi to sync, run <code>minigit ui --lan</code>.`;
+                                }
+                            }
+                        }
+                    }
+                } catch (e) {}
             }
             if (modal) modal.classList.remove('hidden');
         }
@@ -1564,9 +1619,19 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             showToast("Copied peer address to clipboard");
         }
 
+        function copyLocalPeerToken() {
+            if (LOCAL_PEER_TOKEN) {
+                navigator.clipboard.writeText(LOCAL_PEER_TOKEN);
+                showToast("Copied pairing token to clipboard");
+            }
+        }
+
         async function executeLanPull() {
             const input = document.getElementById('lanPeerUrlInput');
+            const tokenInput = document.getElementById('lanPeerTokenInput');
             let peerUrl = (input ? input.value : '').trim();
+            const peerToken = (tokenInput ? tokenInput.value : '').trim();
+
             if (!peerUrl) {
                 showToast("Please enter peer address (e.g. http://192.168.1.5:8080)", "error");
                 return;
@@ -1575,21 +1640,32 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
 
             showToast("Connecting to peer over LAN...");
             try {
-                const res = await fetch(peerUrl + '/api/sync/bundle', { mode: 'cors' });
-                if (!res.ok) throw new Error("Peer returned HTTP " + res.status);
+                const headers = peerToken ? { 'X-MiniGit-Token': peerToken } : {};
+                const res = await fetch(peerUrl + '/api/sync/bundle', { headers, mode: 'cors' });
+                if (!res.ok) {
+                    if (res.status === 401 || res.status === 403) {
+                        throw new Error("Peer rejected connection: pairing token missing or incorrect.");
+                    }
+                    throw new Error("Peer returned HTTP " + res.status);
+                }
                 const bundle = await res.json();
                 
                 if (IS_SERVER_MODE) {
                     const postRes = await apiPost('sync/import-bundle', bundle);
-                    if (postRes) showToast("Synchronized with LAN peer successfully!");
+                    if (postRes && postRes.ok) {
+                        showToast(postRes.message || "Synchronized with LAN peer successfully!");
+                        closeLanSyncModal();
+                    } else if (postRes) {
+                        showToast(postRes.error || postRes.message || "P2P sync failed", "error");
+                    }
                 } else {
                     if (bundle.objects) Object.assign(OBJECTS, bundle.objects);
                     if (bundle.branches) Object.assign(BRANCHES, bundle.branches);
                     recordDemoReflog("p2p_sync", null, null, `Pulled from peer ${peerUrl}`);
                     showToast("Synchronized with LAN peer successfully!");
                     updateUI();
+                    closeLanSyncModal();
                 }
-                closeLanSyncModal();
             } catch (err) {
                 showToast("P2P Sync failed: " + err.message, "error");
             }
@@ -1597,7 +1673,10 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
 
         async function executeLanPush() {
             const input = document.getElementById('lanPeerUrlInput');
+            const tokenInput = document.getElementById('lanPeerTokenInput');
             let peerUrl = (input ? input.value : '').trim();
+            const peerToken = (tokenInput ? tokenInput.value : '').trim();
+
             if (!peerUrl) {
                 showToast("Please enter peer address (e.g. http://192.168.1.5:8080)", "error");
                 return;
@@ -1609,29 +1688,32 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                 let bundleData = null;
                 if (IS_SERVER_MODE) {
                     const bRes = await fetch('/api/sync/bundle');
+                    if (!bRes.ok) throw new Error("Failed to export local bundle: HTTP " + bRes.status);
                     bundleData = await bRes.json();
                 } else {
                     bundleData = {
                         repoName: "minigit",
                         branches: BRANCHES,
                         objects: OBJECTS,
-                        files: VFS,
                         currentBranch: CURRENT_BRANCH
                     };
                 }
 
+                const headers = { 'Content-Type': 'application/json' };
+                if (peerToken) headers['X-MiniGit-Token'] = peerToken;
+
                 const postRes = await fetch(peerUrl + '/api/sync/import-bundle', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: headers,
                     body: JSON.stringify(bundleData),
                     mode: 'cors'
                 });
                 const resJson = await postRes.json();
-                if (resJson && resJson.ok) {
-                    showToast("Successfully pushed bundle to LAN peer!");
+                if (postRes.ok && resJson && resJson.ok) {
+                    showToast(resJson.message || "Successfully pushed bundle to LAN peer!");
                     closeLanSyncModal();
                 } else {
-                    showToast(resJson.error || "Peer rejected bundle", "error");
+                    showToast(resJson.error || resJson.message || ("Peer rejected bundle (HTTP " + postRes.status + ")"), "error");
                 }
             } catch (err) {
                 showToast("Push failed: " + err.message, "error");
@@ -1653,8 +1735,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                     generated: new Date().toISOString(),
                     currentBranch: CURRENT_BRANCH,
                     branches: BRANCHES,
-                    objects: OBJECTS,
-                    files: VFS
+                    objects: OBJECTS
                 };
             }
 
@@ -1677,23 +1758,28 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                     const bundle = JSON.parse(e.target.result);
                     if (IS_SERVER_MODE) {
                         const res = await apiPost('sync/import-bundle', bundle);
-                        if (res) showToast("Bundle imported successfully");
+                        if (res && res.ok) {
+                            showToast(res.message || "Bundle imported successfully");
+                            closeLanSyncModal();
+                        } else if (res) {
+                            showToast(res.error || res.message || "Bundle import failed", "error");
+                        }
                     } else {
                         if (bundle.objects) Object.assign(OBJECTS, bundle.objects);
                         if (bundle.branches) Object.assign(BRANCHES, bundle.branches);
                         recordDemoReflog("bundle_import", null, null, "Imported bundle file");
-                        showToast("Bundle imported successfully");
+                        showToast("Bundle imported successfully into demo");
                         updateUI();
+                        closeLanSyncModal();
                     }
-                    closeLanSyncModal();
                 } catch (err) {
                     showToast("Invalid bundle file: " + err.message, "error");
                 }
             };
             reader.readAsText(file);
         }
-
-        /* ---------------------------------------------------------------------
+        
+/* ---------------------------------------------------------------------
          * SAFETY NETS & REFLOG
          * --------------------------------------------------------------------- */
         async function executeQuickUndo() {
@@ -2286,6 +2372,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             if (!svg) return;
             svg.innerHTML = '';
 
+            const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
             const commitNodes = getChronologicalCommits();
 
             let y = 60;
@@ -2309,7 +2396,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                         line.setAttribute('y1', parentY);
                         line.setAttribute('x2', x);
                         line.setAttribute('y2', nodeY);
-                        line.setAttribute('stroke', '#D1D5DB');
+                        line.setAttribute('stroke', isDark ? '#3F3F46' : '#D1D5DB');
                         line.setAttribute('stroke-width', '2.5');
                         svg.appendChild(line);
                     }
@@ -2324,8 +2411,8 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                 circle.setAttribute('cx', x);
                 circle.setAttribute('cy', nodeY);
                 circle.setAttribute('r', isHead ? nodeRadius + 2 : nodeRadius);
-                circle.setAttribute('fill', isHead ? '#000000' : '#FFFFFF');
-                circle.setAttribute('stroke', isHead ? '#000000' : '#6B7280');
+                circle.setAttribute('fill', isDark ? (isHead ? '#FFFFFF' : '#18181B') : (isHead ? '#000000' : '#FFFFFF'));
+                circle.setAttribute('stroke', isDark ? (isHead ? '#FFFFFF' : '#A1A1AA') : (isHead ? '#000000' : '#6B7280'));
                 circle.setAttribute('stroke-width', isHead ? '3' : '2');
                 group.appendChild(circle);
 
@@ -2333,11 +2420,23 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                 const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
                 text.setAttribute('x', x + 30);
                 text.setAttribute('y', nodeY + 4);
-                text.setAttribute('fill', '#111827');
+                text.setAttribute('fill', isDark ? '#F3F4F6' : '#111827');
                 text.setAttribute('font-size', '12px');
                 text.setAttribute('font-family', 'JetBrains Mono, monospace');
                 text.setAttribute('font-weight', isHead ? '600' : '400');
-                text.textContent = `[${node.hash.substring(0, 7)}] ${node.message}`;
+
+                const hashSpan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
+                hashSpan.setAttribute('fill', isDark ? '#A1A1AA' : '#6B7280');
+                hashSpan.setAttribute('font-weight', '500');
+                hashSpan.textContent = `[${node.hash.substring(0, 7)}] `;
+
+                const msgSpan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
+                msgSpan.setAttribute('fill', isDark ? '#FFFFFF' : '#111827');
+                msgSpan.setAttribute('font-weight', isHead ? '600' : '400');
+                msgSpan.textContent = node.message;
+
+                text.appendChild(hashSpan);
+                text.appendChild(msgSpan);
                 group.appendChild(text);
 
                 // Branch labels
@@ -2352,14 +2451,14 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                         rect.setAttribute('width', bWidth);
                         rect.setAttribute('height', 20);
                         rect.setAttribute('rx', 10);
-                        rect.setAttribute('fill', isCur ? '#000000' : '#F3F4F6');
-                        rect.setAttribute('stroke', isCur ? '#000000' : '#E5E7EB');
+                        rect.setAttribute('fill', isCur ? (isDark ? '#FFFFFF' : '#000000') : (isDark ? '#27272A' : '#F3F4F6'));
+                        rect.setAttribute('stroke', isCur ? (isDark ? '#FFFFFF' : '#000000') : (isDark ? '#3F3F46' : '#E5E7EB'));
                         group.appendChild(rect);
 
                         const bText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
                         bText.setAttribute('x', labelOffset + bWidth / 2);
                         bText.setAttribute('y', nodeY + 4);
-                        bText.setAttribute('fill', isCur ? '#FFFFFF' : '#4B5563');
+                        bText.setAttribute('fill', isCur ? (isDark ? '#000000' : '#FFFFFF') : (isDark ? '#E4E4E7' : '#4B5563'));
                         bText.setAttribute('font-size', '10px');
                         bText.setAttribute('font-family', 'Inter, sans-serif');
                         bText.setAttribute('text-anchor', 'middle');
