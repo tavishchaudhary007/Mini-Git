@@ -135,16 +135,19 @@ void HtmlCmd::execute(Repository* repo, const Args& args) {
 void UiCmd::execute(Repository* repo, const Args& args) {
     int port = 8080;
     bool open = true;
+    bool lan = false;
     for (size_t i = 0; i < args.size(); ++i) {
         if (args[i] == "--no-open") {
             open = false;
+        } else if (args[i] == "--lan") {
+            lan = true;
         } else if (args[i] == "--port" && i + 1 < args.size()) {
             port = std::stoi(args[++i]);
         } else {
             usageError(*this);
         }
     }
-    HttpServer::run(repo, port, open);
+    HttpServer::run(repo, port, open, lan);
 }
 
 void ServeCmd::execute(Repository* repo, const Args& args) {
