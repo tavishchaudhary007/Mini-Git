@@ -1,4 +1,5 @@
 #pragma once
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -7,6 +8,14 @@
 #include "Exceptions.h"
 
 namespace fs = std::filesystem;
+
+inline std::string isoTime(std::time_t t) {
+    char buf[32];
+    std::tm* tm = std::gmtime(&t);
+    if (!tm) return "1970-01-01T00:00:00Z";
+    std::strftime(buf, sizeof buf, "%Y-%m-%dT%H:%M:%SZ", tm);
+    return buf;
+}
 
 inline std::string readFile(const fs::path& p) {
     std::ifstream in(p, std::ios::binary);

@@ -4,37 +4,9 @@
 #include <sstream>
 #include "Base64.h"
 #include "FrontendTemplate.h"
+#include "Json.h"
 
 namespace {
-
-// JSON string literal. '<', '>' and '&' are escaped so the data can never
-// close the surrounding <script> tag.
-void jsonString(std::ostream& os, const std::string& s) {
-    os << '"';
-    for (unsigned char c : s) {
-        switch (c) {
-            case '"':  os << "\\\""; break;
-            case '\\': os << "\\\\"; break;
-            case '\n': os << "\\n";  break;
-            case '\r': os << "\\r";  break;
-            case '\t': os << "\\t";  break;
-            case '<':  os << "\\u003c"; break;
-            case '>':  os << "\\u003e"; break;
-            case '&':  os << "\\u0026"; break;
-            default:
-                if (c < 0x20) { char buf[8]; std::snprintf(buf, sizeof buf, "\\u%04x", c); os << buf; }
-                else os << static_cast<char>(c);
-        }
-    }
-    os << '"';
-}
-
-std::string isoTime(std::time_t t) {
-    char buf[32];
-    std::tm* tm = std::gmtime(&t);
-    std::strftime(buf, sizeof buf, "%Y-%m-%dT%H:%M:%SZ", tm);
-    return buf;
-}
 
 void jsonHashOrNull(std::ostream& os, const Hash& h) {
     if (h.empty()) os << "null"; else jsonString(os, h.str());

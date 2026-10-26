@@ -19,7 +19,7 @@ const JsonValue& JsonValue::operator[](size_t idx) const {
     return arrVal_[idx];
 }
 
-static void escapeJsonString(std::ostream& os, const std::string& s) {
+void jsonString(std::ostream& os, const std::string& s) {
     os << '"';
     for (unsigned char c : s) {
         switch (c) {
@@ -28,6 +28,9 @@ static void escapeJsonString(std::ostream& os, const std::string& s) {
             case '\n': os << "\\n";  break;
             case '\r': os << "\\r";  break;
             case '\t': os << "\\t";  break;
+            case '<':  os << "\\u003c"; break;
+            case '>':  os << "\\u003e"; break;
+            case '&':  os << "\\u0026"; break;
             default:
                 if (c < 0x20) {
                     char buf[8];
@@ -40,6 +43,16 @@ static void escapeJsonString(std::ostream& os, const std::string& s) {
         }
     }
     os << '"';
+}
+
+std::string jsonString(const std::string& s) {
+    std::ostringstream oss;
+    jsonString(oss, s);
+    return oss.str();
+}
+
+static void escapeJsonString(std::ostream& os, const std::string& s) {
+    jsonString(os, s);
 }
 
 std::string JsonValue::serialize() const {

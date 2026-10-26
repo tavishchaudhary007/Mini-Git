@@ -4,6 +4,7 @@
 #include <map>
 #include <memory>
 #include <cstdint>
+#include <iosfwd>
 
 class JsonValue {
 public:
@@ -59,3 +60,6 @@ public:
     std::string serialize() const;
     static JsonValue parse(const std::string& src, std::string* errOut = nullptr);
 };
+
+void jsonString(std::ostream& os, const std::string& s);
+std::string jsonString(const std::string& s);
