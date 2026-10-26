@@ -22,6 +22,14 @@ struct ReflogEntry {
     std::string description;
 };
 
+struct StashEntry {
+    size_t index{0};
+    Hash commitHash;
+    Hash indexTreeHash;
+    std::string message;
+    std::string timestamp;
+};
+
 // Read-only copy of everything a frontend needs to display a repository.
 struct Snapshot {
     std::string currentBranch;                      // "" when HEAD is detached
@@ -41,7 +49,9 @@ class Repository {
     RefManager refs_;
 
     std::string relPath(const fs::path& p) const;
-    bool isIgnored(const fs::path& fullPath, const std::string& relPath, bool isDir = false) const;
+    std::string resolveRepoPath(const std::string& p, bool isRepoRelative) const;
+    bool isIgnored(const fs::path& fullPath, const std::string& relPath, bool isDir) const;
+    void checkUntrackedOverwrite(const std::map<std::string, Hash>& targetTree) const;
     std::vector<std::string> workingFiles() const;
     std::map<std::string, Hash> headTree() const;
     Hash hashWorking(const std::string& rel) const;
@@ -57,14 +67,14 @@ public:
     static fs::path findRoot(fs::path start);
     const fs::path& root() const { return root_; }
 
-    void add(const std::string& path);
-    void unstage(const std::string& path);
-    void discard(const std::string& path);
+    void add(const std::string& path, bool isRepoRelative = false);
+    void unstage(const std::string& path, bool isRepoRelative = false);
+    void discard(const std::string& path, bool isRepoRelative = false);
     Hash commit(const std::string& message);
     Hash revert(const Hash& commitHash);
     std::vector<Commit> log() const;
     Status status() const;
-    std::string diff(const std::string& path) const;
+    std::string diff(const std::string& path, bool isRepoRelative = false) const;
     Snapshot snapshot() const;
 
     void createBranch(const std::string& name);
@@ -81,9 +91,10 @@ public:
     void recordReflog(const std::string& action, const Hash& oldH, const Hash& newH, const std::string& desc);
     std::vector<ReflogEntry> reflog() const;
     std::string undo();
-    std::string stashSave(const std::string& message = "");
+    std::string stashSave(const std::string& message = "", bool includeUntracked = false);
     std::string stashPop();
     bool hasStash() const;
+    std::vector<StashEntry> stashList() const;
 
     // Serverless P2P & LAN Sync Bundle
     std::string exportBundleJson() const;

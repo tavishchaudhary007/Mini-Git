@@ -8,6 +8,7 @@
 #include "HtmlExporter.h"
 #include "Base64.h"
 #include "Json.h"
+#include <set>
 
 Repository::Repository(const fs::path& root)
     : root_(root), gitDir_(root / ".minigit"), store_(gitDir_ / "objects"),
@@ -40,9 +41,38 @@ std::string Repository::author() {
 std::string Repository::relPath(const fs::path& p) const {
     fs::path rel = fs::weakly_canonical(fs::absolute(p)).lexically_relative(fs::weakly_canonical(root_));
     std::string s = rel.generic_string();
-    if (s == "." ) return "";
+    if (s == "." || s.empty()) return "";
     if (s.rfind("..", 0) == 0) throw MiniGitException("path is outside the repository: " + p.generic_string());
     return s;
+}
+
+std::string Repository::resolveRepoPath(const std::string& pathArg, bool isRepoRelative) const {
+    if (pathArg.empty() || pathArg == "." || pathArg == "..") {
+        throw MiniGitException("invalid path: cannot be empty, '.', or '..'");
+    }
+    fs::path inPath(pathArg);
+    if (inPath.is_absolute()) {
+        throw MiniGitException("invalid path: absolute paths are not allowed: " + pathArg);
+    }
+    fs::path full;
+    if (isRepoRelative) {
+        full = (root_ / inPath).lexically_normal();
+    } else {
+        full = fs::weakly_canonical(fs::absolute(inPath));
+    }
+    fs::path normRoot = fs::weakly_canonical(root_);
+    fs::path rel = full.lexically_relative(normRoot);
+    std::string relStr = rel.generic_string();
+    if (relStr.empty() || relStr == ".") {
+        throw MiniGitException("invalid path: refers to repository root");
+    }
+    if (relStr.rfind("..", 0) == 0) {
+        throw MiniGitException("path is outside the repository: " + pathArg);
+    }
+    if (relStr == ".minigit" || relStr.rfind(".minigit/", 0) == 0) {
+        throw MiniGitException("invalid path: cannot access .minigit: " + pathArg);
+    }
+    return relStr;
 }
 
 bool Repository::isIgnored(const fs::path& fullPath, const std::string& relPath, bool isDir) const {
@@ -122,19 +152,30 @@ void Repository::addFile(const std::string& rel) {
     index_.set(rel, store_.save(Blob(readFile(root_ / rel))));
 }
 
-void Repository::add(const std::string& pathArg) {
-    fs::path p(pathArg);
-    std::string rel = relPath(p);
-    if (fs::is_directory(p)) {
-        std::string prefix = rel.empty() ? "" : rel + "/";
+void Repository::add(const std::string& pathArg, bool isRepoRelative) {
+    if (pathArg == "." || pathArg.empty()) {
+        for (const auto& f : workingFiles()) addFile(f);
+        std::vector<std::string> gone;
+        for (const auto& [path, h] : index_.entries())
+            if (!fs::exists(root_ / path)) gone.push_back(path);
+        for (const auto& g : gone) index_.remove(g);
+        index_.save();
+        return;
+    }
+    std::string rel = resolveRepoPath(pathArg, isRepoRelative);
+    fs::path full = root_ / rel;
+    if (fs::is_directory(full)) {
+        std::string prefix = rel + "/";
         for (const auto& f : workingFiles())
             if (f.rfind(prefix, 0) == 0) addFile(f);
-        std::vector<std::string> gone;  // tracked files deleted from disk
+        std::vector<std::string> gone;
         for (const auto& [path, h] : index_.entries())
             if (path.rfind(prefix, 0) == 0 && !fs::exists(root_ / path)) gone.push_back(path);
         for (const auto& g : gone) index_.remove(g);
-    } else if (fs::is_regular_file(p)) {
-        addFile(rel);
+    } else if (fs::is_regular_file(full)) {
+        if (!isIgnored(full, rel, false)) {
+            addFile(rel);
+        }
     } else if (index_.has(rel)) {
         index_.remove(rel);  // staging a deletion
     } else {
@@ -143,14 +184,14 @@ void Repository::add(const std::string& pathArg) {
     index_.save();
 }
 
-void Repository::unstage(const std::string& pathArg) {
+void Repository::unstage(const std::string& pathArg, bool isRepoRelative) {
     auto head = headTree();
     if (pathArg.empty() || pathArg == ".") {
         index_.replace(head);
         index_.save();
         return;
     }
-    std::string rel = relPath(fs::path(pathArg));
+    std::string rel = resolveRepoPath(pathArg, isRepoRelative);
     if (head.count(rel)) {
         index_.set(rel, head.at(rel));
     } else {
@@ -159,17 +200,27 @@ void Repository::unstage(const std::string& pathArg) {
     index_.save();
 }
 
-void Repository::discard(const std::string& pathArg) {
-    std::string rel = relPath(fs::path(pathArg));
+void Repository::discard(const std::string& pathArg, bool isRepoRelative) {
+    std::string rel = resolveRepoPath(pathArg, isRepoRelative);
+    fs::path full = (root_ / rel).lexically_normal();
+    if (full == root_ || rel.empty() || rel == "." || rel.rfind("..", 0) == 0 ||
+        rel == ".minigit" || rel.rfind(".minigit/", 0) == 0) {
+        throw MiniGitException("cannot discard entire repository or internal files: " + pathArg);
+    }
     auto head = headTree();
     if (head.count(rel)) {
-        writeFile(root_ / rel, store_.loadAs<Blob>(head.at(rel))->content());
+        writeFile(full, store_.loadAs<Blob>(head.at(rel))->content());
         index_.set(rel, head.at(rel));
         index_.save();
     } else if (index_.has(rel)) {
-        writeFile(root_ / rel, store_.loadAs<Blob>(index_.get(rel))->content());
-    } else if (fs::exists(root_ / rel)) {
-        fs::remove_all(root_ / rel);
+        writeFile(full, store_.loadAs<Blob>(index_.get(rel))->content());
+    } else if (fs::exists(full)) {
+        if (!fs::is_regular_file(full)) {
+            throw MiniGitException("discard only works on regular files: " + pathArg);
+        }
+        fs::remove(full);
+    } else {
+        throw FileNotFoundException("file not found: " + pathArg);
     }
 }
 
@@ -183,22 +234,55 @@ Hash Repository::revert(const Hash& commitHash) {
     if (!parentHash.empty()) {
         pTree = store_.loadAs<Tree>(store_.loadAs<Commit>(parentHash)->tree())->entries();
     }
+    auto head = headTree();
 
-    // Invert the changes introduced in c
+    std::vector<std::string> addedInC;
+    std::vector<std::string> removedInC;
+    std::vector<std::string> modifiedInC;
+
     for (const auto& [path, h] : cTree) {
-        if (pTree.count(path)) {
-            writeFile(root_ / path, store_.loadAs<Blob>(pTree.at(path))->content());
-            index_.set(path, pTree.at(path));
-        } else {
-            if (fs::exists(root_ / path)) fs::remove(root_ / path);
-            index_.remove(path);
+        if (!pTree.count(path)) {
+            addedInC.push_back(path);
+        } else if (pTree.at(path) != h) {
+            modifiedInC.push_back(path);
         }
     }
     for (const auto& [path, h] : pTree) {
         if (!cTree.count(path)) {
-            writeFile(root_ / path, store_.loadAs<Blob>(h)->content());
-            index_.set(path, h);
+            removedInC.push_back(path);
         }
+    }
+
+    for (const auto& path : addedInC) {
+        if (!head.count(path) || head.at(path) != cTree.at(path)) {
+            throw MiniGitException("revert conflict in " + path);
+        }
+    }
+    for (const auto& path : removedInC) {
+        if (head.count(path)) {
+            throw MiniGitException("revert conflict in " + path);
+        }
+    }
+    for (const auto& path : modifiedInC) {
+        if (!head.count(path) || head.at(path) != cTree.at(path)) {
+            throw MiniGitException("revert conflict in " + path);
+        }
+    }
+
+    for (const auto& path : addedInC) {
+        if (fs::exists(root_ / path)) fs::remove(root_ / path);
+        for (fs::path d = (root_ / path).parent_path(); d != root_ && fs::is_empty(d); d = d.parent_path()) {
+            fs::remove(d);
+        }
+        index_.remove(path);
+    }
+    for (const auto& path : removedInC) {
+        writeFile(root_ / path, store_.loadAs<Blob>(pTree.at(path))->content());
+        index_.set(path, pTree.at(path));
+    }
+    for (const auto& path : modifiedInC) {
+        writeFile(root_ / path, store_.loadAs<Blob>(pTree.at(path))->content());
+        index_.set(path, pTree.at(path));
     }
     index_.save();
     return commit("Revert \"" + c->message() + "\"");
@@ -249,11 +333,11 @@ Status Repository::status() const {
     return s;
 }
 
-std::string Repository::diff(const std::string& pathArg) const {
+std::string Repository::diff(const std::string& pathArg, bool isRepoRelative) const {
     std::vector<std::string> targets;
     if (pathArg.empty()) for (const auto& [p, h] : index_.entries()) targets.push_back(p);
     else {
-        std::string rel = relPath(pathArg);
+        std::string rel = resolveRepoPath(pathArg, isRepoRelative);
         if (!index_.has(rel)) throw FileNotFoundException("not tracked: " + pathArg);
         targets.push_back(rel);
     }
@@ -295,6 +379,15 @@ bool Repository::isAncestor(const Hash& ancestor, const Hash& descendant) const 
     return false;
 }
 
+void Repository::checkUntrackedOverwrite(const std::map<std::string, Hash>& targetTree) const {
+    Status s = status();
+    for (const auto& f : s.untracked) {
+        if (targetTree.count(f)) {
+            throw MiniGitException("untracked file '" + f + "' would be overwritten; move or commit it first");
+        }
+    }
+}
+
 void Repository::restoreCommit(const Hash& c) {
     auto tree = store_.loadAs<Tree>(store_.loadAs<Commit>(c)->tree());
     const auto& target = tree->entries();
@@ -317,7 +410,9 @@ void Repository::checkout(const std::string& target) {
     Hash oldHead = refs_.headCommit();
     bool isBranch = refs_.branchExists(target);
     Hash dest = isBranch ? refs_.branchTip(target) : store_.resolvePrefix(target);
-    store_.loadAs<Commit>(dest);  // validates that dest is a commit
+    auto c = store_.loadAs<Commit>(dest);  // validates that dest is a commit
+    auto targetTree = store_.loadAs<Tree>(c->tree())->entries();
+    checkUntrackedOverwrite(targetTree);
     restoreCommit(dest);
     if (isBranch) refs_.switchToBranch(target);
     else          refs_.detach(dest);
@@ -333,6 +428,8 @@ std::string Repository::merge(const std::string& branch) {
     if (cur.empty()) throw MergeException("current branch has no commits");
     if (cur == tgt || isAncestor(tgt, cur)) return "Already up to date.";
     if (isAncestor(cur, tgt)) {
+        auto targetTree = store_.loadAs<Tree>(store_.loadAs<Commit>(tgt)->tree())->entries();
+        checkUntrackedOverwrite(targetTree);
         restoreCommit(tgt);
         refs_.updateHead(tgt);
         recordReflog("merge", cur, tgt, "Merged branch " + branch);
@@ -364,22 +461,44 @@ Snapshot Repository::snapshot() const {
     return s;
 }
 
-static std::string currentIsoTime() {
-    char buf[32];
-    std::time_t t = std::time(nullptr);
-    std::tm* tm = std::gmtime(&t);
-    std::strftime(buf, sizeof buf, "%Y-%m-%dT%H:%M:%SZ", tm);
-    return buf;
+static std::string escapeReflogField(const std::string& s) {
+    std::string out;
+    for (char c : s) {
+        if (c == '\\') out += "\\\\";
+        else if (c == '|') out += "\\|";
+        else if (c == '\n') out += "\\n";
+        else if (c == '\r') out += "\\r";
+        else out += c;
+    }
+    return out;
+}
+
+static std::string unescapeReflogField(const std::string& s) {
+    std::string out;
+    for (size_t i = 0; i < s.size(); ++i) {
+        if (s[i] == '\\' && i + 1 < s.size()) {
+            char next = s[++i];
+            if (next == 'n') out += '\n';
+            else if (next == 'r') out += '\r';
+            else if (next == '|') out += '|';
+            else if (next == '\\') out += '\\';
+            else { out += '\\'; out += next; }
+        } else {
+            out += s[i];
+        }
+    }
+    return out;
 }
 
 void Repository::recordReflog(const std::string& action, const Hash& oldH, const Hash& newH, const std::string& desc) {
     try {
         std::ofstream ofs(gitDir_ / "reflog", std::ios::app);
         if (ofs.is_open()) {
-            ofs << currentIsoTime() << "|" << action << "|"
+            ofs << isoTime(std::time(nullptr)) << "|"
+                << escapeReflogField(action) << "|"
                 << (oldH.empty() ? "0000000" : oldH.str()) << "|"
                 << (newH.empty() ? "0000000" : newH.str()) << "|"
-                << desc << "\n";
+                << escapeReflogField(desc) << "\n";
         }
     } catch (...) {}
 }
@@ -391,11 +510,23 @@ std::vector<ReflogEntry> Repository::reflog() const {
         std::ifstream ifs(p);
         std::string line;
         while (std::getline(ifs, line)) {
+            while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) line.pop_back();
             if (line.empty()) continue;
-            std::stringstream ss(line);
-            std::string item;
             std::vector<std::string> parts;
-            while (std::getline(ss, item, '|')) parts.push_back(item);
+            std::string current;
+            for (size_t i = 0; i < line.size(); ++i) {
+                if (line[i] == '\\' && i + 1 < line.size()) {
+                    current += line[i];
+                    current += line[++i];
+                } else if (line[i] == '|') {
+                    parts.push_back(unescapeReflogField(current));
+                    current.clear();
+                } else {
+                    current += line[i];
+                }
+            }
+            parts.push_back(unescapeReflogField(current));
+
             if (parts.size() >= 5) {
                 entries.push_back({parts[0], parts[1], parts[2], parts[3], parts[4]});
             }
@@ -404,7 +535,7 @@ std::vector<ReflogEntry> Repository::reflog() const {
     if (entries.empty()) {
         for (const auto& c : log()) {
             entries.push_back({
-                currentIsoTime(),
+                isoTime(c.time()),
                 "commit",
                 (c.parent().empty() ? "0000000" : c.parent().str()),
                 c.hash().str(),
@@ -436,25 +567,57 @@ std::string Repository::undo() {
 }
 
 bool Repository::hasStash() const {
-    return fs::exists(gitDir_ / "stash");
+    return fs::exists(gitDir_ / "stash") && !stashList().empty();
 }
 
-std::string Repository::stashSave(const std::string& message) {
+std::string Repository::stashSave(const std::string& message, bool includeUntracked) {
+    if (head().empty()) {
+        throw MiniGitException("cannot stash before the first commit");
+    }
     Status s = status();
-    if (s.clean()) throw MiniGitException("no uncommitted changes to stash");
+    bool hasTrackedChanges = !(s.staged.empty() && s.modified.empty() && s.deleted.empty());
+    if (!hasTrackedChanges && (!includeUntracked || s.untracked.empty())) {
+        throw MiniGitException("no uncommitted changes to stash");
+    }
 
     Tree t;
-    for (const auto& f : workingFiles()) {
-        t.set(f, store_.save(Blob(readFile(root_ / f))));
+    std::set<std::string> trackedFiles;
+    for (const auto& [p, h] : index_.entries()) trackedFiles.insert(p);
+    for (const auto& [p, h] : headTree()) trackedFiles.insert(p);
+
+    for (const auto& f : trackedFiles) {
+        if (fs::exists(root_ / f)) {
+            t.set(f, store_.save(Blob(readFile(root_ / f))));
+        }
+    }
+    if (includeUntracked) {
+        for (const auto& u : s.untracked) {
+            if (fs::exists(root_ / u)) {
+                t.set(u, store_.save(Blob(readFile(root_ / u))));
+            }
+        }
     }
     store_.save(t);
 
+    Tree indexTree;
+    for (const auto& [p, h] : index_.entries()) indexTree.set(p, h);
+    Hash indexTreeHash = store_.save(indexTree);
+
     std::string desc = message.empty() ? ("WIP on " + (currentBranch().empty() ? "detached" : currentBranch())) : message;
     Hash h = store_.save(Commit(t.hash(), head(), author(), desc, std::time(nullptr)));
-    writeFile(gitDir_ / "stash", h.str());
 
-    if (!head().empty()) {
-        restoreCommit(head());
+    {
+        std::ofstream ofs(gitDir_ / "stash", std::ios::app);
+        if (ofs.is_open()) {
+            ofs << h.str() << " " << indexTreeHash.str() << " " << escapeReflogField(desc) << "\n";
+        }
+    }
+
+    restoreCommit(head());
+    if (includeUntracked) {
+        for (const auto& u : s.untracked) {
+            if (fs::exists(root_ / u)) fs::remove(root_ / u);
+        }
     }
 
     recordReflog("stash", head(), h, "Saved stash: " + desc);
@@ -462,22 +625,96 @@ std::string Repository::stashSave(const std::string& message) {
 }
 
 std::string Repository::stashPop() {
-    if (!hasStash()) throw MiniGitException("no stash entries found to pop");
-    std::string hStr = readFile(gitDir_ / "stash");
-    while (!hStr.empty() && (hStr.back() == '\r' || hStr.back() == '\n' || hStr.back() == ' ')) hStr.pop_back();
-    Hash stashHash(hStr);
+    auto list = stashList();
+    if (list.empty()) throw MiniGitException("no stash entries found to pop");
 
-    auto c = store_.loadAs<Commit>(stashHash);
+    if (isDirty()) {
+        throw MiniGitException("cannot pop stash: you have uncommitted changes");
+    }
+
+    StashEntry entry = list.front();
+
+    auto c = store_.loadAs<Commit>(entry.commitHash);
     auto t = store_.loadAs<Tree>(c->tree());
-    for (const auto& [p, blobHash] : t->entries()) {
+    const auto& workEntries = t->entries();
+
+    checkUntrackedOverwrite(workEntries);
+
+    auto curHeadTree = headTree();
+    for (const auto& [p, h] : curHeadTree) {
+        if (!workEntries.count(p) && fs::exists(root_ / p)) {
+            fs::remove(root_ / p);
+        }
+    }
+    for (const auto& [p, blobHash] : workEntries) {
         writeFile(root_ / p, store_.loadAs<Blob>(blobHash)->content());
-        index_.set(p, blobHash);
+    }
+
+    if (!entry.indexTreeHash.empty() && store_.exists(entry.indexTreeHash)) {
+        auto idxTree = store_.loadAs<Tree>(entry.indexTreeHash);
+        index_.replace(idxTree->entries());
+    } else {
+        index_.replace(curHeadTree);
     }
     index_.save();
 
-    fs::remove(gitDir_ / "stash");
-    recordReflog("stash_pop", head(), head(), "Restored stash [" + stashHash.shortStr() + "]");
-    return "Restored and applied stash [" + stashHash.shortStr() + "]";
+    std::ifstream ifs(gitDir_ / "stash");
+    std::vector<std::string> allLines;
+    std::string l;
+    while (std::getline(ifs, l)) {
+        while (!l.empty() && (l.back() == '\r' || l.back() == ' ')) l.pop_back();
+        if (!l.empty()) allLines.push_back(l);
+    }
+    ifs.close();
+
+    if (!allLines.empty()) allLines.pop_back();
+
+    if (allLines.empty()) {
+        fs::remove(gitDir_ / "stash");
+    } else {
+        std::ofstream ofs(gitDir_ / "stash", std::ios::trunc);
+        for (const auto& line : allLines) ofs << line << "\n";
+    }
+
+    recordReflog("stash_pop", entry.commitHash, this->head(), "Popped stash [" + entry.commitHash.shortStr() + "]");
+    return "Restored and applied stash [" + entry.commitHash.shortStr() + "]";
+}
+
+std::vector<StashEntry> Repository::stashList() const {
+    std::vector<StashEntry> entries;
+    fs::path p = gitDir_ / "stash";
+    if (!fs::exists(p)) return entries;
+
+    std::ifstream ifs(p);
+    std::string line;
+    std::vector<std::string> lines;
+    while (std::getline(ifs, line)) {
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
+        if (!line.empty()) lines.push_back(line);
+    }
+
+    std::reverse(lines.begin(), lines.end());
+    for (size_t i = 0; i < lines.size(); ++i) {
+        std::stringstream ss(lines[i]);
+        std::string hStr, idxHStr, descEsc;
+        ss >> hStr >> idxHStr;
+        std::getline(ss, descEsc);
+        while (!descEsc.empty() && descEsc.front() == ' ') descEsc.erase(descEsc.begin());
+
+        Hash h(hStr);
+        Hash idxH(idxHStr);
+        std::string desc = unescapeReflogField(descEsc);
+        std::string ts;
+        if (store_.exists(h)) {
+            try {
+                auto c = store_.loadAs<Commit>(h);
+                ts = isoTime(c->time());
+                if (desc.empty()) desc = c->message();
+            } catch (...) {}
+        }
+        entries.push_back({i, h, idxH, desc, ts});
+    }
+    return entries;
 }
 
 std::string Repository::exportBundleJson() const {
@@ -677,6 +914,14 @@ std::string Repository::importBundleJson(const std::string& bundleJson) {
                         if (isDirty()) {
                             activeBranchDirtyRefused = true;
                             refuseReason = "Cannot fast-forward active branch '" + bName + "': working tree or index has uncommitted changes.";
+                            continue;
+                        }
+                        auto targetTree = store_.loadAs<Tree>(store_.loadAs<Commit>(target)->tree())->entries();
+                        try {
+                            checkUntrackedOverwrite(targetTree);
+                        } catch (const MiniGitException& e) {
+                            activeBranchDirtyRefused = true;
+                            refuseReason = e.what();
                             continue;
                         }
                         restoreCommit(target);
