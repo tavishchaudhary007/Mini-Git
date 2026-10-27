@@ -599,6 +599,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                         <select id="diffFileSelect" onchange="ACTIVE_FILE = this.value; renderFileTree(); renderDiffView();" class="bg-zinc-100 dark:bg-zinc-900 border border-theme-border text-theme-text px-3 py-1 rounded-full focus:outline-none cursor-pointer">
                             <!-- Populated dynamically -->
                         </select>
+                        <span id="diffFileStatsBadge" class="hidden items-center space-x-1.5 font-mono text-[11px] px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 border border-theme-border"></span>
                     </div>
                     <div class="flex items-center space-x-4 text-xs font-sans">
                         <span class="text-rose-600 flex items-center"><i class="fa-solid fa-minus mr-1"></i> HEAD Version</span>
@@ -696,7 +697,10 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
     <div id="commitActionModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center hidden" onclick="if(event.target===this)closeCommitActionModal()">
         <div class="bg-theme-card border border-theme-border w-full max-w-md rounded-3xl shadow-2xl p-6 space-y-4">
             <div class="flex items-center justify-between border-b border-theme-border pb-3">
-                <h3 class="font-serif font-bold text-theme-text text-lg">Commit Details</h3>
+                <div class="flex items-center space-x-2">
+                    <h3 class="font-serif font-bold text-theme-text text-lg">Commit Details</h3>
+                    <div id="camTotalStats" class="flex items-center space-x-1.5 text-xs font-mono"></div>
+                </div>
                 <button onclick="closeCommitActionModal()" class="text-theme-muted hover:text-theme-text"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="space-y-3 text-xs">
@@ -708,6 +712,14 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                 <div class="p-3 bg-zinc-50 dark:bg-zinc-900/70 border border-theme-border rounded-2xl space-y-1">
                     <div class="text-[10px] text-theme-muted uppercase font-bold tracking-wider">Commit Message</div>
                     <div id="camMessage" class="text-theme-text font-medium"></div>
+                </div>
+                <!-- Changed Files List with +x -y -->
+                <div id="camFilesContainer" class="p-3 bg-zinc-50 dark:bg-zinc-900/70 border border-theme-border rounded-2xl space-y-2">
+                    <div class="flex justify-between items-center text-[10px] text-theme-muted uppercase font-bold tracking-wider">
+                        <span>Changed Files</span>
+                        <span id="camFileCount" class="font-mono"></span>
+                    </div>
+                    <div id="camFileList" class="space-y-1.5 max-h-36 overflow-y-auto font-mono text-xs pr-1"></div>
                 </div>
                 <!-- Action Buttons: Switch / Branch / Revert -->
                 <div class="grid grid-cols-3 gap-2 pt-1">
@@ -1272,6 +1284,178 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             }
         }
 
+        function isBinaryContent(text) {
+            if (typeof text !== 'string') return false;
+            return text === '[binary file]' || text.includes('\0');
+        }
+
+        function getBlobText(blobHash) {
+            if (!blobHash || !OBJECTS[blobHash]) return "";
+            const obj = OBJECTS[blobHash];
+            if (obj.type !== 'blob') return "";
+            if (obj.content === "[binary file]") return "[binary file]";
+            let content = obj.content;
+            if (obj.encoding === 'base64' && typeof content === 'string') {
+                try {
+                    content = atob(content);
+                } catch (_) {}
+            }
+            if (typeof content === 'string') {
+                if (content.includes('\0')) return "[binary file]";
+                return content;
+            }
+            return "";
+        }
+
+        function getHeadBlobText(filepath) {
+            const headCommitHash = BRANCHES[CURRENT_BRANCH];
+            if (!headCommitHash || !OBJECTS[headCommitHash]) return "";
+            const treeHash = OBJECTS[headCommitHash].data?.tree;
+            if (!treeHash || !OBJECTS[treeHash]) return "";
+            const blobHash = OBJECTS[treeHash].data?.[filepath];
+            if (!blobHash) return "";
+            return getBlobText(blobHash);
+        }
+
+        function diffLines(oldText, newText) {
+            if (isBinaryContent(oldText) || isBinaryContent(newText)) {
+                const res = [];
+                res.isBinary = true;
+                return res;
+            }
+            const a = (oldText !== null && oldText !== undefined && oldText !== "") ? oldText.split(/\r?\n/) : [];
+            const b = (newText !== null && newText !== undefined && newText !== "") ? newText.split(/\r?\n/) : [];
+
+            if (a.length > 5000 || b.length > 5000) {
+                const res = [];
+                res.isLarge = true;
+                return res;
+            }
+
+            const n = a.length;
+            const m = b.length;
+            if (n === 0) {
+                return b.map(line => ({ type: 'add', kind: 'add', value: line }));
+            }
+            if (m === 0) {
+                return a.map(line => ({ type: 'remove', kind: 'remove', value: line }));
+            }
+
+            const dp = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
+            for (let i = n - 1; i >= 0; i--) {
+                for (let j = m - 1; j >= 0; j--) {
+                    dp[i][j] = (a[i] === b[j]) ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+                }
+            }
+
+            const out = [];
+            let i = 0, j = 0;
+            while (i < n && j < m) {
+                if (a[i] === b[j]) {
+                    out.push({ type: 'keep', kind: 'keep', value: a[i] });
+                    i++;
+                    j++;
+                } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+                    out.push({ type: 'remove', kind: 'remove', value: a[i] });
+                    i++;
+                } else {
+                    out.push({ type: 'add', kind: 'add', value: b[j] });
+                    j++;
+                }
+            }
+            while (i < n) {
+                out.push({ type: 'remove', kind: 'remove', value: a[i++] });
+            }
+            while (j < m) {
+                out.push({ type: 'add', kind: 'add', value: b[j++] });
+            }
+            return out;
+        }
+
+        function countChanges(oldText, newText) {
+            if (isBinaryContent(oldText) || isBinaryContent(newText)) {
+                return { added: 0, removed: 0, isBinary: true, isLarge: false };
+            }
+            const a = (oldText !== null && oldText !== undefined && oldText !== "") ? oldText.split(/\r?\n/) : [];
+            const b = (newText !== null && newText !== undefined && newText !== "") ? newText.split(/\r?\n/) : [];
+            if (a.length > 5000 || b.length > 5000) {
+                return { added: 0, removed: 0, isBinary: false, isLarge: true };
+            }
+            if (a.length === 0) {
+                return { added: b.length, removed: 0, isBinary: false, isLarge: false };
+            }
+            if (b.length === 0) {
+                return { added: 0, removed: a.length, isBinary: false, isLarge: false };
+            }
+            const ops = diffLines(oldText, newText);
+            let added = 0;
+            let removed = 0;
+            for (const op of ops) {
+                if (op.type === 'add') added++;
+                else if (op.type === 'remove') removed++;
+            }
+            return { added, removed, isBinary: false, isLarge: false };
+        }
+
+        const COMMIT_STATS_CACHE = {};
+
+        function commitStats(hash) {
+            if (!hash) return { files: [], totalAdded: 0, totalRemoved: 0, totalFiles: 0 };
+            if (COMMIT_STATS_CACHE[hash]) return COMMIT_STATS_CACHE[hash];
+
+            const commitObj = OBJECTS[hash];
+            if (!commitObj || commitObj.type !== 'commit') {
+                return { files: [], totalAdded: 0, totalRemoved: 0, totalFiles: 0 };
+            }
+
+            const c = commitObj.data || {};
+            const curTreeObj = OBJECTS[c.tree];
+            const curEntries = (curTreeObj && curTreeObj.data) ? curTreeObj.data : {};
+
+            let pEntries = {};
+            if (c.parent && OBJECTS[c.parent] && OBJECTS[c.parent].type === 'commit') {
+                const pCommit = OBJECTS[c.parent].data || {};
+                const pTreeObj = OBJECTS[pCommit.tree];
+                if (pTreeObj && pTreeObj.data) {
+                    pEntries = pTreeObj.data;
+                }
+            }
+
+            const allPaths = Array.from(new Set([...Object.keys(curEntries), ...Object.keys(pEntries)])).sort();
+            const files = [];
+            let totalAdded = 0;
+            let totalRemoved = 0;
+
+            for (const path of allPaths) {
+                const oldH = pEntries[path];
+                const newH = curEntries[path];
+                if (oldH === newH) continue;
+
+                const oldContent = oldH ? getBlobText(oldH) : "";
+                const newContent = newH ? getBlobText(newH) : "";
+
+                const ch = countChanges(oldContent, newContent);
+                files.push({
+                    path,
+                    added: ch.added,
+                    removed: ch.removed,
+                    isBinary: ch.isBinary,
+                    isLarge: ch.isLarge
+                });
+                totalAdded += ch.added;
+                totalRemoved += ch.removed;
+            }
+
+            const result = {
+                files,
+                totalFiles: files.length,
+                totalAdded,
+                totalRemoved
+            };
+            COMMIT_STATS_CACHE[hash] = result;
+            return result;
+        }
+
         function splitPath(filepath) {
             const parts = filepath.split('/');
             if (parts.length > 1) {
@@ -1778,6 +1962,39 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 text.setAttribute('text-anchor', 'middle');
                 text.textContent = node.hash.substring(0, 6);
                 group.appendChild(text);
+
+                // Mini graph: Total only, keep it tiny
+                const stats = commitStats(node.hash);
+                if (stats && (stats.totalAdded > 0 || stats.totalRemoved > 0)) {
+                    const statText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    statText.setAttribute('x', nodeX);
+                    statText.setAttribute('y', y + 38);
+                    statText.setAttribute('font-size', '9px');
+                    statText.setAttribute('font-family', 'JetBrains Mono, monospace');
+                    statText.setAttribute('text-anchor', 'middle');
+
+                    if (stats.totalAdded > 0) {
+                        const plusTspan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
+                        plusTspan.setAttribute('fill', '#059669');
+                        plusTspan.setAttribute('font-weight', '700');
+                        plusTspan.textContent = `+${stats.totalAdded}`;
+                        statText.appendChild(plusTspan);
+                    }
+                    if (stats.totalAdded > 0 && stats.totalRemoved > 0) {
+                        const sepTspan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
+                        sepTspan.setAttribute('fill', isDark ? '#71717A' : '#9CA3AF');
+                        sepTspan.textContent = ' ';
+                        statText.appendChild(sepTspan);
+                    }
+                    if (stats.totalRemoved > 0) {
+                        const minusTspan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
+                        minusTspan.setAttribute('fill', '#dc2626');
+                        minusTspan.setAttribute('font-weight', '700');
+                        minusTspan.textContent = `-${stats.totalRemoved}`;
+                        statText.appendChild(minusTspan);
+                    }
+                    group.appendChild(statText);
+                }
 
                 svg.appendChild(group);
             });
@@ -2946,6 +3163,91 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             document.getElementById('camAuthor').textContent = c.author || 'unknown';
             document.getElementById('camDate').textContent = formatCommitDateTime(c.timestamp);
             document.getElementById('camMessage').textContent = c.message || '';
+
+            // Line counts & file list
+            const stats = commitStats(hash);
+            const totalStatsEl = document.getElementById('camTotalStats');
+            if (totalStatsEl) {
+                totalStatsEl.innerHTML = '';
+                if (stats.totalFiles > 0) {
+                    if (stats.totalAdded > 0) {
+                        const spanA = document.createElement('span');
+                        spanA.className = 'diff-added px-1.5 py-0.5 rounded font-bold';
+                        spanA.textContent = `+${stats.totalAdded}`;
+                        totalStatsEl.appendChild(spanA);
+                    }
+                    if (stats.totalRemoved > 0) {
+                        const spanR = document.createElement('span');
+                        spanR.className = 'diff-removed px-1.5 py-0.5 rounded font-bold';
+                        spanR.textContent = `-${stats.totalRemoved}`;
+                        totalStatsEl.appendChild(spanR);
+                    }
+                }
+            }
+
+            const fileCountEl = document.getElementById('camFileCount');
+            if (fileCountEl) {
+                fileCountEl.textContent = `${stats.totalFiles} ${stats.totalFiles === 1 ? 'file' : 'files'}`;
+            }
+
+            const fileListEl = document.getElementById('camFileList');
+            if (fileListEl) {
+                fileListEl.innerHTML = '';
+                if (stats.files.length === 0) {
+                    const emptyRow = document.createElement('div');
+                    emptyRow.className = 'text-theme-muted italic text-[11px]';
+                    emptyRow.textContent = 'No file changes (initial or empty tree)';
+                    fileListEl.appendChild(emptyRow);
+                } else {
+                    for (const file of stats.files) {
+                        const row = document.createElement('div');
+                        row.className = 'flex items-center justify-between text-[11px] py-0.5';
+
+                        const nameSpan = document.createElement('span');
+                        nameSpan.className = 'truncate max-w-[220px] text-theme-text';
+                        nameSpan.textContent = file.path;
+                        nameSpan.title = file.path;
+                        row.appendChild(nameSpan);
+
+                        const badgeContainer = document.createElement('span');
+                        badgeContainer.className = 'flex items-center space-x-1 shrink-0';
+
+                        if (file.isBinary) {
+                            const binSpan = document.createElement('span');
+                            binSpan.className = 'text-theme-muted text-[10px] italic';
+                            binSpan.textContent = 'binary';
+                            badgeContainer.appendChild(binSpan);
+                        } else if (file.isLarge) {
+                            const lgSpan = document.createElement('span');
+                            lgSpan.className = 'text-theme-muted text-[10px] italic';
+                            lgSpan.textContent = 'large file';
+                            badgeContainer.appendChild(lgSpan);
+                        } else {
+                            if (file.added > 0) {
+                                const addSpan = document.createElement('span');
+                                addSpan.className = 'diff-added px-1 py-0.2 rounded font-bold text-[10px]';
+                                addSpan.textContent = `+${file.added}`;
+                                badgeContainer.appendChild(addSpan);
+                            }
+                            if (file.removed > 0) {
+                                const remSpan = document.createElement('span');
+                                remSpan.className = 'diff-removed px-1 py-0.2 rounded font-bold text-[10px]';
+                                remSpan.textContent = `-${file.removed}`;
+                                badgeContainer.appendChild(remSpan);
+                            }
+                            if (file.added === 0 && file.removed === 0) {
+                                const zeroSpan = document.createElement('span');
+                                zeroSpan.className = 'text-theme-muted text-[10px]';
+                                zeroSpan.textContent = '0';
+                                badgeContainer.appendChild(zeroSpan);
+                            }
+                        }
+                        row.appendChild(badgeContainer);
+                        fileListEl.appendChild(row);
+                    }
+                }
+            }
+
             const modal = document.getElementById('commitActionModal');
             if (modal) modal.classList.remove('hidden');
         }
@@ -3047,6 +3349,48 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                     fileSpan.textContent = filename;
                     fileLeft.appendChild(fileSpan);
                     fileEl.appendChild(fileLeft);
+
+                    // +x -y badge next to modified files (working copy vs HEAD)
+                    const headText = getHeadBlobText(filepath);
+                    const workingText = (VFS[filepath] !== undefined) ? VFS[filepath] : "";
+                    if (headText !== workingText) {
+                        const changes = countChanges(headText, workingText);
+                        if (changes.isBinary || changes.isLarge || changes.added > 0 || changes.removed > 0) {
+                            const fileRight = document.createElement('div');
+                            fileRight.className = "flex items-center space-x-1 shrink-0 font-mono text-[10px] ml-2";
+
+                            if (changes.isBinary) {
+                                const binBadge = document.createElement('span');
+                                binBadge.className = isSelected ? 'opacity-80 italic' : 'text-theme-muted italic';
+                                binBadge.textContent = 'bin';
+                                fileRight.appendChild(binBadge);
+                            } else if (changes.isLarge) {
+                                const lgBadge = document.createElement('span');
+                                lgBadge.className = isSelected ? 'opacity-80 italic' : 'text-theme-muted italic';
+                                lgBadge.textContent = 'large';
+                                fileRight.appendChild(lgBadge);
+                            } else {
+                                if (changes.added > 0) {
+                                    const plusSpan = document.createElement('span');
+                                    plusSpan.className = isSelected
+                                        ? 'px-1 py-0.2 rounded font-bold bg-emerald-500/20 text-emerald-300 dark:text-emerald-700'
+                                        : 'diff-added px-1 py-0.2 rounded font-bold';
+                                    plusSpan.textContent = `+${changes.added}`;
+                                    fileRight.appendChild(plusSpan);
+                                }
+                                if (changes.removed > 0) {
+                                    const minusSpan = document.createElement('span');
+                                    minusSpan.className = isSelected
+                                        ? 'px-1 py-0.2 rounded font-bold bg-rose-500/20 text-rose-300 dark:text-rose-700'
+                                        : 'diff-removed px-1 py-0.2 rounded font-bold';
+                                    minusSpan.textContent = `-${changes.removed}`;
+                                    fileRight.appendChild(minusSpan);
+                                }
+                            }
+                            fileEl.appendChild(fileRight);
+                        }
+                    }
+
                     container.appendChild(fileEl);
                 }
             }
@@ -3304,45 +3648,89 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             const select = document.getElementById('diffFileSelect');
             const origDiv = document.getElementById('diffOriginalLines');
             const modDiv = document.getElementById('diffModifiedLines');
+            const statsBadge = document.getElementById('diffFileStatsBadge');
             if (!select || !origDiv || !modDiv) return;
 
             const filepath = select.value || ACTIVE_FILE;
             origDiv.innerHTML = '';
             modDiv.innerHTML = '';
 
-            const workingContent = VFS[filepath] || "";
-            let headContent = "";
+            const workingContent = (VFS[filepath] !== undefined) ? VFS[filepath] : "";
+            const headContent = getHeadBlobText(filepath);
 
-            const headCommitHash = BRANCHES[CURRENT_BRANCH];
-            if (headCommitHash && OBJECTS[headCommitHash]) {
-                const treeHash = OBJECTS[headCommitHash].data.tree;
-                const blobHash = OBJECTS[treeHash]?.data?.[filepath];
-                if (blobHash && OBJECTS[blobHash]) {
-                    headContent = OBJECTS[blobHash].content || "";
+            // Update Diff View Header Badge (+x -y)
+            const changes = countChanges(headContent, workingContent);
+            if (statsBadge) {
+                statsBadge.innerHTML = '';
+                if (changes.isBinary) {
+                    statsBadge.className = "inline-flex items-center px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 border border-theme-border font-mono text-[11px] text-theme-muted italic";
+                    statsBadge.textContent = "binary";
+                } else if (changes.isLarge) {
+                    statsBadge.className = "inline-flex items-center px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 border border-theme-border font-mono text-[11px] text-theme-muted italic";
+                    statsBadge.textContent = "large file";
+                } else if (changes.added > 0 || changes.removed > 0) {
+                    statsBadge.className = "inline-flex items-center space-x-1 font-mono text-[11px]";
+                    if (changes.added > 0) {
+                        const plusSpan = document.createElement('span');
+                        plusSpan.className = "diff-added px-1.5 py-0.5 rounded font-bold";
+                        plusSpan.textContent = `+${changes.added}`;
+                        statsBadge.appendChild(plusSpan);
+                    }
+                    if (changes.removed > 0) {
+                        const minusSpan = document.createElement('span');
+                        minusSpan.className = "diff-removed px-1.5 py-0.5 rounded font-bold";
+                        minusSpan.textContent = `-${changes.removed}`;
+                        statsBadge.appendChild(minusSpan);
+                    }
+                } else {
+                    statsBadge.className = "hidden";
                 }
             }
 
-            const headLines = headContent.split('\n');
-            const workLines = workingContent.split('\n');
-            const maxL = Math.max(headLines.length, workLines.length);
+            // Render Split View using diffLines()
+            const ops = diffLines(headContent, workingContent);
+            if (ops.isBinary) {
+                const bLeft = document.createElement('div');
+                bLeft.className = "text-theme-muted italic p-4 text-xs";
+                bLeft.textContent = "Binary file (diff unavailable)";
+                const bRight = document.createElement('div');
+                bRight.className = "text-theme-muted italic p-4 text-xs";
+                bRight.textContent = "Binary file (diff unavailable)";
+                origDiv.appendChild(bLeft);
+                modDiv.appendChild(bRight);
+                return;
+            }
+            if (ops.isLarge) {
+                const lLeft = document.createElement('div');
+                lLeft.className = "text-theme-muted italic p-4 text-xs";
+                lLeft.textContent = "File is larger than 5,000 lines (diff skipped)";
+                const lRight = document.createElement('div');
+                lRight.className = "text-theme-muted italic p-4 text-xs";
+                lRight.textContent = "File is larger than 5,000 lines (diff skipped)";
+                origDiv.appendChild(lLeft);
+                modDiv.appendChild(lRight);
+                return;
+            }
 
-            for (let i = 0; i < maxL; i++) {
-                const hLine = headLines[i] ?? "";
-                const wLine = workLines[i] ?? "";
-
+            for (const op of ops) {
                 const oRow = document.createElement('div');
                 const mRow = document.createElement('div');
 
-                if (hLine === wLine) {
+                if (op.type === 'keep') {
                     oRow.className = "diff-neutral px-2 py-0.5 whitespace-pre";
                     mRow.className = "diff-neutral px-2 py-0.5 whitespace-pre";
-                    oRow.textContent = hLine || " ";
-                    mRow.textContent = wLine || " ";
-                } else {
+                    oRow.textContent = op.value || " ";
+                    mRow.textContent = op.value || " ";
+                } else if (op.type === 'remove') {
                     oRow.className = "diff-removed px-2 py-0.5 whitespace-pre font-bold";
+                    mRow.className = "px-2 py-0.5 whitespace-pre select-none opacity-20";
+                    oRow.textContent = `- ${op.value}`;
+                    mRow.textContent = " ";
+                } else if (op.type === 'add') {
+                    oRow.className = "px-2 py-0.5 whitespace-pre select-none opacity-20";
                     mRow.className = "diff-added px-2 py-0.5 whitespace-pre font-bold";
-                    oRow.textContent = hLine ? `- ${hLine}` : " ";
-                    mRow.textContent = wLine ? `+ ${wLine}` : " ";
+                    oRow.textContent = " ";
+                    mRow.textContent = `+ ${op.value}`;
                 }
 
                 origDiv.appendChild(oRow);
@@ -3420,10 +3808,39 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
 
                 text.appendChild(hashSpan);
                 text.appendChild(msgSpan);
+
+                // Small green/red +12 -3 badge next to the message
+                const stats = commitStats(node.hash);
+                let statStrLen = 0;
+                if (stats && (stats.totalAdded > 0 || stats.totalRemoved > 0)) {
+                    const spaceSpan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
+                    spaceSpan.textContent = '  ';
+                    text.appendChild(spaceSpan);
+
+                    if (stats.totalAdded > 0) {
+                        const addSpan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
+                        addSpan.setAttribute('fill', '#059669');
+                        addSpan.setAttribute('font-weight', '700');
+                        addSpan.setAttribute('font-size', '11px');
+                        addSpan.textContent = `+${stats.totalAdded} `;
+                        text.appendChild(addSpan);
+                        statStrLen += (String(stats.totalAdded).length + 3);
+                    }
+                    if (stats.totalRemoved > 0) {
+                        const remSpan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
+                        remSpan.setAttribute('fill', '#dc2626');
+                        remSpan.setAttribute('font-weight', '700');
+                        remSpan.setAttribute('font-size', '11px');
+                        remSpan.textContent = `-${stats.totalRemoved} `;
+                        text.appendChild(remSpan);
+                        statStrLen += (String(stats.totalRemoved).length + 3);
+                    }
+                }
+
                 group.appendChild(text);
 
                 // Branch labels
-                let labelOffset = x + 30 + (node.message.length * 7.5) + 80;
+                let labelOffset = x + 30 + ((node.message.length + statStrLen) * 7.5) + 80;
                 for (const [bName, bHash] of Object.entries(BRANCHES)) {
                     if (bHash === node.hash) {
                         const isCur = (bName === CURRENT_BRANCH);

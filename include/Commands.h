@@ -28,7 +28,7 @@ public:
 MG_COMMAND(InitCmd,     "init",     "minigit init", false)
 MG_COMMAND(AddCmd,      "add",      "minigit add <file|dir|.>...", true)
 MG_COMMAND(CommitCmd,   "commit",   "minigit commit -m \"message\"", true)
-MG_COMMAND(LogCmd,      "log",      "minigit log [--oneline]", true)
+MG_COMMAND(LogCmd,      "log",      "minigit log [--oneline] [--stat]", true)
 MG_COMMAND(StatusCmd,   "status",   "minigit status", true)
 MG_COMMAND(DiffCmd,     "diff",     "minigit diff [file]", true)
 MG_COMMAND(BranchCmd,   "branch",   "minigit branch [name]", true)

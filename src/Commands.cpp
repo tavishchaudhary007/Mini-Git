@@ -31,8 +31,10 @@ void CommitCmd::execute(Repository* repo, const Args& args) {
 
 void LogCmd::execute(Repository* repo, const Args& args) {
     bool oneline = false;
+    bool stat = false;
     for (const auto& a : args) {
         if (a == "--oneline") oneline = true;
+        else if (a == "--stat") stat = true;
         else usageError(*this);
     }
     for (const auto& c : repo->log()) {
@@ -48,6 +50,40 @@ void LogCmd::execute(Repository* repo, const Args& args) {
             }
             cout << "Author: " << c.author() << "\nDate:   " << c.time() << "\n\n    "
                  << c.message() << "\n\n";
+        }
+        if (stat) {
+            auto stats = repo->commitStats(c.hash());
+            if (stats.totalFiles > 0) {
+                size_t maxLen = 0;
+                for (const auto& item : stats.files) {
+                    if (item.path.size() > maxLen) maxLen = item.path.size();
+                }
+                for (const auto& item : stats.files) {
+                    std::string pad(maxLen > item.path.size() ? maxLen - item.path.size() : 0, ' ');
+                    if (item.isBinary) {
+                        cout << " " << item.path << pad << " | Bin\n";
+                    } else {
+                        size_t total = item.added + item.removed;
+                        std::string bar;
+                        size_t barMax = 30;
+                        size_t plusCount = total > barMax ? (item.added * barMax / total) : item.added;
+                        size_t minusCount = total > barMax ? (item.removed * barMax / total) : item.removed;
+                        if (plusCount == 0 && item.added > 0) plusCount = 1;
+                        if (minusCount == 0 && item.removed > 0) minusCount = 1;
+                        bar.append(plusCount, '+');
+                        bar.append(minusCount, '-');
+                        cout << " " << item.path << pad << " | " << total << " " << bar << "\n";
+                    }
+                }
+                cout << " " << stats.totalFiles << (stats.totalFiles == 1 ? " file changed" : " files changed");
+                if (stats.totalAdded > 0) {
+                    cout << ", " << stats.totalAdded << (stats.totalAdded == 1 ? " insertion(+)" : " insertions(+)");
+                }
+                if (stats.totalRemoved > 0) {
+                    cout << ", " << stats.totalRemoved << (stats.totalRemoved == 1 ? " deletion(-)" : " deletions(-)");
+                }
+                cout << "\n\n";
+            }
         }
     }
 }

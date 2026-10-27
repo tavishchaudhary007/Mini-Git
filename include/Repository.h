@@ -30,6 +30,20 @@ struct StashEntry {
     std::string timestamp;
 };
 
+struct CommitStatItem {
+    std::string path;
+    size_t added{0};
+    size_t removed{0};
+    bool isBinary{false};
+};
+
+struct CommitStat {
+    std::vector<CommitStatItem> files;
+    size_t totalFiles{0};
+    size_t totalAdded{0};
+    size_t totalRemoved{0};
+};
+
 // Read-only copy of everything a frontend needs to display a repository.
 struct Snapshot {
     std::string currentBranch;                      // "" when HEAD is detached
@@ -76,6 +90,7 @@ public:
     std::vector<Commit> log() const;
     Status status() const;
     std::string diff(const std::string& path, bool isRepoRelative = false) const;
+    CommitStat commitStats(const Hash& commitHash) const;
     Snapshot snapshot() const;
 
     void createBranch(const std::string& name);

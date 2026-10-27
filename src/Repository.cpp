@@ -380,22 +380,96 @@ std::string Repository::diff(const std::string& pathArg, bool isRepoRelative) co
     }
 
     std::string out;
+    size_t filesChanged = 0;
+    size_t totalInsertions = 0;
+    size_t totalDeletions = 0;
+
     for (const auto& path : targets) {
         auto oldBlob = store_.loadAs<Blob>(index_.get(path));
         std::string now = fs::exists(root_ / path) ? readFile(root_ / path) : "";
         if (oldBlob->content() == now) continue;
 
+        filesChanged++;
         auto ops = DiffEngine<std::string>::diff(splitLines(oldBlob->content()), splitLines(now));
         out += "--- a/" + path + "\n+++ b/" + path + "\n";
         size_t i = 0, j = 0;
         for (const auto& op : ops) {
             using K = DiffOp<std::string>::Kind;
             if (op.kind == K::Keep)        { ++i; ++j; }
-            else if (op.kind == K::Remove) out += "-" + std::to_string(++i) + ": " + op.value + "\n";
-            else                           out += "+" + std::to_string(++j) + ": " + op.value + "\n";
+            else if (op.kind == K::Remove) {
+                out += "-" + std::to_string(++i) + ": " + op.value + "\n";
+                totalDeletions++;
+            } else {
+                out += "+" + std::to_string(++j) + ": " + op.value + "\n";
+                totalInsertions++;
+            }
         }
     }
+
+    if (filesChanged > 0) {
+        out += " " + std::to_string(filesChanged) + (filesChanged == 1 ? " file changed" : " files changed");
+        if (totalInsertions > 0) {
+            out += ", " + std::to_string(totalInsertions) + (totalInsertions == 1 ? " insertion(+)" : " insertions(+)");
+        }
+        if (totalDeletions > 0) {
+            out += ", " + std::to_string(totalDeletions) + (totalDeletions == 1 ? " deletion(-)" : " deletions(-)");
+        }
+        out += "\n";
+    }
+
     return out;
+}
+
+CommitStat Repository::commitStats(const Hash& commitHash) const {
+    CommitStat result{ {}, 0, 0, 0 };
+    if (commitHash.empty() || !store_.exists(commitHash)) return result;
+    auto c = store_.loadAs<Commit>(commitHash);
+    if (!c) return result;
+
+    std::map<std::string, Hash> curTree;
+    if (store_.exists(c->tree())) {
+        curTree = store_.loadAs<Tree>(c->tree())->entries();
+    }
+
+    std::map<std::string, Hash> pTree;
+    if (!c->parent().empty() && store_.exists(c->parent())) {
+        auto pCommit = store_.loadAs<Commit>(c->parent());
+        if (pCommit && store_.exists(pCommit->tree())) {
+            pTree = store_.loadAs<Tree>(pCommit->tree())->entries();
+        }
+    }
+
+    std::set<std::string> allPaths;
+    for (const auto& [p, _] : curTree) allPaths.insert(p);
+    for (const auto& [p, _] : pTree) allPaths.insert(p);
+
+    for (const auto& path : allPaths) {
+        Hash oldH = pTree.count(path) ? pTree.at(path) : Hash();
+        Hash newH = curTree.count(path) ? curTree.at(path) : Hash();
+        if (oldH == newH) continue;
+
+        std::string oldContent = (!oldH.empty() && store_.exists(oldH)) ? store_.loadAs<Blob>(oldH)->content() : "";
+        std::string newContent = (!newH.empty() && store_.exists(newH)) ? store_.loadAs<Blob>(newH)->content() : "";
+
+        bool isBin = (oldContent.find('\0') != std::string::npos || newContent.find('\0') != std::string::npos);
+        if (isBin) {
+            result.files.push_back({path, 0, 0, true});
+            result.totalFiles++;
+            continue;
+        }
+
+        auto ops = DiffEngine<std::string>::diff(splitLines(oldContent), splitLines(newContent));
+        size_t added = 0, removed = 0;
+        for (const auto& op : ops) {
+            if (op.kind == DiffOp<std::string>::Kind::Add) added++;
+            else if (op.kind == DiffOp<std::string>::Kind::Remove) removed++;
+        }
+        result.files.push_back({path, added, removed, false});
+        result.totalFiles++;
+        result.totalAdded += added;
+        result.totalRemoved += removed;
+    }
+    return result;
 }
 
 void Repository::createBranch(const std::string& name) {

@@ -87,7 +87,15 @@ g++ -std=c++17 -Iinclude src/*.cpp -o minigit
 
 You now have an executable called `minigit` (`minigit.exe` on Windows).
 
-### Quick self-test
+### Running tests
+
+Run the automated test suite:
+```bash
+make test
+```
+This builds and executes both `tests/test_fixes.cpp` (regression and edge case tests) and `tests/test_p2p.cpp` (P2P sync, token authentication, and network security tests) against all library sources.
+
+You can also run the scripted end-to-end demo session:
 ```bash
 bash tests/demo.sh
 ```
@@ -278,6 +286,7 @@ Optional: set the commit author name with the `MINIGIT_AUTHOR` environment varia
 
 ```
 minigit/
+├── .gitattributes       Linguist & line-ending configuration
 ├── include/
 │   ├── Exceptions.h     exception hierarchy
 │   ├── Hash.h           Hash value class (operator overloading)
@@ -296,7 +305,10 @@ minigit/
 ├── src/                 implementations (.cpp) + main.cpp
 ├── templates/frontend.html   the web UI (edit this)
 ├── tools/embed_frontend.py   regenerates FrontendTemplate.h
-├── tests/demo.sh        end-to-end demo script
+├── tests/
+│   ├── demo.sh          end-to-end demo script
+│   ├── test_fixes.cpp   unit & regression tests
+│   └── test_p2p.cpp     P2P sync & security tests
 ├── Makefile
 ├── setup.bat / setup.sh one-command build + demo repo
 ├── architecture.md      architecture and flowcharts
