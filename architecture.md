@@ -21,54 +21,78 @@
 7. [Object Graph Evolution](#7-object-graph-evolution)
 8. [OOP & C++ Concept Map](#8-oop--c-concept-map)
 9. [Second Frontend: Visual Web Studio (`minigit html`)](#9-second-frontend-visual-web-studio-minigit-html)
+10. [More Diagrams](#10-more-diagrams)
 
 ---
 
 ## 1. Layered Overview
 
-Mini-Git is organized into three decoupled layers: **Frontend (CLI & HTML)**, **Backend Facade (`Repository`)**, and **Storage Subsystems (`.minigit/`)**.
+Mini-Git is organized into three decoupled layers: **Frontends (CLI and Web Studio)**, **Backend Facade (`Repository`)**, and **Storage Subsystems (`.minigit/`)**.
 
 ```mermaid
-flowchart TD
-    subgraph UI ["1. Frontends"]
-        CLI["CLI (main.cpp, CLI.h, Commands.h)"]
-        HTML["Web Studio (HtmlExporter, HTML GUI)"]
+flowchart TB
+    User(["Developer"])
+    Browser["Browser<br/>Web Studio page (frontend.html)"]
+    Terminal["Terminal"]
+
+    subgraph FE["Layer 1: Front ends"]
+        direction LR
+        subgraph CLIF["Command line"]
+            Main["main.cpp"] --> CLI["CLI<br/>command registry"] --> Cmds["12 Command classes<br/>Commands.cpp"]
+        end
+        subgraph WEB["Web Studio"]
+            Server["HttpServer<br/>raw sockets, REST routes"]
+            Exporter["HtmlExporter<br/>Snapshot to JSON / HTML"]
+            Tmpl["FrontendTemplate.h<br/>embedded UI"]
+            Pair["PairingManager<br/>codes, approval, tokens"]
+        end
     end
 
-    subgraph Core ["2. Backend Facade"]
-        Repo["Repository Facade (Repository.h)"]
-        ObjStore["ObjectStore (Objects & Blobs)"]
-        Idx["Index (Staging Area)"]
-        RefMgr["RefManager (HEAD & Branches)"]
-        DiffEng["DiffEngine&lt;T&gt; (LCS Diff)"]
-        Hasher["Hasher (SHA-1 Engine)"]
+    subgraph CORE["Layer 2: Facade"]
+        Repo["Repository<br/>all version-control logic<br/>(no printing)"]
     end
 
-    subgraph Disk ["3. Storage Subsystem (.minigit/)"]
-        Objects[".minigit/objects/ (blobs, trees, commits)"]
-        Refs[".minigit/refs/heads/ (branch pointers)"]
-        Head[".minigit/HEAD (current reference/hash)"]
-        IndexFile[".minigit/index (staging table)"]
+    subgraph SVC["Layer 3: Storage and services"]
+        direction LR
+        Store["ObjectStore"]
+        Idx["Index"]
+        Refs["RefManager"]
+        Hasher["Hasher (SHA-1)"]
+        Diff["DiffEngine T (LCS)"]
+        Json["JsonValue"]
+        B64["Base64"]
     end
 
-    CLI -->|Dispatches Command| Repo
-    HTML -->|Extracts Snapshot| Repo
-    Repo --> ObjStore
-    Repo --> Idx
-    Repo --> RefMgr
-    Repo -.-> DiffEng
-    Repo -.-> Hasher
-    ObjStore --> Objects
-    RefMgr --> Refs
-    RefMgr --> Head
-    Idx --> IndexFile
+    subgraph DISK[".minigit/ on disk"]
+        direction LR
+        O[("objects/")]
+        I[("index")]
+        H[("HEAD, refs/heads/")]
+        X[("MERGE_HEAD, stash,<br/>reflog, report.html")]
+    end
+
+    User --> Terminal --> Main
+    User --> Browser
+    Browser <-->|"HTTP JSON API<br/>poll every 2.5 s"| Server
+    Server --> Exporter --> Tmpl
+    Server --> Pair
+    Cmds --> Repo
+    Server --> Repo
+    Repo --> Store --> O
+    Repo --> Idx --> I
+    Repo --> Refs --> H
+    Repo --> X
+    Store --> Hasher
+    Repo --> Diff
+    Repo --> Json
+    Repo --> B64
 ```
 
 | Layer | Components | Responsibility |
 |---|---|---|
-| **Frontend** | `main.cpp`, `CLI`, `Command` hierarchy | Parses arguments, prints user output, catches exceptions, coordinates CLI / HTML report. |
+| **Frontend** | `main.cpp`, `CLI`, `Command` hierarchy; `HttpServer`, `HtmlExporter`, `PairingManager`, embedded web UI | Parses arguments or HTTP requests, prints output or returns JSON, catches exceptions. |
 | **Backend Facade** | `Repository` | Contains all business logic, never prints to `stdout`/`stderr`, owns storage abstractions. |
-| **Storage Subsystems** | `ObjectStore`, `Index`, `RefManager` | Reads and writes immutable objects, staging index, and branch references under `.minigit/`. |
+| **Storage Subsystems** | `ObjectStore`, `Index`, `RefManager` (plus helpers `Hasher`, `DiffEngine<T>`, `JsonValue`, `Base64`) | Reads and writes immutable objects, staging index, and branch references under `.minigit/`. |
 
 ---
 
@@ -76,56 +100,224 @@ flowchart TD
 
 ```mermaid
 classDiagram
-    class Object {
-        <<abstract>>
-        +type() string*
-        +serialize() string*
-        +hash() Hash
-        +deserialize(raw) Object$
-    }
-    class Blob {
-        +content() string
-    }
-    class Tree {
-        +entries() map~string, Hash~
-    }
-    class Commit {
-        +tree() Hash
-        +parent() Hash
-        +author() string
-        +time() time_t
-        +message() string
+    direction TB
+
+    class CLI {
+        -map~string, unique_ptr~Command~~ commands_
+        -registerCommand(unique_ptr~Command~ c)
+        +run(argc, argv) int
     }
     class Command {
         <<abstract>>
         +name() string*
         +usage() string*
-        +needsRepo() bool*
-        +execute(repo, args)*
+        +needsRepo() bool
+        +execute(Repository* repo, Args args)*
     }
+    class InitCmd
+    class AddCmd
+    class CommitCmd
+    class LogCmd
+    class StatusCmd
+    class DiffCmd
+    class BranchCmd
+    class CheckoutCmd
+    class MergeCmd
+    class HtmlCmd
+    class UiCmd
+    class ServeCmd
+
     class Repository {
-        +init()
+        <<Facade>>
+        -fs::path root_
+        -fs::path gitDir_
+        -ObjectStore store_
+        -Index index_
+        -RefManager refs_
+        +init(dir)$
+        +findRoot(start)$ fs::path
         +add(path)
-        +commit(msg)
+        +unstage(path)
+        +discard(path)
+        +commit(message) Hash
+        +revert(hash) Hash
+        +log() vector~Commit~
         +status() Status
         +diff(path) string
-        +branch(name)
-        +checkout(tgt)
-        +merge(tgt)
+        +commitStats(hash) CommitStat
         +snapshot() Snapshot
+        +createBranch(name)
+        +checkout(target)
+        +findMergeBase(h1, h2) Hash
+        +merge(branch) string
+        +mergeAbort() string
+        +undo() string
+        +stashSave(msg, untracked) string
+        +stashPop() string
+        +reflog() vector~ReflogEntry~
+        +exportBundleJson() string
+        +importBundleJson(json) string
+        +exportToGit() string
+        +importFromGit() string
+        -restoreCommit(hash)
+        -isAncestor(a, d) bool
+        -isDirty() bool
     }
 
-    Object <|-- Blob
-    Object <|-- Tree
-    Object <|-- Commit
+    class ObjectStore {
+        -fs::path dir_
+        +save(Object obj) Hash
+        +load(Hash h) unique_ptr~Object~
+        +loadAs~T~(Hash h) unique_ptr~T~
+        +exists(Hash h) bool
+        +resolvePrefix(prefix) Hash
+        +listAll() vector~Hash~
+    }
+    class Index {
+        -fs::path file_
+        -map~string, Hash~ entries_
+        +set(path, hash)
+        +remove(path)
+        +has(path) bool
+        +replace(entries)
+        +save()
+    }
+    class RefManager {
+        -fs::path gitDir_
+        +currentBranch() string
+        +headCommit() Hash
+        +updateHead(hash)
+        +createBranch(name, at)
+        +setBranch(name, at)
+        +switchToBranch(name)
+        +detach(hash)
+        +isValidBranchName(name)$ bool
+    }
+
+    class Object {
+        <<abstract>>
+        +type() string*
+        +serialize() string*
+        +raw() string
+        +hash() Hash
+        +deserialize(raw)$ unique_ptr~Object~
+    }
+    class Blob {
+        -string content_
+    }
+    class Tree {
+        -map~string, Hash~ entries_
+        +parse(body)$ Tree
+    }
+    class Commit {
+        -Hash tree_
+        -Hash parent_
+        -Hash parent2_
+        -string author_
+        -string message_
+        -time_t time_
+        +parse(body)$ Commit
+        +parent2() Hash
+    }
+
+    class Hash {
+        -string value_
+        +str() string
+        +shortStr(n) string
+        +operator==(Hash) bool
+        +operator<(Hash) bool
+    }
+    class Hasher {
+        +sha1(data)$ string
+    }
+    class DiffEngine~T~ {
+        +diff(vector~T~ a, vector~T~ b)$ vector~DiffOp~T~~
+    }
+
+    class HttpServer {
+        +run(repo, port, open, lan)$
+    }
+    class HtmlExporter {
+        +toJson(snap, name, isSyncBundle)$ string
+        +render(snap, name)$ string
+    }
+    class PairingManager {
+        -string currentCode_
+        -int failedAttempts_
+        -bool isLocked_
+        -map~string, PendingPairRequest~ pendingRequests_
+        -vector~PairedPeer~ pairedPeers_
+        +generateNewCode() string
+        +submitCode(code, ip, name) PairSubmitResult
+        +decideRequest(id, allow, label) bool
+        +isValidSessionToken(token) bool
+        +revokePeer(idOrToken) bool
+    }
+    class JsonValue {
+        -Type type_
+        -vector~JsonValue~ arrVal_
+        -map~string, JsonValue~ objVal_
+        +parse(text, err)$ JsonValue
+        +serialize() string
+        +operator[](key) JsonValue
+    }
+    class Base64 {
+        <<namespace>>
+        +encode(in) string
+        +decode(in, out, err) bool
+    }
+
+    class MiniGitException {
+        +category() const char*
+    }
+    class runtime_error {
+        <<std>>
+    }
+
+    CLI *-- "12" Command : owns
     Command <|-- InitCmd
     Command <|-- AddCmd
     Command <|-- CommitCmd
+    Command <|-- LogCmd
+    Command <|-- StatusCmd
+    Command <|-- DiffCmd
+    Command <|-- BranchCmd
+    Command <|-- CheckoutCmd
+    Command <|-- MergeCmd
     Command <|-- HtmlCmd
+    Command <|-- UiCmd
+    Command <|-- ServeCmd
+    Command ..> Repository : uses
+
     Repository *-- ObjectStore
     Repository *-- Index
     Repository *-- RefManager
+    Repository ..> DiffEngine~T~ : DiffEngine~string~
+    Repository ..> HtmlExporter
+    Repository ..> JsonValue
+    Repository ..> Base64
+
+    ObjectStore ..> Object : creates via deserialize
+    Object <|-- Blob
+    Object <|-- Tree
+    Object <|-- Commit
+    Object ..> Hasher : hash()
+    Tree --> Hash
+    Commit --> Hash
+    Index --> Hash
+
+    UiCmd ..> HttpServer
+    ServeCmd ..> UiCmd
+    HtmlCmd ..> HtmlExporter
+    HttpServer ..> Repository
+    HttpServer *-- PairingManager : local object in run()
+    HttpServer ..> HtmlExporter
+    HttpServer ..> JsonValue
+
+    runtime_error <|-- MiniGitException
 ```
+
+The exception classes are drawn separately in [docs/diagrams/exceptions.md](docs/diagrams/exceptions.md).
 
 ### Core Data & Object Models
 - **`Hash`**: Value type wrapping a 40-character hexadecimal SHA-1 digest. Overloads `==`, `!=`, `<`, and `<<`.
@@ -133,7 +325,7 @@ classDiagram
 - **`Object`** *(Abstract Base)*: Defines `type()`, `serialize()`, `hash()`, and factory `deserialize()`.
   - **`Blob`**: Stores raw uncompressed file contents.
   - **`Tree`**: Maps relative file paths to `Hash` identifiers (`map<string, Hash>`), representing snapshot directories.
-  - **`Commit`**: Encapsulates a root `Tree` hash, parent commit `Hash`, author string, timestamp, and log message.
+  - **`Commit`**: Encapsulates a root `Tree` hash, parent commit `Hash`, an optional second parent `parent2` (merge commits only), author string, timestamp, and log message.
 
 ### Engine Services
 - **`ObjectStore`**: Content-addressable object store located at `.minigit/objects/`. Implements template method `loadAs<T>()` and prefix resolver `resolvePrefix()` for short hashes.
@@ -143,7 +335,10 @@ classDiagram
 - **`Repository`**: Central facade pattern mediating all version control operations.
 - **`Status`**: Struct packaging lists of `staged`, `modified`, `deleted`, and `untracked` paths.
 - **`Snapshot`**: Complete read-only memory capture of repository state (objects, branches, working files, index).
-- **`HtmlExporter`**: Converts a `Snapshot` into JSON and injects it into the self-contained Liquid Glass web dashboard.
+- **`HtmlExporter`**: Converts a `Snapshot` into JSON (or a sync bundle with Base64 binaries) and injects it into the embedded web UI.
+- **`HttpServer`**: Socket-based local server for the Web Studio REST API; binds to 127.0.0.1, or 0.0.0.0 with `--lan`.
+- **`PairingManager`**: 6-digit pair codes, host approval, session tokens and revocation for LAN sync.
+- **`JsonValue`** / **`Base64`**: Hand-written JSON parser/serialiser and Base64 codec used by the API and sync bundles.
 
 ### Commands & Dispatcher
 - **`Command`** *(Abstract Base)*: Declares `name()`, `usage()`, `needsRepo()`, and `execute(repo, args)`.
@@ -156,11 +351,12 @@ classDiagram
 
 - **Inheritance**:
   - `Blob`, `Tree`, `Commit` $\rightarrow$ `Object`
-  - Concrete commands (`InitCmd`, `AddCmd`, `CommitCmd`, `LogCmd`, `StatusCmd`, `DiffCmd`, `BranchCmd`, `CheckoutCmd`, `MergeCmd`, `HtmlCmd`) $\rightarrow$ `Command`
-  - Custom exceptions (`NotARepoException`, `FileNotFoundException`, `BranchException`, `NothingToCommitException`, `CheckoutException`, `MergeException`) $\rightarrow$ `MiniGitException` $\rightarrow$ `std::runtime_error`
+  - Concrete commands (`InitCmd`, `AddCmd`, `CommitCmd`, `LogCmd`, `StatusCmd`, `DiffCmd`, `BranchCmd`, `CheckoutCmd`, `MergeCmd`, `HtmlCmd`, `UiCmd`, `ServeCmd`) $\rightarrow$ `Command`
+  - Custom exceptions (`NotARepoException`, `FileNotFoundException`, `InvalidObjectException`, `BranchException`, `NothingToCommitException`, `CheckoutException`, `MergeException`) $\rightarrow$ `MiniGitException` $\rightarrow$ `std::runtime_error`
 - **Composition**:
   - `Repository` owns `ObjectStore`, `Index`, `RefManager`
   - `CLI` owns `map<string, unique_ptr<Command>>`
+  - `HttpServer::run` owns a local `PairingManager`
 - **Association**:
   - `Tree` associates with `Hash` (blob identifiers)
   - `Commit` associates with `Hash` (tree & parent commit)
@@ -168,6 +364,8 @@ classDiagram
 - **Dependency**:
   - `Repository` $\rightarrow$ `DiffEngine<string>`, `Blob`, `Tree`, `Commit`, `Snapshot`
   - `HtmlCmd` $\rightarrow$ `HtmlExporter`, `Repository`, `Snapshot`
+  - `UiCmd` $\rightarrow$ `HttpServer` $\rightarrow$ `Repository`, `PairingManager`, `HtmlExporter`, `JsonValue`
+  - `Repository` $\rightarrow$ `JsonValue`, `Base64` (sync bundles)
   - `ObjectStore` $\rightarrow$ `Object` (instantiates through `Object::deserialize`)
 
 ---
@@ -178,6 +376,10 @@ classDiagram
 .minigit/
 ├── HEAD                 "ref: refs/heads/main"  (or raw hash when detached)
 ├── index                "<blobhash> <filepath>" (one line per staged entry)
+├── MERGE_HEAD           other branch's tip while a conflicted merge is unfinished
+├── stash                one line per stash: <commit> <index tree> <message>
+├── reflog               time|action|old|new|description, one line per HEAD move
+├── report.html          page written by `minigit html`
 ├── refs/
 │   └── heads/
 │       ├── main         latest 40-char commit hash on 'main'
@@ -185,7 +387,7 @@ classDiagram
 └── objects/
     ├── 7f59f3...        Blob:   "blob\n<raw file content>"
     ├── a91c02...        Tree:   "tree\n<blobhash> <filepath>\n..."
-    └── e1dfc6...        Commit: "commit\ntree <treehash>\nparent <parenthash>\nauthor ...\n\n<message>"
+    └── e1dfc6...        Commit: "commit\ntree <treehash>\nparent <parenthash>\n[parent2 <hash>]\nauthor ...\ntime ...\n\n<message>"
 ```
 
 > [!NOTE]
@@ -407,7 +609,7 @@ flowchart LR
 | Concept | Implementation in Mini-Git |
 |---|---|
 | **Encapsulation** | Strict private members with accessors in `Commit`, `Hash`, `Index`, `RefManager`, and `Repository`. |
-| **Inheritance** | Polymorphic hierarchies: `Object` (`Blob`, `Tree`, `Commit`), `Command` (10 concrete commands), and `MiniGitException`. |
+| **Inheritance** | Polymorphic hierarchies: `Object` (`Blob`, `Tree`, `Commit`), `Command` (12 concrete commands), and `MiniGitException`. |
 | **Polymorphism** | Dynamic dispatch via pure virtual methods (`execute()`, `serialize()`, `type()`, `category()`). |
 | **Abstract Classes** | `Object` and `Command` enforce interface contracts via pure virtual methods (`= 0`). |
 | **Templates** | Generic LCS algorithm `DiffEngine<T>` and type-safe object loading `ObjectStore::loadAs<T>()`. |
@@ -446,3 +648,20 @@ flowchart TD
 - **Live Snapshot**: The export writes directly inside `.minigit/report.html`, ensuring it never appears as an untracked file in the repository.
 - **Apple Liquid Glass Interface**: Styled with frosted glass layers (`backdrop-blur-28px`), tactile segmented pill switchers, and an atmospheric sky backdrop.
 - **Client-Side SHA-1 Verification**: File statuses are verified in the browser using the Web Crypto API, matching the C++ backend.
+
+---
+
+## 10. More Diagrams
+
+Each diagram below has its own page in [`docs/diagrams/`](docs/diagrams/README.md), with a PNG copy in `docs/diagrams/png/`.
+
+- [Architecture Diagram](docs/diagrams/architecture.md)
+- [Class Diagram (UML)](docs/diagrams/class-diagram.md)
+- [Exception Hierarchy](docs/diagrams/exceptions.md)
+- [Object Model](docs/diagrams/object-model.md)
+- [Sequence Diagram: Commit](docs/diagrams/sequence-commit.md)
+- [Activity Diagram: Merge](docs/diagrams/activity-merge.md)
+- [Sequence Diagram: LAN Pairing and Sync](docs/diagrams/sequence-pairing-sync.md)
+- [Deployment Diagram](docs/diagrams/deployment.md)
+- [Use-Case Diagram](docs/diagrams/use-case.md)
+- [State Diagrams](docs/diagrams/state-diagram.md)

@@ -315,6 +315,20 @@ minigit/
 └── README.md
 ```
 
+## Design and diagrams
+
+- [architecture.md](architecture.md): layers, classes, `.minigit/` layout, command flowcharts, OOP concept map
+- [Architecture Diagram](docs/diagrams/architecture.md)
+- [Class Diagram (UML)](docs/diagrams/class-diagram.md)
+- [Exception Hierarchy](docs/diagrams/exceptions.md)
+- [Object Model](docs/diagrams/object-model.md)
+- [Sequence Diagram: Commit](docs/diagrams/sequence-commit.md)
+- [Activity Diagram: Merge](docs/diagrams/activity-merge.md)
+- [Sequence Diagram: LAN Pairing and Sync](docs/diagrams/sequence-pairing-sync.md)
+- [Deployment Diagram](docs/diagrams/deployment.md)
+- [Use-Case Diagram](docs/diagrams/use-case.md)
+- [State Diagrams](docs/diagrams/state-diagram.md)
+
 ## How it works
 
 ```
