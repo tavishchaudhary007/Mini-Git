@@ -1017,7 +1017,9 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         let DEMO_STASH = null;
 
         // Visual Time Travel State
-        let TIME_TRAVEL_INDEX = 0;
+        let TIME_TRAVEL_INDEX = null;
+        let TIME_TRAVEL_SELECTED_HASH = null;
+        let TIME_TRAVEL_SELECTED_FILE = null;
         let TIME_TRAVEL_COMMITS = [];
         let TIME_TRAVEL_PLAY_TIMER = null;
 
@@ -1155,14 +1157,25 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             }
         }
 
+        function hasRepositorySnapshotChanged(prev, next) {
+            if (!prev || !next) return true;
+            if (prev === next) return false;
+            const { generated: _g1, ...p } = prev;
+            const { generated: _g2, ...n } = next;
+            return JSON.stringify(p) !== JSON.stringify(n);
+        }
+
         async function refreshRepositorySnapshot(silent = false) {
             if (!IS_SERVER_MODE) return;
             try {
                 const res = await fetch('/api/snapshot');
                 if (res.ok) {
                     const snap = await res.json();
+                    const changed = hasRepositorySnapshotChanged(window.MINIGIT_LIVE, snap);
                     window.MINIGIT_LIVE = snap;
-                    loadLiveRepo();
+                    if (changed || !silent) {
+                        loadLiveRepo();
+                    }
                     if (!silent) showToast("Repository synchronized");
                 }
             } catch (err) {
@@ -1773,7 +1786,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         /* ---------------------------------------------------------------------
          * TIME TRAVEL SLIDER ENGINE
          * --------------------------------------------------------------------- */
-        function initTimeTravelSlider() {
+        function initTimeTravelSlider(preserveSelection = false) {
             TIME_TRAVEL_COMMITS = getChronologicalCommits();
             const slider = document.getElementById('timeTravelSlider');
             if (!slider) return;
@@ -1782,24 +1795,49 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 slider.min = 0;
                 slider.max = 0;
                 slider.value = 0;
+                TIME_TRAVEL_INDEX = 0;
+                TIME_TRAVEL_SELECTED_HASH = null;
                 return;
             }
 
             slider.min = 0;
             slider.max = TIME_TRAVEL_COMMITS.length - 1;
-            TIME_TRAVEL_INDEX = TIME_TRAVEL_COMMITS.length - 1;
+
+            if (preserveSelection && TIME_TRAVEL_SELECTED_HASH) {
+                const foundIdx = TIME_TRAVEL_COMMITS.findIndex(c => c.hash === TIME_TRAVEL_SELECTED_HASH);
+                if (foundIdx !== -1) {
+                    TIME_TRAVEL_INDEX = foundIdx;
+                } else if (typeof TIME_TRAVEL_INDEX === 'number') {
+                    TIME_TRAVEL_INDEX = Math.max(0, Math.min(TIME_TRAVEL_COMMITS.length - 1, TIME_TRAVEL_INDEX));
+                } else {
+                    TIME_TRAVEL_INDEX = TIME_TRAVEL_COMMITS.length - 1;
+                }
+            } else if (preserveSelection && typeof TIME_TRAVEL_INDEX === 'number') {
+                TIME_TRAVEL_INDEX = Math.max(0, Math.min(TIME_TRAVEL_COMMITS.length - 1, TIME_TRAVEL_INDEX));
+            } else {
+                TIME_TRAVEL_INDEX = TIME_TRAVEL_COMMITS.length - 1;
+            }
+
+            if (TIME_TRAVEL_COMMITS[TIME_TRAVEL_INDEX]) {
+                TIME_TRAVEL_SELECTED_HASH = TIME_TRAVEL_COMMITS[TIME_TRAVEL_INDEX].hash;
+            }
+
             slider.value = TIME_TRAVEL_INDEX;
             renderTimeTravelSnapshot(TIME_TRAVEL_INDEX);
         }
 
         function onTimeTravelSliderInput(val) {
             TIME_TRAVEL_INDEX = parseInt(val, 10);
+            if (TIME_TRAVEL_COMMITS[TIME_TRAVEL_INDEX]) {
+                TIME_TRAVEL_SELECTED_HASH = TIME_TRAVEL_COMMITS[TIME_TRAVEL_INDEX].hash;
+            }
             renderTimeTravelSnapshot(TIME_TRAVEL_INDEX);
         }
 
         function renderTimeTravelSnapshot(idx) {
             if (!TIME_TRAVEL_COMMITS[idx]) return;
             const c = TIME_TRAVEL_COMMITS[idx];
+            TIME_TRAVEL_SELECTED_HASH = c.hash;
             
             const counter = document.getElementById('timeTravelStepCounter');
             if (counter) counter.textContent = `Commit ${idx + 1} of ${TIME_TRAVEL_COMMITS.length}`;
@@ -1825,20 +1863,23 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 const filePaths = Object.keys(treeData).sort();
                 if (countEl) countEl.textContent = `${filePaths.length} files`;
 
-                let selectedTtFile = filePaths[0] || null;
+                if (!TIME_TRAVEL_SELECTED_FILE || !filePaths.includes(TIME_TRAVEL_SELECTED_FILE)) {
+                    TIME_TRAVEL_SELECTED_FILE = filePaths[0] || null;
+                }
+
                 const updateTtSelection = (targetFp) => {
-                    selectedTtFile = targetFp;
+                    TIME_TRAVEL_SELECTED_FILE = targetFp;
                     const rows = listEl.querySelectorAll('[data-timetravel-file]');
                     rows.forEach(r => {
                         const fp = r.getAttribute('data-timetravel-file');
-                        const isSel = (fp === selectedTtFile);
+                        const isSel = (fp === TIME_TRAVEL_SELECTED_FILE);
                         r.className = `flex items-center justify-between py-1.5 px-3 rounded-lg text-theme-text cursor-pointer transition ${isSel ? 'bg-zinc-200 dark:bg-zinc-800 font-semibold shadow-xs' : 'hover:bg-zinc-100 dark:hover:bg-zinc-800'}`;
                     });
                 };
 
-                filePaths.forEach((fp, i) => {
+                filePaths.forEach((fp) => {
                     const row = document.createElement('div');
-                    const isSel = (i === 0);
+                    const isSel = (fp === TIME_TRAVEL_SELECTED_FILE);
                     row.setAttribute('data-timetravel-file', fp);
                     row.className = `flex items-center justify-between py-1.5 px-3 rounded-lg text-theme-text cursor-pointer transition ${isSel ? 'bg-zinc-200 dark:bg-zinc-800 font-semibold shadow-xs' : 'hover:bg-zinc-100 dark:hover:bg-zinc-800'}`;
                     row.onclick = () => {
@@ -1859,11 +1900,16 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                     row.appendChild(leftDiv);
                     row.appendChild(eye);
                     listEl.appendChild(row);
-
-                    if (i === 0) {
-                        previewTimeTravelFile(fp, treeData[fp]);
-                    }
                 });
+
+                if (TIME_TRAVEL_SELECTED_FILE && treeData[TIME_TRAVEL_SELECTED_FILE]) {
+                    previewTimeTravelFile(TIME_TRAVEL_SELECTED_FILE, treeData[TIME_TRAVEL_SELECTED_FILE]);
+                } else if (filePaths.length === 0) {
+                    const nameEl = document.getElementById('timeTravelPreviewFileName');
+                    const contentEl = document.getElementById('timeTravelFileContent');
+                    if (nameEl) nameEl.textContent = "No files";
+                    if (contentEl) contentEl.textContent = "This commit tree has no files.";
+                }
             }
         }
 
@@ -1883,9 +1929,13 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             if (!slider) return;
 
             if (dir === 'start') TIME_TRAVEL_INDEX = 0;
-            else if (dir === 'prev') TIME_TRAVEL_INDEX = Math.max(0, TIME_TRAVEL_INDEX - 1);
-            else if (dir === 'next') TIME_TRAVEL_INDEX = Math.min(TIME_TRAVEL_COMMITS.length - 1, TIME_TRAVEL_INDEX + 1);
+            else if (dir === 'prev') TIME_TRAVEL_INDEX = Math.max(0, (TIME_TRAVEL_INDEX !== null ? TIME_TRAVEL_INDEX : TIME_TRAVEL_COMMITS.length - 1) - 1);
+            else if (dir === 'next') TIME_TRAVEL_INDEX = Math.min(TIME_TRAVEL_COMMITS.length - 1, (TIME_TRAVEL_INDEX !== null ? TIME_TRAVEL_INDEX : 0) + 1);
             else if (dir === 'end') TIME_TRAVEL_INDEX = TIME_TRAVEL_COMMITS.length - 1;
+
+            if (TIME_TRAVEL_COMMITS[TIME_TRAVEL_INDEX]) {
+                TIME_TRAVEL_SELECTED_HASH = TIME_TRAVEL_COMMITS[TIME_TRAVEL_INDEX].hash;
+            }
 
             slider.value = TIME_TRAVEL_INDEX;
             renderTimeTravelSnapshot(TIME_TRAVEL_INDEX);
@@ -1906,7 +1956,10 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                     if (TIME_TRAVEL_INDEX >= TIME_TRAVEL_COMMITS.length - 1) {
                         TIME_TRAVEL_INDEX = 0;
                     } else {
-                        TIME_TRAVEL_INDEX++;
+                        TIME_TRAVEL_INDEX = (TIME_TRAVEL_INDEX !== null ? TIME_TRAVEL_INDEX : 0) + 1;
+                    }
+                    if (TIME_TRAVEL_COMMITS[TIME_TRAVEL_INDEX]) {
+                        TIME_TRAVEL_SELECTED_HASH = TIME_TRAVEL_COMMITS[TIME_TRAVEL_INDEX].hash;
                     }
                     const slider = document.getElementById('timeTravelSlider');
                     if (slider) slider.value = TIME_TRAVEL_INDEX;
@@ -2944,7 +2997,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             renderCommitDagGraph();
             populateDiffFileSelect();
             renderDiffView();
-            initTimeTravelSlider();
+            initTimeTravelSlider(true);
         }
 
         function renderFileTree() {
@@ -3437,7 +3490,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             } else if (view === 'timeline') {
                 timelineView?.classList.remove('hidden');
                 if (tabTimeline) tabTimeline.className = activeClass;
-                initTimeTravelSlider();
+                initTimeTravelSlider(true);
             } else if (view === 'diff') {
                 diffView?.classList.remove('hidden');
                 if (tabDiff) tabDiff.className = activeClass;
@@ -3500,9 +3553,12 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                             const res = await fetch('/api/snapshot');
                             if (res.ok) {
                                 const live = await res.json();
-                                if (live && JSON.stringify(live) !== JSON.stringify(window.MINIGIT_LIVE)) {
+                                if (live) {
+                                    const changed = hasRepositorySnapshotChanged(window.MINIGIT_LIVE, live);
                                     window.MINIGIT_LIVE = live;
-                                    loadLiveRepo();
+                                    if (changed) {
+                                        loadLiveRepo();
+                                    }
                                 }
                             }
                         } catch (e) {}
