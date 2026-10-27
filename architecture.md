@@ -17,10 +17,10 @@
    - [status](#64-flowchart-minigit-status)
    - [diff](#65-flowchart-minigit-diff-file)
    - [branch & checkout](#66-flowchart-minigit-branch--checkout)
-   - [merge](#67-flowchart-minigit-merge-branch)
+   - [merge](#67-flowchart-minigit-merge-branch--minigit-merge---abort)
 7. [Object Graph Evolution](#7-object-graph-evolution)
 8. [OOP & C++ Concept Map](#8-oop--c-concept-map)
-9. [Second Frontend: Visual Web Studio (`minigit html`)](#9-second-frontend-visual-web-studio-minigit-html)
+9. [Second Frontend: Web Studio (`minigit html`, `minigit ui`)](#9-second-frontend-web-studio-minigit-html-minigit-ui)
 10. [More Diagrams](#10-more-diagrams)
 
 ---
@@ -467,26 +467,29 @@ flowchart TD
 ```mermaid
 flowchart TD
     A["minigit commit -m 'msg'"] --> B{"Message empty?"}
-    B -- Yes --> ErrMsg["Usage Error"]
+    B -- Yes --> ErrMsg["Throw MiniGitException (commit message must not be empty)"]
     B -- No --> C{"Index empty?"}
-    C -- Yes --> ErrEmpty["Throw NothingToCommitException"]
+    C -- Yes --> ErrEmpty["Throw NothingToCommitException (staging area is empty)"]
     C -- No --> D["Build Tree object from index entries"]
-    D --> E{"HEAD has parent commit?"}
-
-    E -- Yes --> F{"parent.tree == new tree hash?"}
-    F -- Yes --> ErrNoChange["Throw NothingToCommitException (no staged changes)"]
+    D --> P["parent = refs.headCommit()"]
+    P --> MH{".minigit/MERGE_HEAD exists?"}
+    MH -- Yes --> P2["parent2 = hash in MERGE_HEAD"]
+    MH -- No --> P0["parent2 = empty"]
+    P2 --> G
+    P0 --> F{"parent exists AND parent.tree == new tree?"}
+    F -- Yes --> ErrNoChange["Throw NothingToCommitException (no changes staged)"]
     F -- No --> G["store.save(tree)"]
-    E -- No --> G
-
-    G --> H["Create Commit(tree, parent, author, timestamp, message)"]
-    H --> I["store.save(commit)"]
-    I --> J["refs.updateHead(commitHash)"]
-    J --> K{"On branch or detached?"}
-    K -- On Branch --> L["Write refs/heads/&lt;branch&gt; = commitHash"]
-    K -- Detached --> M["Write HEAD = commitHash"]
-    L --> Out["Print [branch shorthash] msg"]
-    M --> Out
+    G --> H["store.save(Commit(tree, parent, author, time, message, parent2))"]
+    H --> J["refs.updateHead(commitHash)<br/>on a branch: refs/heads/branch = hash<br/>detached: HEAD = hash"]
+    J --> K{"parent2 set?"}
+    K -- Yes --> M1["Delete MERGE_HEAD<br/>recordReflog('merge')"]
+    K -- No --> M2["recordReflog('commit')"]
+    M1 --> Out["Print [branch shorthash] msg"]
+    M2 --> Out
 ```
+
+- A commit made while `MERGE_HEAD` exists finishes a conflicted merge: it gets two parents even if the tree equals the parent's tree.
+- The author comes from `MINIGIT_AUTHOR`, then `USER` / `USERNAME`, else `unknown`.
 
 ---
 
@@ -557,23 +560,51 @@ flowchart TD
 
 ---
 
-### 6.7 Flowchart: `minigit merge <branch>`
+### 6.7 Flowchart: `minigit merge <branch>` / `minigit merge --abort`
 
 ```mermaid
 flowchart TD
-    A["minigit merge &lt;branch&gt;"] --> B{"HEAD detached?"}
+    A["minigit merge branch"] --> B{"HEAD detached?"}
     B -- Yes --> E1["Throw MergeException"]
-    B -- No --> C{"Branch exists?"}
+    B -- No --> MH{"MERGE_HEAD exists?"}
+    MH -- Yes --> E0["Throw MergeException (merge already in progress)"]
+    MH -- No --> C{"Branch exists?"}
     C -- No --> E2["Throw BranchException"]
     C -- Yes --> D{"Working copy dirty?"}
-    D -- Yes --> E3["Throw MergeException"]
-    D -- No --> F["cur = current tip, tgt = target branch tip"]
+    D -- Yes --> E3["Throw MergeException (uncommitted changes)"]
+    D -- No --> F["cur = current tip, tgt = branch tip<br/>(either empty: MergeException)"]
     F --> G{"cur == tgt OR tgt is ancestor of cur?"}
-    G -- Yes --> H["Print 'Already up to date.'"]
+    G -- Yes --> H["'Already up to date.'"]
     G -- No --> I{"cur is ancestor of tgt?"}
-    I -- Yes --> J["Fast-Forward: restoreCommit(tgt), move current branch pointer to tgt"]
-    I -- No --> K["Throw MergeException ('branches have diverged; only fast-forward supported')"]
+    I -- Yes --> J["Untracked-overwrite check<br/>restoreCommit(tgt), updateHead(tgt)<br/>reflog 'merge'<br/>'Fast-forward to abc1234'"]
+    I -- No --> K["base = findMergeBase(cur, tgt)"]
+    K --> L["For each path in base, ours, theirs:<br/>B, O, T = blob hashes"]
+    L --> R{"Decide per file"}
+    R -- "O == T" --> K1["keep"]
+    R -- "O == B" --> K2["take theirs (or delete)"]
+    R -- "T == B" --> K3["keep ours"]
+    R -- "all differ" --> K4["conflict"]
+    K1 & K2 & K3 & K4 --> Q{"Any conflicts?"}
+    Q -- No --> M["Write files, update index,<br/>save Tree + Commit(parent=cur, parent2=tgt),<br/>updateHead, reflog 'merge'<br/>'Merged branch (3-way)'"]
+    Q -- Yes --> X["Apply clean changes<br/>text: write conflict markers<br/>binary: keep ours<br/>write MERGE_HEAD = tgt"]
+    X --> XE["Throw MergeException<br/>(Automatic merge failed ... Conflicted files: ...)<br/>Web Studio replies 409"]
+    XE --> U{"User"}
+    U -- "edit, add, commit" --> UC["commit() uses MERGE_HEAD as parent2"]
+    U -- "merge --abort" --> UA["Delete MERGE_HEAD<br/>restoreCommit(HEAD)<br/>'Merge aborted.'"]
 ```
+
+Conflict markers in a text file:
+
+```text
+<<<<<<< ours
+our version
+=======
+their version
+>>>>>>> feature
+```
+
+- The merge base is found with a breadth-first search over `parent` and `parent2` links.
+- `merge --abort` fails with `no merge in progress to abort` when there is no `MERGE_HEAD`.
 
 ---
 
@@ -621,33 +652,61 @@ flowchart LR
 
 ---
 
-## 9. Second Frontend: Visual Web Studio (`minigit html`)
+## 9. Second Frontend: Web Studio (`minigit html`, `minigit ui`)
 
-Mini-Git provides two frontends sharing the same backend:
+Both commands use the same embedded page (`templates/frontend.html`, compiled into `include/FrontendTemplate.h`) and the same backend.
 
 ```mermaid
 flowchart TD
-    User["User runs: minigit html [--no-open]"] --> CLI["CLI -> HtmlCmd::execute()"]
-    CLI --> Snap["Repository::snapshot()"]
-    Snap --> Exporter["HtmlExporter::toJson(snapshot)"]
-    Exporter --> Template["Inject into embedded HTML (FrontendTemplate.h)"]
-    Template --> WriteFile["Write .minigit/report.html"]
-    WriteFile --> Browser["Launch default OS browser (Windows: start, Mac: open, Linux: xdg-open)"]
-
-    subgraph Dashboard ["Liquid Glass Web Dashboard"]
-        VFS["In-memory Virtual Filesystem"]
-        TreeViewer["Interactive Working Directory Explorer"]
-        DiffViewer["Side-by-Side Unified Diff Visualizer"]
-        DAGViewer["Interactive Commit Graph (DAG)"]
-        Console["In-Browser CLI Console"]
+    subgraph Static ["minigit html [--no-open]"]
+        H1["HtmlCmd::execute()"] --> H2["Repository::snapshot()"]
+        H2 --> H3["HtmlExporter::render(): snapshot JSON injected into page"]
+        H3 --> H4["Write .minigit/report.html, open browser"]
     end
 
-    Browser --> Dashboard
+    subgraph Live ["minigit ui / serve [--port N] [--no-open] [--lan]"]
+        U1["UiCmd::execute()"] --> U2["HttpServer::run(repo, port, open, lan)"]
+        U2 --> U3["Bind 127.0.0.1 (0.0.0.0 with --lan)<br/>try port .. port+29"]
+        U3 --> U4["Accept loop: parse request, route"]
+        U4 --> U5["GET / : rendered page"]
+        U4 --> U6["/api/* : call Repository,<br/>reply with JSON + fresh snapshot"]
+        U4 --> U7["/api/pair* : PairingManager"]
+        U4 --> U8["/api/sync/* : exportBundleJson / importBundleJson"]
+        U4 --> U9["/api/git/* : exportToGit / importFromGit"]
+    end
+
+    subgraph Browser ["Browser page"]
+        B1["Files, editor, staging, commit"]
+        B2["Branches, merge, revert, undo"]
+        B3["Stash, reflog, time travel"]
+        B4["Commit graph, health banner"]
+        B5["Pair panel, pull / push, Git Bridge"]
+    end
+
+    H4 --> Browser
+    U5 --> Browser
+    Browser -->|"fetch, poll /api/snapshot every 2.5 s"| U6
 ```
 
-- **Live Snapshot**: The export writes directly inside `.minigit/report.html`, ensuring it never appears as an untracked file in the repository.
-- **Apple Liquid Glass Interface**: Styled with frosted glass layers (`backdrop-blur-28px`), tactile segmented pill switchers, and an atmospheric sky backdrop.
-- **Client-Side SHA-1 Verification**: File statuses are verified in the browser using the Web Crypto API, matching the C++ backend.
+**REST API (`HttpServer.cpp`)**
+
+| Area | Endpoints |
+|---|---|
+| Page and state | `GET /`, `GET /api/snapshot` |
+| Working tree | `POST /api/file/write`, `/api/stage`, `/api/unstage`, `/api/discard`, `/api/commit` |
+| Branches and history | `POST /api/branch/create`, `/api/branch/delete`, `/api/checkout`, `/api/merge`, `/api/revert`, `/api/undo` |
+| Stash and reflog | `POST /api/stash/save`, `/api/stash/pop`, `GET /api/stash/list`, `GET /api/reflog`, `POST /api/reflog/restore` |
+| Pairing | `GET /api/token`, `GET /api/pair/code`, `POST /api/pair/generate-code`, `POST /api/pair`, `GET /api/pair/status`, `GET /api/pair/pending`, `POST /api/pair/decide`, `GET /api/pair/peers`, `POST /api/pair/revoke` |
+| Sync | `GET /api/sync/bundle`, `POST /api/sync/import-bundle` |
+| Git Bridge | `GET /api/git/status`, `POST /api/git/export`, `POST /api/git/import` |
+
+- **Static vs live:** `report.html` is a read-only snapshot taken when the command ran; it lives inside `.minigit/` so it is never untracked. `minigit ui` is live and every action goes through `Repository`.
+- **Refresh:** the page polls `/api/snapshot` every 2.5 s; the host's pending pair requests are polled every 1.5 s.
+- **Commit graph:** a single column of commits sorted by time, with branch labels. It does not draw parent edges or one lane per branch.
+- **Network access:** loopback clients can use every endpoint. Non-loopback clients (only possible with `--lan`) can reach only `/api/pair`, `/api/pair/status`, `/api/sync/bundle` and `/api/sync/import-bundle` (anything else returns 403); the sync endpoints also need a valid `X-MiniGit-Token` (401 otherwise).
+- **Pairing:** 6-digit code, valid 300 s, single use, locked after 5 wrong attempts; host approval issues a 64-hex session token; peers can be revoked.
+- **Hashing:** real repositories are always hashed by the C++ SHA-1 `Hasher`. Only the offline demo mode (opening `templates/frontend.html` directly) simulates a repository in the browser, using SHA-256 from the Web Crypto API.
+- **Styling** loads from CDNs (Tailwind, Font Awesome, Google Fonts).
 
 ---
 
