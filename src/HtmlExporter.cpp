@@ -103,7 +103,34 @@ std::string HtmlExporter::toJson(const Snapshot& snap, const std::string& repoNa
         first = false;
         jsonString(o, path);
     }
-    o << "]}";
+    o << "]";
+
+    if (!isSyncBundle) {
+        o << ",\"status\":{";
+        o << "\"staged\":[";
+        bool fst = true;
+        for (const auto& f : snap.status.staged) {
+            if (!fst) o << ','; fst = false; jsonString(o, f);
+        }
+        o << "],\"modified\":[";
+        fst = true;
+        for (const auto& f : snap.status.modified) {
+            if (!fst) o << ','; fst = false; jsonString(o, f);
+        }
+        o << "],\"deleted\":[";
+        fst = true;
+        for (const auto& f : snap.status.deleted) {
+            if (!fst) o << ','; fst = false; jsonString(o, f);
+        }
+        o << "],\"untracked\":[";
+        fst = true;
+        for (const auto& f : snap.status.untracked) {
+            if (!fst) o << ','; fst = false; jsonString(o, f);
+        }
+        o << "]}";
+    }
+
+    o << "}";
     return o.str();
 }
 

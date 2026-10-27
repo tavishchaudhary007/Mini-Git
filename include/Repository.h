@@ -39,6 +39,7 @@ struct Snapshot {
     std::map<std::string, std::string> files;       // working directory (text files)
     std::map<std::string, Hash> staged;             // index entries that differ from HEAD
     std::vector<std::string> stagedDeleted;         // in HEAD but removed from the index
+    Status status;                                  // live status (staged, modified, deleted, untracked)
 };
 
 // Backend facade. Composes ObjectStore + Index + RefManager; contains no I/O to cout/cin.
@@ -49,7 +50,6 @@ class Repository {
     RefManager refs_;
 
     std::string relPath(const fs::path& p) const;
-    std::string resolveRepoPath(const std::string& p, bool isRepoRelative) const;
     bool isIgnored(const fs::path& fullPath, const std::string& relPath, bool isDir) const;
     void checkUntrackedOverwrite(const std::map<std::string, Hash>& targetTree) const;
     std::vector<std::string> workingFiles() const;
@@ -66,6 +66,7 @@ public:
     static void init(const fs::path& dir);
     static fs::path findRoot(fs::path start);
     const fs::path& root() const { return root_; }
+    std::string resolveRepoPath(const std::string& p, bool isRepoRelative = false) const;
 
     void add(const std::string& path, bool isRepoRelative = false);
     void unstage(const std::string& path, bool isRepoRelative = false);

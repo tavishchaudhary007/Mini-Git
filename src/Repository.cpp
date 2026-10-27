@@ -458,6 +458,7 @@ Snapshot Repository::snapshot() const {
     }
     for (const auto& [path, h] : head)
         if (!index_.has(path)) s.stagedDeleted.push_back(path);
+    s.status = status();
     return s;
 }
 

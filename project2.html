@@ -238,7 +238,10 @@
             <div id="tabFilesPanel" class="flex-1 flex flex-col overflow-y-auto p-4 space-y-2">
                 <div class="flex items-center justify-between text-[11px] text-theme-muted uppercase font-semibold tracking-wider">
                     <span>Repository Files</span>
-                    <button onclick="refreshRepositorySnapshot()" class="text-theme-muted hover:text-theme-text"><i class="fa-solid fa-rotate text-xs"></i></button>
+                    <div class="flex items-center space-x-2">
+                        <button onclick="createNewFilePrompt()" title="New File" class="text-theme-muted hover:text-theme-text cursor-pointer"><i class="fa-solid fa-plus text-xs"></i></button>
+                        <button onclick="refreshRepositorySnapshot()" title="Refresh" class="text-theme-muted hover:text-theme-text cursor-pointer"><i class="fa-solid fa-rotate text-xs"></i></button>
+                    </div>
                 </div>
                 <!-- File Tree List -->
                 <div id="fileTreeContainer" class="space-y-1 font-mono text-xs">
@@ -1253,8 +1256,33 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             const area = document.getElementById('codeEditorArea');
             if (!area || !ACTIVE_FILE) return;
             VFS[ACTIVE_FILE] = area.value;
+            if (IS_SERVER_MODE) {
+                const res = await apiPost('file/save', { path: ACTIVE_FILE, content: area.value });
+                if (res && res.ok) {
+                    showToast(`Saved '${ACTIVE_FILE}'`);
+                }
+                return;
+            }
             showToast(`Saved '${ACTIVE_FILE}'`);
             updateUI();
+        }
+
+        async function createNewFilePrompt() {
+            const path = prompt("Enter new file path (e.g. notes.txt or src/app.js):");
+            if (!path || !path.trim()) return;
+            const cleanPath = path.trim();
+            if (IS_SERVER_MODE) {
+                const res = await apiPost('file/save', { path: cleanPath, content: '' });
+                if (res && res.ok) {
+                    showToast(`Created '${cleanPath}'`);
+                    openFileInEditor(cleanPath);
+                }
+            } else {
+                VFS[cleanPath] = '';
+                showToast(`Created '${cleanPath}'`);
+                openFileInEditor(cleanPath);
+                updateUI();
+            }
         }
 
         /* ---------------------------------------------------------------------
@@ -2761,63 +2789,55 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             let stagedCount = 0;
             let unstagedCount = 0;
 
-            let headTreeBlobs = {};
-            const headCommitHash = BRANCHES[CURRENT_BRANCH];
-            if (headCommitHash && OBJECTS[headCommitHash]) {
-                const treeHash = OBJECTS[headCommitHash].data.tree;
-                headTreeBlobs = OBJECTS[treeHash]?.data || {};
-            }
+            if (IS_SERVER_MODE && window.MINIGIT_LIVE && window.MINIGIT_LIVE.status) {
+                const liveStatus = window.MINIGIT_LIVE.status;
+                const staged = liveStatus.staged || [];
+                const modified = liveStatus.modified || [];
+                const untracked = liveStatus.untracked || [];
+                const deleted = liveStatus.deleted || [];
 
-            // Staged Files
-            for (const [filepath, blobHash] of Object.entries(STAGING_INDEX)) {
-                stagedCount++;
-                if (stagedList) {
-                    const item = document.createElement('div');
-                    item.className = "flex items-center justify-between p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-theme-border rounded-2xl text-xs";
+                // Render Staged Files
+                for (const filepath of staged) {
+                    stagedCount++;
+                    if (stagedList) {
+                        const item = document.createElement('div');
+                        item.className = "flex items-center justify-between p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-theme-border rounded-2xl text-xs";
 
-                    const leftDiv = document.createElement('div');
-                    leftDiv.className = "flex items-center space-x-2 truncate cursor-pointer";
-                    leftDiv.onclick = () => openFileInEditor(filepath);
+                        const leftDiv = document.createElement('div');
+                        leftDiv.className = "flex items-center space-x-2 truncate cursor-pointer";
+                        const rawPath = filepath.replace(" (deleted)", "");
+                        leftDiv.onclick = () => openFileInEditor(rawPath);
 
-                    const tag = document.createElement('span');
-                    tag.className = "text-xs text-emerald-500 font-bold";
-                    tag.textContent = "A";
+                        const tag = document.createElement('span');
+                        tag.className = "text-xs text-emerald-500 font-bold";
+                        tag.textContent = filepath.includes("(deleted)") ? "D" : "A";
 
-                    const pathSpan = document.createElement('span');
-                    pathSpan.className = "truncate text-theme-text font-mono";
-                    pathSpan.textContent = filepath;
+                        const pathSpan = document.createElement('span');
+                        pathSpan.className = "truncate text-theme-text font-mono";
+                        pathSpan.textContent = filepath;
 
-                    leftDiv.appendChild(tag);
-                    leftDiv.appendChild(pathSpan);
+                        leftDiv.appendChild(tag);
+                        leftDiv.appendChild(pathSpan);
 
-                    const unstageBtn = document.createElement('button');
-                    unstageBtn.className = "w-6 h-6 rounded-full bg-theme-card border border-theme-border text-theme-muted hover:text-theme-text flex items-center justify-center transition shadow-xs";
-                    unstageBtn.title = "Unstage";
-                    unstageBtn.innerHTML = '<i class="fa-solid fa-minus text-[10px]"></i>';
-                    unstageBtn.onclick = () => unstageFile(filepath);
+                        const unstageBtn = document.createElement('button');
+                        unstageBtn.className = "w-6 h-6 rounded-full bg-theme-card border border-theme-border text-theme-muted hover:text-theme-text flex items-center justify-center transition shadow-xs";
+                        unstageBtn.title = "Unstage";
+                        unstageBtn.innerHTML = '<i class="fa-solid fa-minus text-[10px]"></i>';
+                        unstageBtn.onclick = () => unstageFile(rawPath);
 
-                    item.appendChild(leftDiv);
-                    item.appendChild(unstageBtn);
-                    stagedList.appendChild(item);
-                }
-            }
-
-            // Unstaged / Modified Files
-            for (const [filepath, content] of Object.entries(VFS)) {
-                const currentHash = await sha256(content);
-                const headHash = headTreeBlobs[filepath];
-                const stagedHash = STAGING_INDEX[filepath];
-
-                let status = null;
-                if (!headHash && !stagedHash) {
-                    status = 'U';
-                } else if (stagedHash && currentHash !== stagedHash) {
-                    status = 'M';
-                } else if (!stagedHash && headHash && currentHash !== headHash) {
-                    status = 'M';
+                        item.appendChild(leftDiv);
+                        item.appendChild(unstageBtn);
+                        stagedList.appendChild(item);
+                    }
                 }
 
-                if (status) {
+                // Render Unstaged Files: Modified, Untracked, Deleted
+                const unstagedItems = [];
+                for (const f of modified) unstagedItems.push({ filepath: f, status: 'M' });
+                for (const f of untracked) unstagedItems.push({ filepath: f, status: 'U' });
+                for (const f of deleted) unstagedItems.push({ filepath: f, status: 'D' });
+
+                for (const { filepath, status } of unstagedItems) {
                     unstagedCount++;
                     if (unstagedList) {
                         const item = document.createElement('div');
@@ -2828,7 +2848,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                         leftDiv.onclick = () => openFileInEditor(filepath);
 
                         const tag = document.createElement('span');
-                        tag.className = `text-xs ${status === 'U' ? 'text-theme-muted' : 'text-theme-text'} font-bold`;
+                        tag.className = `text-xs ${status === 'U' ? 'text-theme-muted' : (status === 'D' ? 'text-rose-500' : 'text-amber-500')} font-bold`;
                         tag.textContent = status;
 
                         const pathSpan = document.createElement('span');
@@ -2858,6 +2878,107 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                         item.appendChild(leftDiv);
                         item.appendChild(rightDiv);
                         unstagedList.appendChild(item);
+                    }
+                }
+            } else {
+                let headTreeBlobs = {};
+                const headCommitHash = BRANCHES[CURRENT_BRANCH];
+                if (headCommitHash && OBJECTS[headCommitHash]) {
+                    const treeHash = OBJECTS[headCommitHash].data.tree;
+                    headTreeBlobs = OBJECTS[treeHash]?.data || {};
+                }
+
+                // Staged Files
+                for (const [filepath, blobHash] of Object.entries(STAGING_INDEX)) {
+                    stagedCount++;
+                    if (stagedList) {
+                        const item = document.createElement('div');
+                        item.className = "flex items-center justify-between p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-theme-border rounded-2xl text-xs";
+
+                        const leftDiv = document.createElement('div');
+                        leftDiv.className = "flex items-center space-x-2 truncate cursor-pointer";
+                        leftDiv.onclick = () => openFileInEditor(filepath);
+
+                        const tag = document.createElement('span');
+                        tag.className = "text-xs text-emerald-500 font-bold";
+                        tag.textContent = "A";
+
+                        const pathSpan = document.createElement('span');
+                        pathSpan.className = "truncate text-theme-text font-mono";
+                        pathSpan.textContent = filepath;
+
+                        leftDiv.appendChild(tag);
+                        leftDiv.appendChild(pathSpan);
+
+                        const unstageBtn = document.createElement('button');
+                        unstageBtn.className = "w-6 h-6 rounded-full bg-theme-card border border-theme-border text-theme-muted hover:text-theme-text flex items-center justify-center transition shadow-xs";
+                        unstageBtn.title = "Unstage";
+                        unstageBtn.innerHTML = '<i class="fa-solid fa-minus text-[10px]"></i>';
+                        unstageBtn.onclick = () => unstageFile(filepath);
+
+                        item.appendChild(leftDiv);
+                        item.appendChild(unstageBtn);
+                        stagedList.appendChild(item);
+                    }
+                }
+
+                // Unstaged / Modified Files
+                for (const [filepath, content] of Object.entries(VFS)) {
+                    const currentHash = await sha256(content);
+                    const headHash = headTreeBlobs[filepath];
+                    const stagedHash = STAGING_INDEX[filepath];
+
+                    let status = null;
+                    if (!headHash && !stagedHash) {
+                        status = 'U';
+                    } else if (stagedHash && currentHash !== stagedHash) {
+                        status = 'M';
+                    } else if (!stagedHash && headHash && currentHash !== headHash) {
+                        status = 'M';
+                    }
+
+                    if (status) {
+                        unstagedCount++;
+                        if (unstagedList) {
+                            const item = document.createElement('div');
+                            item.className = "flex items-center justify-between p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-theme-border rounded-2xl text-xs";
+
+                            const leftDiv = document.createElement('div');
+                            leftDiv.className = "flex items-center space-x-2 truncate cursor-pointer";
+                            leftDiv.onclick = () => openFileInEditor(filepath);
+
+                            const tag = document.createElement('span');
+                            tag.className = `text-xs ${status === 'U' ? 'text-theme-muted' : 'text-theme-text'} font-bold`;
+                            tag.textContent = status;
+
+                            const pathSpan = document.createElement('span');
+                            pathSpan.className = "truncate text-theme-text font-mono";
+                            pathSpan.textContent = filepath;
+
+                            leftDiv.appendChild(tag);
+                            leftDiv.appendChild(pathSpan);
+
+                            const rightDiv = document.createElement('div');
+                            rightDiv.className = "flex items-center space-x-1.5";
+
+                            const discardBtn = document.createElement('button');
+                            discardBtn.className = "w-6 h-6 rounded-full bg-theme-card border border-theme-border text-theme-muted hover:text-rose-500 flex items-center justify-center transition shadow-xs";
+                            discardBtn.title = (status === 'U') ? "Delete untracked file permanently" : "Discard changes";
+                            discardBtn.innerHTML = '<i class="fa-solid fa-rotate-left text-[10px]"></i>';
+                            discardBtn.onclick = () => discardFile(filepath, status === 'U');
+
+                            const stageBtn = document.createElement('button');
+                            stageBtn.className = "w-6 h-6 rounded-full bg-black dark:bg-white text-white dark:text-black hover:bg-zinc-800 dark:hover:bg-zinc-200 flex items-center justify-center transition shadow-xs font-semibold";
+                            stageBtn.title = "Stage file";
+                            stageBtn.innerHTML = '<i class="fa-solid fa-plus text-[10px]"></i>';
+                            stageBtn.onclick = () => stageFile(filepath);
+
+                            rightDiv.appendChild(discardBtn);
+                            rightDiv.appendChild(stageBtn);
+                            item.appendChild(leftDiv);
+                            item.appendChild(rightDiv);
+                            unstagedList.appendChild(item);
+                        }
                     }
                 }
             }
@@ -3125,6 +3246,16 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         /* ---------------------------------------------------------------------
          * WINDOW LOAD BOOTSTRAP
          * --------------------------------------------------------------------- */
+        window.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+                const editorView = document.getElementById('viewContainerEditor');
+                if (editorView && !editorView.classList.contains('hidden')) {
+                    e.preventDefault();
+                    saveActiveFileFromEditor();
+                }
+            }
+        });
+
         window.onload = async function() {
             initTheme();
 
