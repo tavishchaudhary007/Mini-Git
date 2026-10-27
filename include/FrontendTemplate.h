@@ -593,7 +593,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                 <div class="h-12 border-b border-theme-border flex items-center justify-between px-6 text-xs font-mono bg-theme-card text-theme-muted">
                     <div class="flex items-center space-x-2">
                         <span>File:</span>
-                        <select id="diffFileSelect" onchange="renderDiffView()" class="bg-zinc-100 dark:bg-zinc-900 border border-theme-border text-theme-text px-3 py-1 rounded-full focus:outline-none cursor-pointer">
+                        <select id="diffFileSelect" onchange="ACTIVE_FILE = this.value; renderFileTree(); renderDiffView();" class="bg-zinc-100 dark:bg-zinc-900 border border-theme-border text-theme-text px-3 py-1 rounded-full focus:outline-none cursor-pointer">
                             <!-- Populated dynamically -->
                         </select>
                     </div>
@@ -1217,7 +1217,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 BRANCHES["main"] = null;
             }
             CURRENT_BRANCH = live.currentBranch || Object.keys(BRANCHES)[0] || "main";
-            if (!VFS[ACTIVE_FILE]) {
+            if (!ACTIVE_FILE || !(ACTIVE_FILE in VFS)) {
                 ACTIVE_FILE = Object.keys(VFS)[0] || "index.html";
             }
             const repoDisp = document.getElementById('repoNameDisplay');
@@ -1231,6 +1231,9 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         function openFileInEditor(filepath) {
             ACTIVE_FILE = filepath;
             const { folder, filename } = splitPath(filepath);
+            if (folder && folder !== 'root') {
+                FOLDER_COLLAPSED_STATE[folder] = false;
+            }
             
             const activeTabName = document.getElementById('activeEditorFileName');
             if (activeTabName) activeTabName.innerText = filename;
@@ -1242,9 +1245,12 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             if (fileDisp) fileDisp.innerText = filename;
 
             const area = document.getElementById('codeEditorArea');
-            if (area) area.value = VFS[filepath] || "";
+            if (area) area.value = (VFS[filepath] !== undefined) ? VFS[filepath] : "";
             
             switchViewTab('editor');
+            renderFileTree();
+            renderSourceControlLists();
+            populateDiffFileSelect(filepath);
         }
 
         function markFileAsModified() {
@@ -1622,10 +1628,26 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 const filePaths = Object.keys(treeData).sort();
                 if (countEl) countEl.textContent = `${filePaths.length} files`;
 
+                let selectedTtFile = filePaths[0] || null;
+                const updateTtSelection = (targetFp) => {
+                    selectedTtFile = targetFp;
+                    const rows = listEl.querySelectorAll('[data-timetravel-file]');
+                    rows.forEach(r => {
+                        const fp = r.getAttribute('data-timetravel-file');
+                        const isSel = (fp === selectedTtFile);
+                        r.className = `flex items-center justify-between py-1.5 px-3 rounded-lg text-theme-text cursor-pointer transition ${isSel ? 'bg-zinc-200 dark:bg-zinc-800 font-semibold shadow-xs' : 'hover:bg-zinc-100 dark:hover:bg-zinc-800'}`;
+                    });
+                };
+
                 filePaths.forEach((fp, i) => {
                     const row = document.createElement('div');
-                    row.className = "flex items-center justify-between py-1.5 px-3 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-theme-text cursor-pointer transition";
-                    row.onclick = () => previewTimeTravelFile(fp, treeData[fp]);
+                    const isSel = (i === 0);
+                    row.setAttribute('data-timetravel-file', fp);
+                    row.className = `flex items-center justify-between py-1.5 px-3 rounded-lg text-theme-text cursor-pointer transition ${isSel ? 'bg-zinc-200 dark:bg-zinc-800 font-semibold shadow-xs' : 'hover:bg-zinc-100 dark:hover:bg-zinc-800'}`;
+                    row.onclick = () => {
+                        updateTtSelection(fp);
+                        previewTimeTravelFile(fp, treeData[fp]);
+                    };
                     const leftDiv = document.createElement('div');
                     leftDiv.className = "flex items-center space-x-2 truncate";
                     const icon = document.createElement('i');
@@ -2764,6 +2786,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                     const { filename } = splitPath(filepath);
                     const isSelected = (filepath === ACTIVE_FILE);
                     const fileEl = document.createElement('div');
+                    fileEl.setAttribute('data-filepath', filepath);
                     fileEl.className = `flex items-center justify-between py-1.5 px-3 rounded-full cursor-pointer transition text-xs ${isSelected ? 'bg-black dark:bg-white text-white dark:text-black font-semibold shadow-sm' : 'text-theme-text hover:bg-zinc-100 dark:hover:bg-zinc-800'}`;
                     fileEl.onclick = () => openFileInEditor(filepath);
                     const fileLeft = document.createElement('div');
@@ -2804,11 +2827,12 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                     stagedCount++;
                     if (stagedList) {
                         const item = document.createElement('div');
-                        item.className = "flex items-center justify-between p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-theme-border rounded-2xl text-xs";
+                        const rawPath = filepath.replace(" (deleted)", "");
+                        const isSelected = (rawPath === ACTIVE_FILE);
+                        item.className = `flex items-center justify-between p-2.5 ${isSelected ? 'bg-zinc-200 dark:bg-zinc-800 ring-1 ring-black dark:ring-white' : 'bg-zinc-50 dark:bg-zinc-900'} border border-theme-border rounded-2xl text-xs transition`;
 
                         const leftDiv = document.createElement('div');
                         leftDiv.className = "flex items-center space-x-2 truncate cursor-pointer";
-                        const rawPath = filepath.replace(" (deleted)", "");
                         leftDiv.onclick = () => openFileInEditor(rawPath);
 
                         const tag = document.createElement('span');
@@ -2844,7 +2868,8 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                     unstagedCount++;
                     if (unstagedList) {
                         const item = document.createElement('div');
-                        item.className = "flex items-center justify-between p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-theme-border rounded-2xl text-xs";
+                        const isSelected = (filepath === ACTIVE_FILE);
+                        item.className = `flex items-center justify-between p-2.5 ${isSelected ? 'bg-zinc-200 dark:bg-zinc-800 ring-1 ring-black dark:ring-white' : 'bg-zinc-50 dark:bg-zinc-900'} border border-theme-border rounded-2xl text-xs transition`;
 
                         const leftDiv = document.createElement('div');
                         leftDiv.className = "flex items-center space-x-2 truncate cursor-pointer";
@@ -2896,7 +2921,8 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                     stagedCount++;
                     if (stagedList) {
                         const item = document.createElement('div');
-                        item.className = "flex items-center justify-between p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-theme-border rounded-2xl text-xs";
+                        const isSelected = (filepath === ACTIVE_FILE);
+                        item.className = `flex items-center justify-between p-2.5 ${isSelected ? 'bg-zinc-200 dark:bg-zinc-800 ring-1 ring-black dark:ring-white' : 'bg-zinc-50 dark:bg-zinc-900'} border border-theme-border rounded-2xl text-xs transition`;
 
                         const leftDiv = document.createElement('div');
                         leftDiv.className = "flex items-center space-x-2 truncate cursor-pointer";
@@ -2944,7 +2970,8 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                         unstagedCount++;
                         if (unstagedList) {
                             const item = document.createElement('div');
-                            item.className = "flex items-center justify-between p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-theme-border rounded-2xl text-xs";
+                            const isSelected = (filepath === ACTIVE_FILE);
+                            item.className = `flex items-center justify-between p-2.5 ${isSelected ? 'bg-zinc-200 dark:bg-zinc-800 ring-1 ring-black dark:ring-white' : 'bg-zinc-50 dark:bg-zinc-900'} border border-theme-border rounded-2xl text-xs transition`;
 
                             const leftDiv = document.createElement('div');
                             leftDiv.className = "flex items-center space-x-2 truncate cursor-pointer";
@@ -3009,16 +3036,16 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             }
         }
 
-        function populateDiffFileSelect() {
+        function populateDiffFileSelect(preferredFile) {
             const select = document.getElementById('diffFileSelect');
             if (!select) return;
-            const current = select.value;
+            const target = preferredFile || ACTIVE_FILE || select.value;
             select.innerHTML = '';
             for (const fp of Object.keys(VFS).sort()) {
                 const opt = document.createElement('option');
                 opt.value = fp;
                 opt.textContent = fp;
-                if (fp === current || (!current && fp === ACTIVE_FILE)) opt.selected = true;
+                if (fp === target) opt.selected = true;
                 select.appendChild(opt);
             }
         }
