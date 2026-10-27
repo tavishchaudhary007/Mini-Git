@@ -726,15 +726,17 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
     </div>
 
     <!-- MODAL 4: SERVERLESS P2P & LAN SYNC -->
-    <div id="lanSyncModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center hidden" onclick="if(event.target===this)closeLanSyncModal()">
-        <div class="bg-theme-card border border-theme-border w-full max-w-lg rounded-3xl shadow-2xl p-6 space-y-5">
-            <div class="flex items-center justify-between border-b border-theme-border pb-3">
+    <div id="lanSyncModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto hidden" onclick="if(event.target===this)closeLanSyncModal()">
+        <div class="bg-theme-card border border-theme-border w-full max-w-lg rounded-3xl shadow-2xl p-5 sm:p-6 flex flex-col max-h-[calc(100vh-2rem)] sm:max-h-[calc(100vh-3rem)] my-auto">
+            <div class="flex items-center justify-between border-b border-theme-border pb-3 shrink-0">
                 <div>
                     <h3 class="font-serif font-bold text-theme-text text-lg">Serverless P2P &amp; LAN Sync</h3>
                     <p class="text-xs text-theme-muted">Collaborate directly on Wi-Fi without GitHub or cloud accounts</p>
                 </div>
-                <button onclick="closeLanSyncModal()" class="text-theme-muted hover:text-theme-text"><i class="fa-solid fa-xmark"></i></button>
+                <button onclick="closeLanSyncModal()" class="text-theme-muted hover:text-theme-text p-1.5 cursor-pointer" title="Close"><i class="fa-solid fa-xmark text-sm"></i></button>
             </div>
+
+            <div class="overflow-y-auto pr-1 sm:pr-1.5 space-y-4 pt-3 flex-1 min-h-0">
 
             <!-- Local Node Card -->
             <div class="p-4 bg-zinc-50 dark:bg-zinc-900/70 border border-theme-border rounded-2xl space-y-3">
@@ -850,6 +852,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                         <input type="file" id="bundleFileInput" accept=".json" onchange="uploadRepositoryBundle(event)" class="hidden">
                     </label>
                 </div>
+            </div>
             </div>
         </div>
     </div>
