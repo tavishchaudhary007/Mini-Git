@@ -464,22 +464,104 @@ void test10_multiline_commit_message() {
     std::cout << "PASSED\n";
 }
 
+void test11_merge_conflict_markers_and_abort() {
+    std::cout << "[Test 11] Merge conflict markers & abort restore... ";
+    fs::path dir = fs::current_path() / "test_repo_11";
+    cleanDir(dir);
+    Repository::init(dir);
+    Repository repo(dir);
+
+    writeFile(dir / "f.txt", "line 1\nline 2 base\nline 3\n");
+    repo.add("f.txt", true);
+    repo.commit("Base commit");
+    repo.createBranch("feat");
+
+    // Edit on main
+    writeFile(dir / "f.txt", "line 1\nline 2 ours\nline 3\n");
+    repo.add("f.txt", true);
+    Hash oursCommit = repo.commit("Ours edit");
+
+    // Edit on feat
+    repo.checkout("feat");
+    writeFile(dir / "f.txt", "line 1\nline 2 theirs\nline 3\n");
+    repo.add("f.txt", true);
+    repo.commit("Theirs edit");
+
+    // Switch back to main
+    repo.checkout("main");
+
+    bool conflictThrew = false;
+    try {
+        repo.merge("feat");
+    } catch (const MergeException& e) {
+        conflictThrew = true;
+        std::string err = e.what();
+        assert(err.find("conflict") != std::string::npos || err.find("Conflict") != std::string::npos);
+    }
+    assert(conflictThrew);
+
+    // Assert conflict markers written
+    std::string conflictedContent = readFile(dir / "f.txt");
+    assert(conflictedContent.find("<<<<<<< ours\n") != std::string::npos);
+    assert(conflictedContent.find("line 2 ours") != std::string::npos);
+    assert(conflictedContent.find("=======\n") != std::string::npos);
+    assert(conflictedContent.find("line 2 theirs") != std::string::npos);
+    assert(conflictedContent.find(">>>>>>> feat\n") != std::string::npos);
+
+    // Assert nothing committed
+    assert(repo.head() == oursCommit);
+    assert(fs::exists(dir / ".minigit" / "MERGE_HEAD"));
+
+    // Merge abort restores file to HEAD
+    std::string abortRes = repo.merge("--abort");
+    assert(abortRes.find("Merge aborted") != std::string::npos);
+    assert(!fs::exists(dir / ".minigit" / "MERGE_HEAD"));
+    assert(readFile(dir / "f.txt") == "line 1\nline 2 ours\nline 3\n");
+    assert(repo.head() == oursCommit);
+
+    removeDir(dir);
+    std::cout << "PASSED\n";
+}
+
+void test12_commit_hash_preservation() {
+    std::cout << "[Test 12] Commit hash without parent2 preservation... ";
+    Commit c(Hash("0123456789012345678901234567890123456789"), Hash(), "User <user@test.com>", "Initial commit", 1700000000);
+    assert(c.hash().str() == "767a84561230db7e4e9cc8c8967cfd6a2aad1035");
+
+    Commit c2(Hash("0123456789012345678901234567890123456789"), Hash("1111111111111111111111111111111111111111"), "User <user@test.com>", "Initial commit", 1700000000);
+    assert(c2.hash().str() == "216b583c3249da911e56f984e717c242073cbe84");
+
+    std::cout << "PASSED\n";
+}
+
 int main() {
     std::cout << "\n============================================\n";
-    std::cout << "  Mini-Git 10 Bug Fixes Automated Verification\n";
+    std::cout << "  Mini-Git Automated Verification\n";
     std::cout << "============================================\n\n";
 
-    test1_discard_safety();
-    test2_revert_delta_and_conflict();
-    test3_untracked_overwrite_protection();
-    test4_stash_stack_and_dirty_refusal();
-    test5_xss_prevention();
-    test6_git_export_command_injection();
-    test7_subfolder_path_resolution();
-    test8_import_git_ignores_dotgit();
-    test9_reflog_json_and_roundtrip();
-    test10_multiline_commit_message();
+    auto runTest = [](const char* name, auto fn) {
+        std::cout << "Running " << name << "...\n" << std::flush;
+        try {
+            fn();
+        } catch (const std::exception& e) {
+            std::cerr << "FAILED in " << name << ": " << e.what() << "\n" << std::flush;
+            throw;
+        }
+    };
 
-    std::cout << "\nALL 10 TESTS PASSED SUCCESSFULLY!\n";
+    runTest("test1", test1_discard_safety);
+    runTest("test2", test2_revert_delta_and_conflict);
+    runTest("test3", test3_untracked_overwrite_protection);
+    runTest("test4", test4_stash_stack_and_dirty_refusal);
+    runTest("test5", test5_xss_prevention);
+    runTest("test6", test6_git_export_command_injection);
+    runTest("test7", test7_subfolder_path_resolution);
+    runTest("test8", test8_import_git_ignores_dotgit);
+    runTest("test9", test9_reflog_json_and_roundtrip);
+    runTest("test10", test10_multiline_commit_message);
+    runTest("test11", test11_merge_conflict_markers_and_abort);
+    runTest("test12", test12_commit_hash_preservation);
+
+    std::cout << "\nALL 12 TESTS PASSED SUCCESSFULLY!\n";
     return 0;
 }

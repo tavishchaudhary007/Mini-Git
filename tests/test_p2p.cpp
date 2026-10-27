@@ -225,6 +225,11 @@ int main() {
     assert(jsonDiverged["branchesDiverged"].as_array()[0].as_string() == "main");
     // Branch tip in B MUST remain at cB
     assert(repoB.branchTip("main") == cB);
+    assert(repoB.branchExists("peer-main"));
+    assert(repoB.branchTip("peer-main") == cA);
+    assert(jsonDiverged.contains("peerRefs"));
+    assert(jsonDiverged["peerRefs"].as_array().size() == 1);
+    assert(jsonDiverged["peerRefs"].as_array()[0].as_string() == "peer-main");
 
     std::cout << "  -> PASSED: Diverged branch correctly identified, skipped, and tip remained unchanged.\n";
 
@@ -382,15 +387,34 @@ int main() {
     std::thread serverThread([&]() {
         try {
             HttpServer::run(&repoA, testPort, false, true); // lan = true
-        } catch (...) {}
+        } catch (const std::exception& e) {
+            std::cerr << "HttpServer threw std::exception: " << e.what() << std::endl;
+        } catch (...) {
+            std::cerr << "HttpServer threw unknown exception" << std::endl;
+        }
     });
     serverThread.detach();
 
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
-    // Get pair code from loopback /api/pair/code
+    // Get pair code from loopback /api/pair/code (with port probing and retry)
     std::string codeReq = "GET /api/pair/code HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
-    std::string codeResp = httpExchange("127.0.0.1", testPort, codeReq);
+    std::string codeResp;
+    int boundTestPort = testPort;
+    for (int retry = 0; retry < 25; ++retry) {
+        for (int p = testPort; p < testPort + 5; ++p) {
+            codeResp = httpExchange("127.0.0.1", p, codeReq);
+            if (codeResp.find("200 OK") != std::string::npos) {
+                boundTestPort = p;
+                break;
+            }
+        }
+        if (codeResp.find("200 OK") != std::string::npos) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
+    testPort = boundTestPort;
     assert(codeResp.find("200 OK") != std::string::npos);
 
     size_t bodyPos = codeResp.find("\r\n\r\n");
@@ -507,11 +531,125 @@ int main() {
     std::string hugeResp = httpExchange("127.0.0.1", testPort, hugeReq);
     assert(hugeResp.find("413 Payload Too Large") != std::string::npos);
 
+    // -------------------------------------------------------------
+    // TEST 8: Diverged branch 3-way merge, invalid branch security, and multi-parent commit
+    // -------------------------------------------------------------
+    std::cout << "[Test 8] Testing 3-way merge, security validation, and multi-parent commits...\n";
+    fs::path repo8APath = tempBase / "repo8_a";
+    fs::path repo8BPath = tempBase / "repo8_b";
+    fs::create_directories(repo8APath);
+    fs::create_directories(repo8BPath);
+
+    Repository::init(repo8APath);
+    Repository::init(repo8BPath);
+    Repository repo8A(repo8APath);
+    Repository repo8B(repo8BPath);
+
+    // Shared base commit on A
+    fs::current_path(repo8APath);
+    writeFile(repo8APath / "shared.txt", "Shared base line\n");
+    repo8A.add("shared.txt");
+    Hash baseCommit = repo8A.commit("Shared initial base");
+    repo8A.createBranch("side");
+
+    // Export base bundle to B
+    std::string baseBundle = repo8A.exportBundleJson();
+    fs::current_path(repo8BPath);
+    repo8B.importBundleJson(baseBundle);
+    assert(repo8B.branchTip("main") == baseCommit);
+
+    // A commits a_only.txt on main
+    fs::current_path(repo8APath);
+    writeFile(repo8APath / "a_only.txt", "A only content\n");
+    repo8A.add("a_only.txt");
+    Hash c8A = repo8A.commit("Commit on A main");
+
+    // A advances branch side
+    repo8A.checkout("side");
+    writeFile(repo8APath / "side.txt", "Side content\n");
+    repo8A.add("side.txt");
+    Hash c8Side = repo8A.commit("Commit on A side");
+    repo8A.checkout("main");
+
+    // B commits b_only.txt on main
+    fs::current_path(repo8BPath);
+    writeFile(repo8BPath / "b_only.txt", "B only content\n");
+    repo8B.add("b_only.txt");
+    Hash c8B = repo8B.commit("Commit on B main");
+
+    // Export bundle from A, and tamper it with invalid branch names: "../HEAD" and "peer-evil"
+    std::string bundle8A = repo8A.exportBundleJson();
+    JsonValue j8A = JsonValue::parse(bundle8A);
+    assert(j8A.is_object() && j8A.contains("branches"));
+    std::map<std::string, JsonValue> branchesMap = j8A["branches"].as_object();
+    branchesMap["../HEAD"] = JsonValue(c8A.str());
+    branchesMap["peer-evil"] = JsonValue(c8A.str());
+    std::map<std::string, JsonValue> rootMap = j8A.as_object();
+    rootMap["branches"] = JsonValue(branchesMap);
+    std::string tamperedBundle8A = JsonValue(rootMap).serialize();
+
+    // Import into B
+    std::string import8Res = repo8B.importBundleJson(tamperedBundle8A);
+    JsonValue jImport8 = JsonValue::parse(import8Res);
+
+    // Assert side fast-forwarded
+    assert(repo8B.branchExists("side"));
+    assert(repo8B.branchTip("side") == c8Side);
+
+    // Assert main unchanged
+    assert(repo8B.branchTip("main") == c8B);
+
+    // Assert peer-main == A's tip
+    assert(repo8B.branchExists("peer-main"));
+    assert(repo8B.branchTip("peer-main") == c8A);
+
+    // Assert branchesSkippedInvalid has 2 entries
+    assert(jImport8.contains("branchesSkippedInvalid"));
+    const auto& skippedArr = jImport8["branchesSkippedInvalid"].as_array();
+    assert(skippedArr.size() == 2);
+    bool foundDotDot = false, foundPeerEvil = false;
+    for (const auto& v : skippedArr) {
+        if (v.as_string() == "../HEAD") foundDotDot = true;
+        if (v.as_string() == "peer-evil") foundPeerEvil = true;
+    }
+    assert(foundDotDot && foundPeerEvil);
+
+    // Assert no files written outside refs/heads/
+    assert(!fs::exists(repo8BPath / ".minigit" / "refs" / "HEAD"));
+    assert(!fs::exists(repo8BPath / "HEAD"));
+    assert(!fs::exists(repo8BPath / ".minigit" / "refs" / "heads" / "peer-evil"));
+
+    // Then run B.merge("peer-main")
+    std::string mergeRes = repo8B.merge("peer-main");
+    assert(mergeRes.find("Merged peer-main (3-way)") != std::string::npos);
+
+    // Assert both files exist
+    assert(fs::exists(repo8BPath / "a_only.txt"));
+    assert(fs::exists(repo8BPath / "b_only.txt"));
+    assert(fs::exists(repo8BPath / "shared.txt"));
+    assert(readFile(repo8BPath / "a_only.txt") == "A only content\n");
+    assert(readFile(repo8BPath / "b_only.txt") == "B only content\n");
+
+    // HEAD has two parents
+    auto log8B = repo8B.log();
+    assert(!log8B.empty());
+    assert(log8B.front().hasParent2());
+    assert(log8B.front().parent() == c8B);
+    assert(log8B.front().parent2() == c8A);
+
+    // Re-importing bundle reports nothing diverged
+    std::string reimportRes = repo8B.importBundleJson(repo8A.exportBundleJson());
+    JsonValue jReimport = JsonValue::parse(reimportRes);
+    assert(jReimport.contains("branchesDiverged"));
+    assert(jReimport["branchesDiverged"].as_array().empty());
+
+    std::cout << "  -> PASSED: 3-way merge succeeded, 2 parents verified, security bounds enforced.\n";
+
     fs::current_path(origCwd);
     cleanDir(tempBase);
 
     std::cout << "\n========================================\n";
-    std::cout << "ALL 7 TESTS PASSED SUCCESSFULLY!\n";
+    std::cout << "ALL 8 TESTS PASSED SUCCESSFULLY!\n";
     std::cout << "========================================\n";
     return 0;
 }
