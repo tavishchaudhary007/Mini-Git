@@ -66,6 +66,9 @@ std::string HtmlExporter::toJson(const Snapshot& snap, const std::string& repoNa
         } else if (const auto* c = dynamic_cast<const Commit*>(obj.get())) {
             o << ",\"data\":{\"tree\":";   jsonString(o, c->tree().str());
             o << ",\"parent\":";           jsonHashOrNull(o, c->parent());
+            if (c->hasParent2()) {
+                o << ",\"parent2\":";      jsonHashOrNull(o, c->parent2());
+            }
             o << ",\"message\":";          jsonString(o, c->message());
             o << ",\"timestamp\":";        jsonString(o, isoTime(c->time()));
             o << ",\"time\":";             o << static_cast<long long>(c->time());
@@ -110,22 +113,30 @@ std::string HtmlExporter::toJson(const Snapshot& snap, const std::string& repoNa
         o << "\"staged\":[";
         bool fst = true;
         for (const auto& f : snap.status.staged) {
-            if (!fst) o << ','; fst = false; jsonString(o, f);
+            if (!fst) o << ',';
+            fst = false;
+            jsonString(o, f);
         }
         o << "],\"modified\":[";
         fst = true;
         for (const auto& f : snap.status.modified) {
-            if (!fst) o << ','; fst = false; jsonString(o, f);
+            if (!fst) o << ',';
+            fst = false;
+            jsonString(o, f);
         }
         o << "],\"deleted\":[";
         fst = true;
         for (const auto& f : snap.status.deleted) {
-            if (!fst) o << ','; fst = false; jsonString(o, f);
+            if (!fst) o << ',';
+            fst = false;
+            jsonString(o, f);
         }
         o << "],\"untracked\":[";
         fst = true;
         for (const auto& f : snap.status.untracked) {
-            if (!fst) o << ','; fst = false; jsonString(o, f);
+            if (!fst) o << ',';
+            fst = false;
+            jsonString(o, f);
         }
         o << "]}";
     }

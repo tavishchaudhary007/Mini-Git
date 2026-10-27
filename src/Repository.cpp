@@ -4,6 +4,8 @@
 #include <ctime>
 #include <fstream>
 #include <sstream>
+#include <queue>
+#include <unordered_set>
 #include "DiffEngine.h"
 #include "HtmlExporter.h"
 #include "Base64.h"
@@ -76,6 +78,7 @@ std::string Repository::resolveRepoPath(const std::string& pathArg, bool isRepoR
 }
 
 bool Repository::isIgnored(const fs::path& fullPath, const std::string& relPath, bool isDir) const {
+    (void)isDir;
     std::string fname = fullPath.filename().generic_string();
     if (fname == ".git" || fname == ".minigit" || fname == "node_modules" ||
         fname == "minigit.exe" || fname == "minigit") {
@@ -296,23 +299,57 @@ Hash Repository::commit(const std::string& message) {
     for (const auto& [path, h] : index_.entries()) tree.set(path, h);
 
     Hash parent = refs_.headCommit();
-    if (!parent.empty() && store_.loadAs<Commit>(parent)->tree() == tree.hash())
+    fs::path mergeHeadFile = gitDir_ / "MERGE_HEAD";
+    Hash parent2;
+    if (fs::exists(mergeHeadFile)) {
+        parent2 = Hash(trim(readFile(mergeHeadFile)));
+    }
+
+    if (parent2.empty() && !parent.empty() && store_.loadAs<Commit>(parent)->tree() == tree.hash())
         throw NothingToCommitException("nothing to commit (no changes staged)");
 
     store_.save(tree);
-    Hash h = store_.save(Commit(tree.hash(), parent, author(), message, std::time(nullptr)));
+    Hash h = store_.save(Commit(tree.hash(), parent, author(), message, std::time(nullptr), parent2));
     refs_.updateHead(h);
-    recordReflog("commit", parent, h, message);
+    if (!parent2.empty()) {
+        fs::remove(mergeHeadFile);
+        recordReflog("merge", parent, h, message);
+    } else {
+        recordReflog("commit", parent, h, message);
+    }
     return h;
 }
 
 std::vector<Commit> Repository::log() const {
     std::vector<Commit> out;
-    for (Hash h = refs_.headCommit(); !h.empty();) {
+    Hash start = refs_.headCommit();
+    if (start.empty()) return out;
+
+    std::queue<Hash> q;
+    std::unordered_set<std::string> visited;
+    q.push(start);
+    visited.insert(start.str());
+
+    while (!q.empty()) {
+        Hash h = q.front();
+        q.pop();
+        if (!store_.exists(h)) continue;
         auto c = store_.loadAs<Commit>(h);
+        if (!c) continue;
         out.push_back(*c);
-        h = c->parent();
+
+        if (!c->parent().empty() && visited.insert(c->parent().str()).second) {
+            q.push(c->parent());
+        }
+        if (c->hasParent2() && !c->parent2().empty() && visited.insert(c->parent2().str()).second) {
+            q.push(c->parent2());
+        }
     }
+
+    std::stable_sort(out.begin(), out.end(), [](const Commit& a, const Commit& b) {
+        return a.time() > b.time();
+    });
+
     return out;
 }
 
@@ -374,9 +411,83 @@ bool Repository::isDirty() const {
 }
 
 bool Repository::isAncestor(const Hash& ancestor, const Hash& descendant) const {
-    for (Hash h = descendant; !h.empty(); h = store_.loadAs<Commit>(h)->parent())
-        if (h == ancestor) return true;
+    if (ancestor.empty() || descendant.empty()) return false;
+    if (ancestor == descendant) return true;
+    std::unordered_set<std::string> visited;
+    std::queue<Hash> q;
+    q.push(descendant);
+    visited.insert(descendant.str());
+    while (!q.empty()) {
+        Hash cur = q.front();
+        q.pop();
+        if (cur == ancestor) return true;
+        if (store_.exists(cur)) {
+            auto c = store_.loadAs<Commit>(cur);
+            if (!c->parent().empty() && visited.insert(c->parent().str()).second) {
+                q.push(c->parent());
+            }
+            if (c->hasParent2() && !c->parent2().empty() && visited.insert(c->parent2().str()).second) {
+                q.push(c->parent2());
+            }
+        }
+    }
     return false;
+}
+
+Hash Repository::findMergeBase(const Hash& h1, const Hash& h2) const {
+    if (h1.empty() || h2.empty()) return Hash();
+    if (h1 == h2) return h1;
+    std::unordered_set<std::string> visited;
+    std::queue<Hash> q;
+    q.push(h1);
+    visited.insert(h1.str());
+    while (!q.empty()) {
+        Hash cur = q.front();
+        q.pop();
+        if (store_.exists(cur)) {
+            auto commit = store_.loadAs<Commit>(cur);
+            if (!commit->parent().empty() && visited.insert(commit->parent().str()).second) {
+                q.push(commit->parent());
+            }
+            if (commit->hasParent2() && !commit->parent2().empty() && visited.insert(commit->parent2().str()).second) {
+                q.push(commit->parent2());
+            }
+        }
+    }
+    std::queue<Hash> q2;
+    q2.push(h2);
+    std::unordered_set<std::string> visited2;
+    visited2.insert(h2.str());
+    while (!q2.empty()) {
+        Hash cur = q2.front();
+        q2.pop();
+        if (visited.count(cur.str())) {
+            return cur;
+        }
+        if (store_.exists(cur)) {
+            auto commit = store_.loadAs<Commit>(cur);
+            if (!commit->parent().empty() && visited2.insert(commit->parent().str()).second) {
+                q2.push(commit->parent());
+            }
+            if (commit->hasParent2() && !commit->parent2().empty() && visited2.insert(commit->parent2().str()).second) {
+                q2.push(commit->parent2());
+            }
+        }
+    }
+    return Hash();
+}
+
+std::string Repository::mergeAbort() {
+    fs::path mergeHead = gitDir_ / "MERGE_HEAD";
+    if (!fs::exists(mergeHead)) {
+        throw MergeException("no merge in progress to abort");
+    }
+    fs::remove(mergeHead);
+    Hash cur = refs_.headCommit();
+    if (!cur.empty()) {
+        restoreCommit(cur);
+    }
+    return "Merge aborted.";
 }
 
 void Repository::checkUntrackedOverwrite(const std::map<std::string, Hash>& targetTree) const {
@@ -420,12 +531,21 @@ void Repository::checkout(const std::string& target) {
 }
 
 std::string Repository::merge(const std::string& branch) {
+    if (branch == "--abort") {
+        return mergeAbort();
+    }
     if (!refs_.onBranch()) throw MergeException("cannot merge while HEAD is detached");
     if (!refs_.branchExists(branch)) throw BranchException("no such branch: " + branch);
     if (isDirty()) throw MergeException("you have uncommitted changes; commit them first");
 
+    fs::path mergeHeadFile = gitDir_ / "MERGE_HEAD";
+    if (fs::exists(mergeHeadFile)) {
+        throw MergeException("a merge is already in progress; commit or abort it first");
+    }
+
     Hash cur = refs_.headCommit(), tgt = refs_.branchTip(branch);
     if (cur.empty()) throw MergeException("current branch has no commits");
+    if (tgt.empty()) throw MergeException("branch '" + branch + "' has no commits");
     if (cur == tgt || isAncestor(tgt, cur)) return "Already up to date.";
     if (isAncestor(cur, tgt)) {
         auto targetTree = store_.loadAs<Tree>(store_.loadAs<Commit>(tgt)->tree())->entries();
@@ -435,7 +555,143 @@ std::string Repository::merge(const std::string& branch) {
         recordReflog("merge", cur, tgt, "Merged branch " + branch);
         return "Fast-forward to " + tgt.shortStr();
     }
-    throw MergeException("branches have diverged; only fast-forward merges are supported");
+
+    // 3-way merge
+    Hash baseCommitHash = findMergeBase(cur, tgt);
+    std::map<std::string, Hash> baseEntries;
+    if (!baseCommitHash.empty() && store_.exists(baseCommitHash)) {
+        baseEntries = store_.loadAs<Tree>(store_.loadAs<Commit>(baseCommitHash)->tree())->entries();
+    }
+    auto oursEntries = store_.loadAs<Tree>(store_.loadAs<Commit>(cur)->tree())->entries();
+    auto theirsEntries = store_.loadAs<Tree>(store_.loadAs<Commit>(tgt)->tree())->entries();
+
+    std::set<std::string> allPaths;
+    for (const auto& [p, _] : baseEntries) allPaths.insert(p);
+    for (const auto& [p, _] : oursEntries) allPaths.insert(p);
+    for (const auto& [p, _] : theirsEntries) allPaths.insert(p);
+
+    struct ConflictItem {
+        std::string path;
+        std::string oursContent;
+        std::string theirsContent;
+        bool isBinary;
+    };
+
+    std::map<std::string, Hash> cleanEntries;
+    std::map<std::string, Hash> filesToWriteTheirs;
+    std::vector<std::string> filesToDelete;
+    std::vector<ConflictItem> conflicts;
+    std::vector<std::string> conflictedPaths;
+
+    for (const auto& path : allPaths) {
+        Hash bHash = baseEntries.count(path) ? baseEntries[path] : Hash();
+        Hash oHash = oursEntries.count(path) ? oursEntries[path] : Hash();
+        Hash tHash = theirsEntries.count(path) ? theirsEntries[path] : Hash();
+
+        if (oHash == tHash) {
+            // Same in ours and theirs
+            if (!oHash.empty()) {
+                cleanEntries[path] = oHash;
+            }
+        } else if (oHash == bHash && tHash != bHash) {
+            // Changed only in theirs
+            if (!tHash.empty()) {
+                cleanEntries[path] = tHash;
+                filesToWriteTheirs[path] = tHash;
+            } else {
+                filesToDelete.push_back(path);
+            }
+        } else if (tHash == bHash && oHash != bHash) {
+            // Changed only in ours
+            if (!oHash.empty()) {
+                cleanEntries[path] = oHash;
+            }
+        } else {
+            // Changed differently on both sides: conflict
+            std::string oursContent = (!oHash.empty() && store_.exists(oHash)) ? store_.loadAs<Blob>(oHash)->content() : "";
+            std::string theirsContent = (!tHash.empty() && store_.exists(tHash)) ? store_.loadAs<Blob>(tHash)->content() : "";
+            bool isBinary = (oursContent.find('\0') != std::string::npos || theirsContent.find('\0') != std::string::npos);
+            conflicts.push_back({path, std::move(oursContent), std::move(theirsContent), isBinary});
+            conflictedPaths.push_back(path);
+        }
+    }
+
+    // Safety: check untracked overwrite before any modifications to disk
+    Status s = status();
+    std::set<std::string> untrackedSet(s.untracked.begin(), s.untracked.end());
+    for (const auto& [p, _] : filesToWriteTheirs) {
+        if (untrackedSet.count(p)) {
+            throw MiniGitException("untracked file '" + p + "' would be overwritten; move or commit it first");
+        }
+    }
+    for (const auto& c : conflicts) {
+        if (untrackedSet.count(c.path)) {
+            throw MiniGitException("untracked file '" + c.path + "' would be overwritten; move or commit it first");
+        }
+    }
+
+    if (!conflicts.empty()) {
+        // Apply non-conflicted updates
+        for (const auto& p : filesToDelete) {
+            fs::remove(root_ / p);
+            index_.remove(p);
+        }
+        for (const auto& [p, h] : filesToWriteTheirs) {
+            writeFile(root_ / p, store_.loadAs<Blob>(h)->content());
+            index_.set(p, h);
+        }
+
+        // Apply conflict markers or keep ours for binary
+        for (const auto& c : conflicts) {
+            if (c.isBinary) {
+                // keep ours
+                if (!c.oursContent.empty()) {
+                    writeFile(root_ / c.path, c.oursContent);
+                }
+            } else {
+                std::string text = "<<<<<<< ours\n";
+                text += c.oursContent;
+                if (!c.oursContent.empty() && c.oursContent.back() != '\n') text += "\n";
+                text += "=======\n";
+                text += c.theirsContent;
+                if (!c.theirsContent.empty() && c.theirsContent.back() != '\n') text += "\n";
+                text += ">>>>>>> " + branch + "\n";
+                writeFile(root_ / c.path, text);
+            }
+        }
+        index_.save();
+        writeFile(mergeHeadFile, tgt.str() + "\n");
+
+        std::string listStr;
+        for (size_t i = 0; i < conflictedPaths.size(); ++i) {
+            if (i > 0) listStr += ", ";
+            listStr += conflictedPaths[i];
+        }
+        throw MergeException("Automatic merge failed; fix conflicts and then commit the result. Conflicted files: " + listStr);
+    }
+
+    // No conflicts: write working tree & index, create 2-parent merge commit
+    for (const auto& p : filesToDelete) {
+        fs::remove(root_ / p);
+        for (fs::path d = (root_ / p).parent_path(); d != root_ && fs::is_empty(d); d = d.parent_path())
+            fs::remove(d);
+    }
+    for (const auto& [p, h] : filesToWriteTheirs) {
+        writeFile(root_ / p, store_.loadAs<Blob>(h)->content());
+    }
+
+    index_.replace(cleanEntries);
+    index_.save();
+
+    Tree resultTree;
+    for (const auto& [p, h] : cleanEntries) {
+        resultTree.set(p, h);
+    }
+    store_.save(resultTree);
+    Hash mergeCommit = store_.save(Commit(resultTree.hash(), cur, author(), "Merge branch '" + branch + "'", std::time(nullptr), tgt));
+    refs_.updateHead(mergeCommit);
+    recordReflog("merge", cur, mergeCommit, "Merge branch '" + branch + "'");
+    return "Merged " + branch + " (3-way)";
 }
 
 Snapshot Repository::snapshot() const {
@@ -825,7 +1081,8 @@ std::string Repository::importBundleJson(const std::string& bundleJson) {
                 } else if (d.contains("timestamp") && d["timestamp"].is_string()) {
                     t = parseIsoTimestamp(d["timestamp"].as_string());
                 }
-                Commit c(Hash(treeStr), Hash(parentStr), authorStr, messageStr, t);
+                std::string parent2Str = (d.contains("parent2") && !d["parent2"].is_null()) ? d["parent2"].as_string() : "";
+                Commit c(Hash(treeStr), Hash(parentStr), authorStr, messageStr, t, Hash(parent2Str));
                 if (c.hash() != expectedHash) {
                     objectsRejected++;
                 } else {
@@ -885,58 +1142,71 @@ std::string Repository::importBundleJson(const std::string& bundleJson) {
     std::vector<std::string> branchesFastForwarded;
     std::vector<std::string> branchesSkippedDiverged;
     std::vector<std::string> branchesUpToDate;
+    std::vector<std::string> branchesSkippedInvalid;
+    std::vector<std::string> peerRefs;
     bool activeBranchDirtyRefused = false;
     std::string refuseReason;
 
     if (root.contains("branches") && root["branches"].is_object()) {
         for (const auto& [bName, tipVal] : root["branches"].as_object()) {
+            if (!RefManager::isValidBranchName(bName) || bName.rfind("peer-", 0) == 0) {
+                branchesSkippedInvalid.push_back(bName);
+                continue;
+            }
             if (tipVal.is_null() || !tipVal.is_string()) continue;
             std::string hStr = tipVal.as_string();
             if (hStr.size() != 40) continue;
             Hash target(hStr);
             if (!store_.exists(target)) continue;
 
-            if (!refs_.branchExists(bName)) {
-                refs_.createBranch(bName, target);
-                if (refs_.currentBranch() == bName) {
-                    restoreCommit(target);
-                }
-                branchesCreated.push_back(bName);
-                recordReflog("p2p_sync", Hash(), target, "P2P LAN Sync: created branch " + bName + " at " + target.shortStr());
-            } else {
-                Hash curTip = refs_.branchTip(bName);
-                if (curTip == target) {
-                    branchesUpToDate.push_back(bName);
-                } else if (isAncestor(target, curTip)) {
-                    branchesUpToDate.push_back(bName + " (local ahead)");
-                } else if (isAncestor(curTip, target)) {
-                    // Fast-forward candidate
+            try {
+                if (!refs_.branchExists(bName)) {
                     if (refs_.currentBranch() == bName) {
-                        if (isDirty()) {
-                            activeBranchDirtyRefused = true;
-                            refuseReason = "Cannot fast-forward active branch '" + bName + "': working tree or index has uncommitted changes.";
-                            continue;
-                        }
                         auto targetTree = store_.loadAs<Tree>(store_.loadAs<Commit>(target)->tree())->entries();
-                        try {
-                            checkUntrackedOverwrite(targetTree);
-                        } catch (const MiniGitException& e) {
-                            activeBranchDirtyRefused = true;
-                            refuseReason = e.what();
-                            continue;
-                        }
+                        checkUntrackedOverwrite(targetTree);
                         restoreCommit(target);
-                        refs_.updateHead(target);
-                        recordReflog("p2p_sync", curTip, target, "P2P LAN Sync: fast-forward " + bName + " to " + target.shortStr());
-                        branchesFastForwarded.push_back(bName);
-                    } else {
-                        refs_.createBranch(bName, target);
-                        recordReflog("p2p_sync", curTip, target, "P2P LAN Sync: fast-forward " + bName + " to " + target.shortStr());
-                        branchesFastForwarded.push_back(bName);
                     }
+                    refs_.createBranch(bName, target);
+                    branchesCreated.push_back(bName);
+                    recordReflog("p2p_sync", Hash(), target, "P2P LAN Sync: created branch " + bName + " at " + target.shortStr());
                 } else {
-                    // Diverged
-                    branchesSkippedDiverged.push_back(bName);
+                    Hash curTip = refs_.branchTip(bName);
+                    if (curTip == target) {
+                        branchesUpToDate.push_back(bName);
+                    } else if (isAncestor(target, curTip)) {
+                        branchesUpToDate.push_back(bName + " (local ahead)");
+                    } else if (isAncestor(curTip, target)) {
+                        // Fast-forward candidate
+                        if (refs_.currentBranch() == bName) {
+                            if (isDirty()) {
+                                activeBranchDirtyRefused = true;
+                                refuseReason = "Cannot fast-forward active branch '" + bName + "': working tree or index has uncommitted changes.";
+                                continue;
+                            }
+                            auto targetTree = store_.loadAs<Tree>(store_.loadAs<Commit>(target)->tree())->entries();
+                            checkUntrackedOverwrite(targetTree);
+                            restoreCommit(target);
+                            refs_.updateHead(target);
+                            recordReflog("p2p_sync", curTip, target, "P2P LAN Sync: fast-forward " + bName + " to " + target.shortStr());
+                            branchesFastForwarded.push_back(bName);
+                        } else {
+                            refs_.setBranch(bName, target);
+                            recordReflog("p2p_sync", curTip, target, "P2P LAN Sync: fast-forward " + bName + " to " + target.shortStr());
+                            branchesFastForwarded.push_back(bName);
+                        }
+                    } else {
+                        // Diverged
+                        std::string peerRef = "peer-" + bName;
+                        refs_.setBranch(peerRef, target);
+                        recordReflog("p2p_sync", Hash(), target, "P2P LAN Sync: saved diverged peer tip for " + bName + " as " + peerRef);
+                        peerRefs.push_back(peerRef);
+                        branchesSkippedDiverged.push_back(bName);
+                    }
+                }
+            } catch (const MiniGitException& e) {
+                if (refs_.currentBranch() == bName) {
+                    activeBranchDirtyRefused = true;
+                    refuseReason = e.what();
                 }
             }
         }
@@ -950,12 +1220,17 @@ std::string Repository::importBundleJson(const std::string& bundleJson) {
         message = refuseReason;
     } else if (!branchesSkippedDiverged.empty() && branchesCreated.empty() && branchesFastForwarded.empty()) {
         ok = false;
-        std::string divList;
-        for (size_t i = 0; i < branchesSkippedDiverged.size(); ++i) {
-            if (i > 0) divList += ", ";
-            divList += branchesSkippedDiverged[i];
+        if (branchesSkippedDiverged.size() == 1) {
+            std::string b = branchesSkippedDiverged[0];
+            message = b + " diverged; your tip is unchanged. Peer's commits saved as peer-" + b + ". To combine them, run: minigit merge peer-" + b;
+        } else {
+            std::string divList;
+            for (size_t i = 0; i < branchesSkippedDiverged.size(); ++i) {
+                if (i > 0) divList += ", ";
+                divList += branchesSkippedDiverged[i];
+            }
+            message = "Branch(es) diverged (" + divList + "), merge needed; tip unchanged.";
         }
-        message = "Branch(es) diverged (" + divList + "), merge needed; tip unchanged.";
     } else if (objectsImported == 0 && objectsPresent == 0 && branchesCreated.empty() && branchesFastForwarded.empty() && branchesUpToDate.empty()) {
         ok = false;
         message = "No objects or branches could be imported from bundle.";
@@ -1007,6 +1282,8 @@ std::string Repository::importBundleJson(const std::string& bundleJson) {
     resObj["branchesFastForwarded"] = makeJsonArr(branchesFastForwarded);
     resObj["branchesDiverged"] = makeJsonArr(branchesSkippedDiverged);
     resObj["branchesUpToDate"] = makeJsonArr(branchesUpToDate);
+    resObj["branchesSkippedInvalid"] = makeJsonArr(branchesSkippedInvalid);
+    resObj["peerRefs"] = makeJsonArr(peerRefs);
 
     return JsonValue(resObj).serialize();
 }

@@ -31,6 +31,9 @@ using socket_t = SOCKET;
 #include <netdb.h>
 #include <errno.h>
 using socket_t = int;
+#ifndef INVALID_SOCKET
+#define INVALID_SOCKET (-1)
+#endif
 #define ISVALIDSOCKET(s) ((s) >= 0)
 #define CLOSESOCKET(s) close(s)
 #define GETSOCKETERR() (errno)
@@ -679,14 +682,36 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                 if (!parseRequestBody(body, bodyJson, parseErr)) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
                                      "{\"ok\":false,\"error\":\"Invalid JSON: " + parseErr + "\"}", origin, isSyncOrPairEndpoint, lan);
-                } else if (!getRequiredString(bodyJson, "branch", branch, parseErr) || branch.empty()) {
-                    sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                     "{\"ok\":false,\"error\":\"Branch cannot be empty\"}", origin, isSyncOrPairEndpoint, lan);
                 } else {
-                    std::string msg = repo->merge(branch);
-                    std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
-                    sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
-                                     "{\"ok\":true,\"result\":" + jsonString(msg) + ",\"snapshot\":" + snap + "}", origin, isSyncOrPairEndpoint, lan);
+                    bool isAbort = (bodyJson.contains("abort") && bodyJson["abort"].is_bool() && bodyJson["abort"].as_bool());
+                    if (!isAbort && bodyJson.contains("branch") && bodyJson["branch"].is_string() && bodyJson["branch"].as_string() == "--abort") {
+                        isAbort = true;
+                    }
+                    if (isAbort) {
+                        try {
+                            std::string msg = repo->mergeAbort();
+                            std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
+                            sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
+                                             "{\"ok\":true,\"result\":" + jsonString(msg) + ",\"snapshot\":" + snap + "}", origin, isSyncOrPairEndpoint, lan);
+                        } catch (const MiniGitException& e) {
+                            sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
+                                             "{\"ok\":false,\"error\":" + jsonString(e.what()) + "}", origin, isSyncOrPairEndpoint, lan);
+                        }
+                    } else if (!getRequiredString(bodyJson, "branch", branch, parseErr) || branch.empty()) {
+                        sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
+                                         "{\"ok\":false,\"error\":\"Branch cannot be empty\"}", origin, isSyncOrPairEndpoint, lan);
+                    } else {
+                        try {
+                            std::string msg = repo->merge(branch);
+                            std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
+                            sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
+                                             "{\"ok\":true,\"result\":" + jsonString(msg) + ",\"snapshot\":" + snap + "}", origin, isSyncOrPairEndpoint, lan);
+                        } catch (const MiniGitException& e) {
+                            std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
+                            sendHttpResponse(clientSock, 409, "Conflict", "application/json; charset=utf-8",
+                                             "{\"ok\":false,\"error\":" + jsonString(e.what()) + ",\"snapshot\":" + snap + "}", origin, isSyncOrPairEndpoint, lan);
+                        }
+                    }
                 }
             } else if (method == "POST" && path == "/api/revert") {
                 JsonValue bodyJson;

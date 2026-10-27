@@ -38,16 +38,18 @@ public:
 };
 
 class Commit : public Object {
-    Hash tree_, parent_;
+    Hash tree_, parent_, parent2_;
     std::string author_, message_;
     std::time_t time_;
 public:
-    Commit(Hash tree, Hash parent, std::string author, std::string message, std::time_t t)
-        : tree_(std::move(tree)), parent_(std::move(parent)), author_(std::move(author)),
-          message_(std::move(message)), time_(t) {}
+    Commit(Hash tree, Hash parent, std::string author, std::string message, std::time_t t, Hash parent2 = Hash())
+        : tree_(std::move(tree)), parent_(std::move(parent)), parent2_(std::move(parent2)),
+          author_(std::move(author)), message_(std::move(message)), time_(t) {}
 
     const Hash& tree() const { return tree_; }
     const Hash& parent() const { return parent_; }
+    const Hash& parent2() const { return parent2_; }
+    bool hasParent2() const { return !parent2_.empty(); }
     const std::string& author() const { return author_; }
     const std::string& message() const { return message_; }
     std::time_t time() const { return time_; }

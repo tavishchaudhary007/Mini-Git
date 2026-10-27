@@ -31,11 +31,21 @@ Hash RefManager::branchTip(const std::string& n) const {
     return Hash(trim(readFile(branchFile(n))));
 }
 
+bool RefManager::isValidBranchName(const std::string& n) {
+    if (n.empty() || n.size() > 100 || n[0] == '.') return false;
+    return std::all_of(n.begin(), n.end(), [](unsigned char c) {
+        return std::isalnum(c) || c == '-' || c == '_' || c == '.';
+    });
+}
+
 void RefManager::createBranch(const std::string& n, const Hash& at) const {
-    bool valid = !n.empty() && n[0] != '.' &&
-                 std::all_of(n.begin(), n.end(), [](unsigned char c) { return std::isalnum(c) || c == '-' || c == '_' || c == '.'; });
-    if (!valid) throw BranchException("invalid branch name: '" + n + "'");
+    if (!isValidBranchName(n)) throw BranchException("invalid branch name: '" + n + "'");
     if (branchExists(n)) throw BranchException("branch already exists: " + n);
+    writeFile(branchFile(n), at.str() + "\n");
+}
+
+void RefManager::setBranch(const std::string& n, const Hash& at) const {
+    if (!isValidBranchName(n)) throw BranchException("invalid branch name: '" + n + "'");
     writeFile(branchFile(n), at.str() + "\n");
 }
 

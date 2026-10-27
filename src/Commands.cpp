@@ -42,7 +42,11 @@ void LogCmd::execute(Repository* repo, const Args& args) {
             if (nl != std::string::npos) first = first.substr(0, nl);
             cout << c.hash().shortStr() << " " << first << "\n";
         } else {
-            cout << "commit " << c.hash().str() << "\nAuthor: " << c.author() << "\nDate:   " << c.time() << "\n\n    "
+            cout << "commit " << c.hash().str() << "\n";
+            if (c.hasParent2()) {
+                cout << "Merge: " << c.parent().shortStr() << " " << c.parent2().shortStr() << "\n";
+            }
+            cout << "Author: " << c.author() << "\nDate:   " << c.time() << "\n\n    "
                  << c.message() << "\n\n";
         }
     }
@@ -101,7 +105,11 @@ void CheckoutCmd::execute(Repository* repo, const Args& args) {
 }
 
 void MergeCmd::execute(Repository* repo, const Args& args) {
-    if (args.size() != 1) usageError(*this);
+    if (args.empty() || args.size() > 1) usageError(*this);
+    if (args[0] == "--abort") {
+        cout << repo->mergeAbort() << "\n";
+        return;
+    }
     cout << repo->merge(args[0]) << "\n";
 }
 

@@ -1,4 +1,5 @@
 #pragma once
+#include <functional>
 #include <ostream>
 #include <string>
 #include <utility>
@@ -19,3 +20,12 @@ public:
     bool operator<(const Hash& o)  const { return value_ < o.value_; }
     friend std::ostream& operator<<(std::ostream& os, const Hash& h) { return os << h.value_; }
 };
+
+namespace std {
+template <>
+struct hash<Hash> {
+    size_t operator()(const Hash& h) const noexcept {
+        return hash<std::string>()(h.str());
+    }
+};
+}

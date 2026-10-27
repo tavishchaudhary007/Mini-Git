@@ -408,7 +408,11 @@ int main() {
     loopbackAddr.sin_port = htons(53);
     connect(sTmp, (struct sockaddr*)&loopbackAddr, sizeof(loopbackAddr));
     sockaddr_in nameAddr{};
+#ifdef _WIN32
     int nameLen = sizeof(nameAddr);
+#else
+    socklen_t nameLen = sizeof(nameAddr);
+#endif
     getsockname(sTmp, (struct sockaddr*)&nameAddr, &nameLen);
     char lanIpBuf[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &nameAddr.sin_addr, lanIpBuf, sizeof(lanIpBuf));

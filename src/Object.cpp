@@ -34,30 +34,38 @@ Tree Tree::parse(const std::string& body) {
 
 std::string Commit::serialize() const {
     std::ostringstream os;
-    os << "tree " << tree_ << "\nparent " << (parent_.empty() ? "-" : parent_.str())
-       << "\nauthor " << author_ << "\ntime " << time_ << "\n\n" << message_;
+    os << "tree " << tree_ << "\nparent " << (parent_.empty() ? "-" : parent_.str());
+    if (!parent2_.empty()) {
+        os << "\nparent2 " << parent2_.str();
+    }
+    os << "\nauthor " << author_ << "\ntime " << time_ << "\n\n" << message_;
     return os.str();
 }
 
 Commit Commit::parse(const std::string& body) {
     std::istringstream in(body);
-    std::string line, tree, parent, author;
+    std::string line, tree, parent, parent2, author;
     std::time_t t = 0;
     while (std::getline(in, line) && !line.empty()) {
-        if (line.rfind("tree ", 0) == 0)        tree = line.substr(5);
-        else if (line.rfind("parent ", 0) == 0) parent = line.substr(7);
-        else if (line.rfind("author ", 0) == 0) author = line.substr(7);
-        else if (line.rfind("time ", 0) == 0)   t = static_cast<std::time_t>(std::stoll(line.substr(5)));
+        if (line.rfind("tree ", 0) == 0)         tree = line.substr(5);
+        else if (line.rfind("parent2 ", 0) == 0) parent2 = line.substr(8);
+        else if (line.rfind("parent ", 0) == 0)  parent = line.substr(7);
+        else if (line.rfind("author ", 0) == 0)  author = line.substr(7);
+        else if (line.rfind("time ", 0) == 0)    t = static_cast<std::time_t>(std::stoll(line.substr(5)));
     }
     std::string message((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     if (tree.empty()) throw InvalidObjectException("corrupt commit (no tree)");
-    return Commit(Hash(tree), Hash(parent == "-" ? "" : parent), author, message, t);
+    return Commit(Hash(tree), Hash(parent == "-" ? "" : parent), author, message, t, Hash(parent2));
 }
 
 std::ostream& operator<<(std::ostream& os, const Commit& c) {
     char buf[64];
     std::tm* tm = std::localtime(&c.time_);
     std::strftime(buf, sizeof buf, "%a %b %d %H:%M:%S %Y", tm);
-    return os << "commit " << c.hash() << "\nAuthor: " << c.author_ << "\nDate:   " << buf
+    os << "commit " << c.hash() << "\n";
+    if (c.hasParent2()) {
+        os << "Merge: " << c.parent_.shortStr() << " " << c.parent2_.shortStr() << "\n";
+    }
+    return os << "Author: " << c.author_ << "\nDate:   " << buf
               << "\n\n    " << c.message_ << "\n";
 }

@@ -86,7 +86,9 @@ public:
     Hash branchTip(const std::string& name) const { return refs_.branchTip(name); }
     bool branchExists(const std::string& name) const { return refs_.branchExists(name); }
     void checkout(const std::string& target);
+    Hash findMergeBase(const Hash& h1, const Hash& h2) const;
     std::string merge(const std::string& branch);
+    std::string mergeAbort();
 
     // Safety Nets & Reflog
     void recordReflog(const std::string& action, const Hash& oldH, const Hash& newH, const std::string& desc);
