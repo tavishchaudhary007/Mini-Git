@@ -633,10 +633,14 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                         <span id="editorFolderPathDisplay" class="text-theme-muted">/</span>
                         <span id="editorFilePathDisplay" class="text-theme-text font-semibold">index.html</span>
                     </div>
-                    <div class="flex items-center space-x-3">
+                    <div class="flex items-center space-x-2">
                         <button onclick="saveActiveFileFromEditor()" class="rounded-full bg-black hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-black px-4 py-1 text-xs font-sans font-semibold flex items-center space-x-1.5 transition cursor-pointer shadow-sm">
                             <i class="fa-solid fa-floppy-disk text-[10px]"></i>
                             <span>Save</span>
+                        </button>
+                        <button onclick="deleteFile(ACTIVE_FILE)" title="Delete File" class="rounded-full bg-zinc-100 hover:bg-rose-100 dark:bg-zinc-800 dark:hover:bg-rose-950/50 text-theme-muted hover:text-rose-600 dark:hover:text-rose-400 px-3 py-1 text-xs font-sans font-medium flex items-center space-x-1 transition cursor-pointer">
+                            <i class="fa-regular fa-trash-can text-[10px]"></i>
+                            <span>Delete</span>
                         </button>
                         <button onclick="switchViewTab('dashboard')" class="rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-theme-text px-3 py-1 text-xs font-sans font-medium flex items-center space-x-1 transition cursor-pointer">
                             <i class="fa-solid fa-xmark text-[10px]"></i>
@@ -1183,9 +1187,10 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 const res = await fetch('/api/snapshot');
                 if (res.ok) {
                     const snap = await res.json();
+                    const isInitial = (!VFS || Object.keys(VFS).length === 0);
                     const changed = hasRepositorySnapshotChanged(window.MINIGIT_LIVE, snap);
                     window.MINIGIT_LIVE = snap;
-                    if (changed || !silent) {
+                    if (changed || isInitial || !silent) {
                         loadLiveRepo();
                     }
                     if (!silent) showToast("Repository synchronized");
@@ -1553,6 +1558,19 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             }
             const repoDisp = document.getElementById('repoNameDisplay');
             if (repoDisp) repoDisp.textContent = live.repoName || 'minigit';
+
+            const area = document.getElementById('codeEditorArea');
+            if (area && ACTIVE_FILE && VFS[ACTIVE_FILE] !== undefined) {
+                if (document.activeElement !== area) {
+                    area.value = VFS[ACTIVE_FILE];
+                }
+            }
+            const activeTabName = document.getElementById('activeEditorFileName');
+            if (activeTabName && ACTIVE_FILE) {
+                const { filename } = splitPath(ACTIVE_FILE);
+                activeTabName.innerText = filename;
+            }
+
             updateUI();
         }
 
@@ -1623,6 +1641,51 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 openFileInEditor(cleanPath);
                 updateUI();
             }
+        }
+
+        async function deleteFile(filepath) {
+            if (!filepath) return;
+            const { filename } = splitPath(filepath);
+            if (!confirm(`Are you sure you want to delete '${filename}'?`)) return;
+
+            if (IS_SERVER_MODE) {
+                const res = await apiPost('file/delete', { path: filepath });
+                if (res && res.ok) {
+                    showToast(`Deleted '${filename}'`);
+                    if (ACTIVE_FILE === filepath) {
+                        ACTIVE_FILE = Object.keys(VFS)[0] || '';
+                        if (ACTIVE_FILE) {
+                            openFileInEditor(ACTIVE_FILE);
+                        } else {
+                            const area = document.getElementById('codeEditorArea');
+                            if (area) area.value = '';
+                            const activeTabName = document.getElementById('activeEditorFileName');
+                            if (activeTabName) activeTabName.innerText = 'No file open';
+                            const fileDisp = document.getElementById('editorFilePathDisplay');
+                            if (fileDisp) fileDisp.innerText = 'No file open';
+                        }
+                    }
+                }
+                return;
+            }
+
+            delete VFS[filepath];
+            delete STAGING_INDEX[filepath];
+            showToast(`Deleted '${filename}'`);
+            if (ACTIVE_FILE === filepath) {
+                ACTIVE_FILE = Object.keys(VFS)[0] || '';
+                if (ACTIVE_FILE) {
+                    openFileInEditor(ACTIVE_FILE);
+                } else {
+                    const area = document.getElementById('codeEditorArea');
+                    if (area) area.value = '';
+                    const activeTabName = document.getElementById('activeEditorFileName');
+                    if (activeTabName) activeTabName.innerText = 'No file open';
+                    const fileDisp = document.getElementById('editorFilePathDisplay');
+                    if (fileDisp) fileDisp.innerText = 'No file open';
+                }
+            }
+            updateUI();
         }
 
         /* ---------------------------------------------------------------------
@@ -3339,7 +3402,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                     const isSelected = (filepath === ACTIVE_FILE);
                     const fileEl = document.createElement('div');
                     fileEl.setAttribute('data-filepath', filepath);
-                    fileEl.className = `flex items-center justify-between py-1.5 px-3 rounded-full cursor-pointer transition text-xs ${isSelected ? 'bg-black dark:bg-white text-white dark:text-black font-semibold shadow-sm' : 'text-theme-text hover:bg-zinc-100 dark:hover:bg-zinc-800'}`;
+                    fileEl.className = `group flex items-center justify-between py-1.5 px-3 rounded-full cursor-pointer transition text-xs ${isSelected ? 'bg-black dark:bg-white text-white dark:text-black font-semibold shadow-sm' : 'text-theme-text hover:bg-zinc-100 dark:hover:bg-zinc-800'}`;
                     fileEl.onclick = () => openFileInEditor(filepath);
                     const fileLeft = document.createElement('div');
                     fileLeft.className = "flex items-center space-x-2 truncate";
@@ -3350,25 +3413,28 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                     fileLeft.appendChild(fileSpan);
                     fileEl.appendChild(fileLeft);
 
+                    const fileRight = document.createElement('div');
+                    fileRight.className = "flex items-center space-x-1.5 shrink-0 ml-2";
+
                     // +x -y badge next to modified files (working copy vs HEAD)
                     const headText = getHeadBlobText(filepath);
                     const workingText = (VFS[filepath] !== undefined) ? VFS[filepath] : "";
                     if (headText !== workingText) {
                         const changes = countChanges(headText, workingText);
                         if (changes.isBinary || changes.isLarge || changes.added > 0 || changes.removed > 0) {
-                            const fileRight = document.createElement('div');
-                            fileRight.className = "flex items-center space-x-1 shrink-0 font-mono text-[10px] ml-2";
+                            const badgeContainer = document.createElement('div');
+                            badgeContainer.className = "flex items-center space-x-1 font-mono text-[10px]";
 
                             if (changes.isBinary) {
                                 const binBadge = document.createElement('span');
                                 binBadge.className = isSelected ? 'opacity-80 italic' : 'text-theme-muted italic';
                                 binBadge.textContent = 'bin';
-                                fileRight.appendChild(binBadge);
+                                badgeContainer.appendChild(binBadge);
                             } else if (changes.isLarge) {
                                 const lgBadge = document.createElement('span');
                                 lgBadge.className = isSelected ? 'opacity-80 italic' : 'text-theme-muted italic';
                                 lgBadge.textContent = 'large';
-                                fileRight.appendChild(lgBadge);
+                                badgeContainer.appendChild(lgBadge);
                             } else {
                                 if (changes.added > 0) {
                                     const plusSpan = document.createElement('span');
@@ -3376,7 +3442,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                                         ? 'px-1 py-0.2 rounded font-bold bg-emerald-500/20 text-emerald-300 dark:text-emerald-700'
                                         : 'diff-added px-1 py-0.2 rounded font-bold';
                                     plusSpan.textContent = `+${changes.added}`;
-                                    fileRight.appendChild(plusSpan);
+                                    badgeContainer.appendChild(plusSpan);
                                 }
                                 if (changes.removed > 0) {
                                     const minusSpan = document.createElement('span');
@@ -3384,13 +3450,27 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                                         ? 'px-1 py-0.2 rounded font-bold bg-rose-500/20 text-rose-300 dark:text-rose-700'
                                         : 'diff-removed px-1 py-0.2 rounded font-bold';
                                     minusSpan.textContent = `-${changes.removed}`;
-                                    fileRight.appendChild(minusSpan);
+                                    badgeContainer.appendChild(minusSpan);
                                 }
                             }
-                            fileEl.appendChild(fileRight);
+                            fileRight.appendChild(badgeContainer);
                         }
                     }
 
+                    // Delete Button next to file
+                    const delBtn = document.createElement('button');
+                    delBtn.title = `Delete ${filename}`;
+                    delBtn.className = isSelected
+                        ? "opacity-60 hover:opacity-100 hover:text-rose-300 dark:hover:text-rose-600 p-0.5 rounded transition cursor-pointer"
+                        : "opacity-0 group-hover:opacity-100 text-theme-muted hover:text-rose-500 dark:hover:text-rose-400 p-0.5 rounded transition cursor-pointer";
+                    delBtn.innerHTML = '<i class="fa-regular fa-trash-can text-[11px]"></i>';
+                    delBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        deleteFile(filepath);
+                    };
+                    fileRight.appendChild(delBtn);
+
+                    fileEl.appendChild(fileRight);
                     container.appendChild(fileEl);
                 }
             }
@@ -3956,6 +4036,10 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         window.onload = async function() {
             initTheme();
 
+            if (window.MINIGIT_LIVE && typeof window.MINIGIT_LIVE === 'object') {
+                loadLiveRepo();
+            }
+
             if (IS_SERVER_MODE) {
                 const badge = document.getElementById('liveServerStatusBadge');
                 if (badge) {
@@ -3963,6 +4047,9 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                     badge.classList.add('flex');
                 }
                 await refreshRepositorySnapshot(true);
+                if (!VFS || Object.keys(VFS).length === 0) {
+                    loadLiveRepo();
+                }
                 setInterval(pollPendingPairRequests, 1500);
                 setInterval(async () => {
                     if (!document.hidden) {
@@ -3981,13 +4068,14 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                         } catch (e) {}
                     }
                 }, 2500);
-            } else if (window.MINIGIT_LIVE && typeof window.MINIGIT_LIVE === 'object') {
-                loadLiveRepo();
-            } else {
+            } else if (!window.MINIGIT_LIVE || typeof window.MINIGIT_LIVE !== 'object') {
                 await executeGitInit();
             }
 
-            openFileInEditor(Object.keys(VFS)[0] || 'index.html');
+            const targetFile = (ACTIVE_FILE && VFS && VFS[ACTIVE_FILE] !== undefined)
+                ? ACTIVE_FILE
+                : (VFS ? Object.keys(VFS)[0] : null) || 'index.html';
+            openFileInEditor(targetFile);
             switchViewTab('dashboard');
         };
     </script>

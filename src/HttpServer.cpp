@@ -558,6 +558,31 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                                          "{\"ok\":false,\"error\":" + jsonString(e.what()) + "}", origin, isSyncOrPairEndpoint, lan);
                     }
                 }
+            } else if (method == "POST" && path == "/api/file/delete") {
+                JsonValue bodyJson;
+                std::string parseErr, p;
+                if (!parseRequestBody(body, bodyJson, parseErr)) {
+                    sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
+                                     "{\"ok\":false,\"error\":\"Invalid JSON: " + parseErr + "\"}", origin, isSyncOrPairEndpoint, lan);
+                } else if (!getRequiredString(bodyJson, "path", p, parseErr) || p.empty()) {
+                    sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
+                                     "{\"ok\":false,\"error\":\"Path is required\"}", origin, isSyncOrPairEndpoint, lan);
+                } else {
+                    try {
+                        std::string rel = repo->resolveRepoPath(p, true);
+                        fs::path full = repo->root() / rel;
+                        if (fs::exists(full)) {
+                            std::error_code ec;
+                            fs::remove(full, ec);
+                        }
+                        std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
+                        sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
+                                         "{\"ok\":true,\"message\":\"deleted\",\"snapshot\":" + snap + "}", origin, isSyncOrPairEndpoint, lan);
+                    } catch (const std::exception& e) {
+                        sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
+                                         "{\"ok\":false,\"error\":" + jsonString(e.what()) + "}", origin, isSyncOrPairEndpoint, lan);
+                    }
+                }
             } else if (method == "POST" && path == "/api/stage") {
                 JsonValue bodyJson;
                 std::string parseErr, p;
