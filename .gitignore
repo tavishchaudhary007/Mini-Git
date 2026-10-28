@@ -2,5 +2,6 @@ build/
 minigit
 minigit.exe
 minigit.exe.*
+minigit_*.exe
 *.tmp
 .minigit/
