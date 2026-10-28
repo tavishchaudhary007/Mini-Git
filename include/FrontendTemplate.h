@@ -842,15 +842,19 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                 </div>
 
                 <div class="grid grid-cols-2 gap-3 pt-1">
-                    <button onclick="executeLanPull()" class="py-2.5 rounded-full bg-black hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-black font-semibold text-xs shadow-sm transition flex items-center justify-center space-x-2 cursor-pointer">
-                        <i class="fa-solid fa-arrow-down text-xs"></i>
-                        <span>Pull from Peer</span>
+                    <button id="btnLanPull" onclick="executeLanPull()" class="py-2.5 rounded-full bg-black hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-black font-semibold text-xs shadow-sm transition flex items-center justify-center space-x-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+                        <i id="iconLanPull" class="fa-solid fa-arrow-down text-xs"></i>
+                        <span id="textLanPull">Pull from Peer</span>
                     </button>
-                    <button onclick="executeLanPush()" class="py-2.5 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-theme-text border border-theme-border font-medium text-xs transition flex items-center justify-center space-x-2 cursor-pointer">
-                        <i class="fa-solid fa-arrow-up text-xs"></i>
-                        <span>Push to Peer</span>
+                    <button id="btnLanPush" onclick="executeLanPush()" class="py-2.5 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-theme-text border border-theme-border font-medium text-xs transition flex items-center justify-center space-x-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+                        <i id="iconLanPush" class="fa-solid fa-arrow-up text-xs"></i>
+                        <span id="textLanPush">Push to Peer</span>
                     </button>
                 </div>
+                <p class="text-[11px] text-theme-muted text-center pt-1">
+                    <i class="fa-solid fa-circle-info text-[10px] mr-1"></i>
+                    Only one teammate needs to push or pull — history syncs across both devices.
+                </p>
             </div>
 
             <!-- Portable Snapshot Bundle -->
@@ -1141,8 +1145,9 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 });
                 const data = await res.json();
                 if (!data.ok) {
-                    if (data.peerRefs && data.peerRefs.length > 0) {
-                        const peerBranch = data.peerRefs[0];
+                    const peerRefs = data.peerRefs || (data.result && data.result.peerRefs);
+                    if (peerRefs && peerRefs.length > 0) {
+                        const peerBranch = peerRefs[0];
                         showToast(data.error || data.message || `Diverged: peer tip saved as ${peerBranch}`, 'warning', {
                             label: `Merge ${peerBranch}`,
                             onClick: async () => {
@@ -2296,6 +2301,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
 
         function cleanPeerUrl(url) {
             let u = (url || '').trim();
+            if (!u) return '';
             if (!u.startsWith('http://') && !u.startsWith('https://')) {
                 u = 'http://' + u;
             }
@@ -2484,6 +2490,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 showToast("Please enter the 6-digit pair code shown on teammate's screen", "error");
                 return;
             }
+            localStorage.setItem('minigit_last_peer_url', peerUrl);
 
             const btn = document.getElementById('btnSubmitPairCode');
             const waiting = document.getElementById('pairWaitingNotice');
@@ -2561,6 +2568,11 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
 
             if (addrEl) {
                 addrEl.textContent = window.location.origin || "http://localhost:8080";
+            }
+            const urlInput = document.getElementById('lanPeerUrlInput');
+            if (urlInput && !urlInput.value) {
+                const savedPeerUrl = localStorage.getItem('minigit_last_peer_url');
+                if (savedPeerUrl) urlInput.value = savedPeerUrl;
             }
             checkPeerAuthStatus();
 
@@ -2663,7 +2675,10 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             return localStorage.getItem('minigit_token_' + cleanUrl) || '';
         }
 
+        let IS_SYNCING_LAN = false;
+
         async function executeLanPull() {
+            if (IS_SYNCING_LAN) return;
             const input = document.getElementById('lanPeerUrlInput');
             let peerUrl = cleanPeerUrl(input ? input.value : '');
 
@@ -2672,7 +2687,20 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 return;
             }
 
+            localStorage.setItem('minigit_last_peer_url', peerUrl);
             const token = getPeerSessionToken(peerUrl);
+
+            const btnPull = document.getElementById('btnLanPull');
+            const btnPush = document.getElementById('btnLanPush');
+            const iconPull = document.getElementById('iconLanPull');
+            const textPull = document.getElementById('textLanPull');
+
+            IS_SYNCING_LAN = true;
+            if (btnPull) btnPull.disabled = true;
+            if (btnPush) btnPush.disabled = true;
+            if (iconPull) iconPull.className = "fa-solid fa-circle-notch fa-spin text-xs";
+            if (textPull) textPull.textContent = "Pulling...";
+
             showToast("Connecting to peer over LAN...");
             try {
                 const headers = token ? { 'X-MiniGit-Token': token } : {};
@@ -2681,7 +2709,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                     if (res.status === 401 || res.status === 403) {
                         localStorage.removeItem('minigit_token_' + peerUrl);
                         checkPeerAuthStatus();
-                        throw new Error("Peer rejected connection: pairing required or token revoked.");
+                        throw new Error("Peer requires authentication: enter 6-digit code above and click Pair Device first.");
                     }
                     throw new Error("Peer returned HTTP " + res.status);
                 }
@@ -2693,7 +2721,13 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                         showToast(postRes.message || "Synchronized with LAN peer successfully!");
                         closeLanSyncModal();
                     } else if (postRes) {
-                        showToast(postRes.error || postRes.message || "P2P sync failed", "error");
+                        const peerRefs = postRes.peerRefs || (postRes.result && postRes.result.peerRefs);
+                        if (peerRefs && peerRefs.length > 0) {
+                            // apiPost already showed the Merge warning toast with action button
+                            closeLanSyncModal();
+                        } else {
+                            showToast(postRes.error || postRes.message || "P2P sync failed", "error");
+                        }
                     }
                 } else {
                     if (bundle.objects) Object.assign(OBJECTS, bundle.objects);
@@ -2705,10 +2739,17 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 }
             } catch (err) {
                 showToast("P2P Sync failed: " + err.message, "error");
+            } finally {
+                IS_SYNCING_LAN = false;
+                if (btnPull) btnPull.disabled = false;
+                if (btnPush) btnPush.disabled = false;
+                if (iconPull) iconPull.className = "fa-solid fa-arrow-down text-xs";
+                if (textPull) textPull.textContent = "Pull from Peer";
             }
         }
 
         async function executeLanPush() {
+            if (IS_SYNCING_LAN) return;
             const input = document.getElementById('lanPeerUrlInput');
             let peerUrl = cleanPeerUrl(input ? input.value : '');
 
@@ -2717,7 +2758,20 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 return;
             }
 
+            localStorage.setItem('minigit_last_peer_url', peerUrl);
             const token = getPeerSessionToken(peerUrl);
+
+            const btnPull = document.getElementById('btnLanPull');
+            const btnPush = document.getElementById('btnLanPush');
+            const iconPush = document.getElementById('iconLanPush');
+            const textPush = document.getElementById('textLanPush');
+
+            IS_SYNCING_LAN = true;
+            if (btnPull) btnPull.disabled = true;
+            if (btnPush) btnPush.disabled = true;
+            if (iconPush) iconPush.className = "fa-solid fa-circle-notch fa-spin text-xs";
+            if (textPush) textPush.textContent = "Pushing...";
+
             showToast("Pushing snapshot bundle to LAN peer...");
             try {
                 let bundleData = null;
@@ -2745,17 +2799,31 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 });
                 const resJson = await postRes.json();
                 if (postRes.ok && resJson && resJson.ok) {
-                    showToast(resJson.message || "Successfully pushed bundle to LAN peer!");
+                    showToast(resJson.message || "Successfully pushed to LAN peer! (Peer's repository updated)");
                     closeLanSyncModal();
                 } else {
                     if (postRes.status === 401 || postRes.status === 403) {
                         localStorage.removeItem('minigit_token_' + peerUrl);
                         checkPeerAuthStatus();
+                        showToast("Peer requires authentication: enter 6-digit code above and click Pair Device first.", "error");
+                    } else {
+                        const peerRefs = resJson.peerRefs || (resJson.result && resJson.result.peerRefs);
+                        if (peerRefs && peerRefs.length > 0) {
+                            showToast(resJson.error || resJson.message || `Pushed to peer, but branches diverged. Saved as ${peerRefs[0]} on peer.`, "warning");
+                            closeLanSyncModal();
+                        } else {
+                            showToast(resJson.error || resJson.message || ("Peer rejected bundle (HTTP " + postRes.status + ")"), "error");
+                        }
                     }
-                    showToast(resJson.error || resJson.message || ("Peer rejected bundle (HTTP " + postRes.status + ")"), "error");
                 }
             } catch (err) {
                 showToast("Push failed: " + err.message, "error");
+            } finally {
+                IS_SYNCING_LAN = false;
+                if (btnPull) btnPull.disabled = false;
+                if (btnPush) btnPush.disabled = false;
+                if (iconPush) iconPush.className = "fa-solid fa-arrow-up text-xs";
+                if (textPush) textPush.textContent = "Push to Peer";
             }
         }
 
@@ -4051,6 +4119,11 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                     loadLiveRepo();
                 }
                 setInterval(pollPendingPairRequests, 1500);
+                document.addEventListener('visibilitychange', () => {
+                    if (!document.hidden && IS_SERVER_MODE) {
+                        refreshRepositorySnapshot(true);
+                    }
+                });
                 setInterval(async () => {
                     if (!document.hidden) {
                         try {
@@ -4067,7 +4140,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                             }
                         } catch (e) {}
                     }
-                }, 2500);
+                }, 1200);
             } else if (!window.MINIGIT_LIVE || typeof window.MINIGIT_LIVE !== 'object') {
                 await executeGitInit();
             }
