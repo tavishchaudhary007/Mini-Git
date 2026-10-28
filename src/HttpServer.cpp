@@ -159,12 +159,14 @@ void sendHttpResponse(socket_t sock, int statusCode, const std::string& statusTe
                       const std::string& contentType, const std::string& body,
                       const std::string& origin = "", bool isSyncOrPairEndpoint = false,
                       bool lan = false) {
+    (void)lan;
     std::ostringstream oss;
     oss << "HTTP/1.1 " << statusCode << " " << statusText << "\r\n"
         << "Content-Type: " << contentType << "\r\n"
         << "Content-Length: " << body.size() << "\r\n";
-    if (lan && isSyncOrPairEndpoint && !origin.empty()) {
-        oss << "Access-Control-Allow-Origin: " << origin << "\r\n"
+    if (isSyncOrPairEndpoint) {
+        std::string allowOrigin = (!origin.empty() && origin != "null") ? origin : "*";
+        oss << "Access-Control-Allow-Origin: " << allowOrigin << "\r\n"
             << "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
             << "Access-Control-Allow-Headers: Content-Type, X-MiniGit-Token\r\n"
             << "Vary: Origin\r\n";
@@ -405,7 +407,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                     sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8", codeJson, origin, isSyncOrPairEndpoint, lan);
                 }
             } else if (method == "POST" && path == "/api/pair") {
-                if (!lan) {
+                if (!lan && !isLoopback) {
                     sendHttpResponse(clientSock, 403, "Forbidden", "application/json",
                                      "{\"ok\":false,\"error\":\"LAN mode is not enabled on host\"}", origin, isSyncOrPairEndpoint, lan);
                 } else {
