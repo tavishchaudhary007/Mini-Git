@@ -77,47 +77,91 @@ std::string Repository::resolveRepoPath(const std::string& pathArg, bool isRepoR
     return relStr;
 }
 
+static void removeConflicts(const fs::path& gitDir, const std::vector<std::string>& resolvedPaths) {
+    fs::path p = gitDir / "MERGE_CONFLICTS";
+    if (!fs::exists(p) || resolvedPaths.empty()) return;
+    std::set<std::string> resolved(resolvedPaths.begin(), resolvedPaths.end());
+    std::vector<std::string> remaining;
+    std::ifstream ifs(p);
+    std::string line;
+    while (std::getline(ifs, line)) {
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
+        while (!line.empty() && (line.front() == ' ')) line.erase(line.begin());
+        if (!line.empty() && !resolved.count(line)) {
+            remaining.push_back(line);
+        }
+    }
+    ifs.close();
+    std::error_code ec;
+    if (remaining.empty()) {
+        fs::remove(p, ec);
+    } else {
+        std::ofstream ofs(p, std::ios::trunc);
+        for (const auto& rem : remaining) {
+            ofs << rem << "\n";
+        }
+    }
+}
+
 bool Repository::isIgnored(const fs::path& fullPath, const std::string& relPath, bool isDir) const {
-    (void)isDir;
     std::string fname = fullPath.filename().generic_string();
-    if (fname == ".git" || fname == ".minigit" || fname == "node_modules" ||
-        fname == "minigit.exe" || fname == "minigit") {
+    if (fname == ".git" || fname == ".minigit" || fname == "node_modules") {
         return true;
     }
     if (relPath == ".git" || relPath.rfind(".git/", 0) == 0 ||
         relPath == ".minigit" || relPath.rfind(".minigit/", 0) == 0 ||
-        relPath == "node_modules" || relPath.rfind("node_modules/", 0) == 0 ||
-        relPath == "minigit.exe" || relPath == "minigit") {
+        relPath == "node_modules" || relPath.rfind("node_modules/", 0) == 0) {
+        return true;
+    }
+    // Only ignore minigit / minigit.exe at the repo root
+    if (!isDir && (relPath == "minigit" || relPath == "minigit.exe")) {
         return true;
     }
 
     fs::path ignPath = root_ / ".minigitignore";
-    if (fs::exists(ignPath)) {
-        std::ifstream ifs(ignPath);
-        std::string line;
-        while (std::getline(ifs, line)) {
-            while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t')) line.pop_back();
-            while (!line.empty() && (line.front() == ' ' || line.front() == '\t')) line.erase(line.begin());
-            if (line.empty() || line.front() == '#') continue;
+    std::error_code ec;
+    bool ignExists = fs::exists(ignPath, ec);
+    if (!ignExists) {
+        if (!ignoreFileCached_ || !ignorePatterns_.empty()) {
+            ignorePatterns_.clear();
+            ignoreFileCached_ = true;
+            ignoreMtime_ = fs::file_time_type{};
+        }
+    } else {
+        auto mtime = fs::last_write_time(ignPath, ec);
+        if (!ignoreFileCached_ || mtime != ignoreMtime_) {
+            ignoreMtime_ = mtime;
+            ignoreFileCached_ = true;
+            ignorePatterns_.clear();
+            std::ifstream ifs(ignPath);
+            std::string line;
+            while (std::getline(ifs, line)) {
+                while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t')) line.pop_back();
+                while (!line.empty() && (line.front() == ' ' || line.front() == '\t')) line.erase(line.begin());
+                if (line.empty() || line.front() == '#') continue;
+                ignorePatterns_.push_back(line);
+            }
+        }
+    }
 
-            if (line.back() == '/') {
-                std::string dirPattern = line.substr(0, line.size() - 1);
-                if (fname == dirPattern || relPath == dirPattern || relPath.rfind(dirPattern + "/", 0) == 0) {
-                    return true;
-                }
-                if (relPath.find("/" + dirPattern + "/") != std::string::npos ||
-                    (relPath.size() >= dirPattern.size() + 1 && relPath.substr(relPath.size() - dirPattern.size() - 1) == "/" + dirPattern)) {
-                    return true;
-                }
-            } else if (line.rfind("*.", 0) == 0) {
-                std::string ext = line.substr(1);
-                if (fname.size() >= ext.size() && fname.substr(fname.size() - ext.size()) == ext) {
-                    return true;
-                }
-            } else {
-                if (fname == line || relPath == line) {
-                    return true;
-                }
+    for (const auto& line : ignorePatterns_) {
+        if (line.back() == '/') {
+            std::string dirPattern = line.substr(0, line.size() - 1);
+            if (fname == dirPattern || relPath == dirPattern || relPath.rfind(dirPattern + "/", 0) == 0) {
+                return true;
+            }
+            if (relPath.find("/" + dirPattern + "/") != std::string::npos ||
+                (relPath.size() >= dirPattern.size() + 1 && relPath.substr(relPath.size() - dirPattern.size() - 1) == "/" + dirPattern)) {
+                return true;
+            }
+        } else if (line.rfind("*.", 0) == 0) {
+            std::string ext = line.substr(1);
+            if (fname.size() >= ext.size() && fname.substr(fname.size() - ext.size()) == ext) {
+                return true;
+            }
+        } else {
+            if (fname == line || relPath == line) {
+                return true;
             }
         }
     }
@@ -157,11 +201,17 @@ void Repository::addFile(const std::string& rel) {
 
 void Repository::add(const std::string& pathArg, bool isRepoRelative) {
     if (pathArg == "." || pathArg.empty()) {
-        for (const auto& f : workingFiles()) addFile(f);
+        std::vector<std::string> added;
+        for (const auto& f : workingFiles()) {
+            addFile(f);
+            added.push_back(f);
+        }
         std::vector<std::string> gone;
         for (const auto& [path, h] : index_.entries())
             if (!fs::exists(root_ / path)) gone.push_back(path);
         for (const auto& g : gone) index_.remove(g);
+        removeConflicts(gitDir_, added);
+        removeConflicts(gitDir_, gone);
         index_.save();
         return;
     }
@@ -169,18 +219,27 @@ void Repository::add(const std::string& pathArg, bool isRepoRelative) {
     fs::path full = root_ / rel;
     if (fs::is_directory(full)) {
         std::string prefix = rel + "/";
-        for (const auto& f : workingFiles())
-            if (f.rfind(prefix, 0) == 0) addFile(f);
+        std::vector<std::string> added;
+        for (const auto& f : workingFiles()) {
+            if (f.rfind(prefix, 0) == 0) {
+                addFile(f);
+                added.push_back(f);
+            }
+        }
         std::vector<std::string> gone;
         for (const auto& [path, h] : index_.entries())
             if (path.rfind(prefix, 0) == 0 && !fs::exists(root_ / path)) gone.push_back(path);
         for (const auto& g : gone) index_.remove(g);
+        removeConflicts(gitDir_, added);
+        removeConflicts(gitDir_, gone);
     } else if (fs::is_regular_file(full)) {
         if (!isIgnored(full, rel, false)) {
             addFile(rel);
+            removeConflicts(gitDir_, {rel});
         }
     } else if (index_.has(rel)) {
         index_.remove(rel);  // staging a deletion
+        removeConflicts(gitDir_, {rel});
     } else {
         throw FileNotFoundException("file not found: " + pathArg);
     }
@@ -228,13 +287,15 @@ void Repository::discard(const std::string& pathArg, bool isRepoRelative) {
 }
 
 Hash Repository::revert(const Hash& commitHash) {
+    if (isMerging()) throw MergeException("merge in progress; commit or abort it first");
     if (isDirty()) throw MiniGitException("you have uncommitted changes; commit them first");
+
     auto c = store_.loadAs<Commit>(commitHash);
     Hash parentHash = c->parent();
 
     std::map<std::string, Hash> cTree = store_.loadAs<Tree>(c->tree())->entries();
     std::map<std::string, Hash> pTree;
-    if (!parentHash.empty()) {
+    if (!parentHash.empty() && store_.exists(parentHash)) {
         pTree = store_.loadAs<Tree>(store_.loadAs<Commit>(parentHash)->tree())->entries();
     }
     auto head = headTree();
@@ -272,31 +333,56 @@ Hash Repository::revert(const Hash& commitHash) {
         }
     }
 
-    for (const auto& path : addedInC) {
-        if (fs::exists(root_ / path)) fs::remove(root_ / path);
-        for (fs::path d = (root_ / path).parent_path(); d != root_ && fs::is_empty(d); d = d.parent_path()) {
-            fs::remove(d);
-        }
-        index_.remove(path);
+    // Fix 10: Cannot revert initial commit
+    if (parentHash.empty()) {
+        throw MiniGitException("cannot revert the initial commit");
     }
+
+    std::map<std::string, Hash> resultTree = head;
+    for (const auto& path : addedInC) resultTree.erase(path);
+    for (const auto& path : removedInC) resultTree[path] = pTree.at(path);
+    for (const auto& path : modifiedInC) resultTree[path] = pTree.at(path);
+
+    if (resultTree == head || (addedInC.empty() && removedInC.empty() && modifiedInC.empty())) {
+        throw MiniGitException("nothing to revert");
+    }
+
+    // Check untracked files before touching disk
     for (const auto& path : removedInC) {
-        writeFile(root_ / path, store_.loadAs<Blob>(pTree.at(path))->content());
-        index_.set(path, pTree.at(path));
+        if (fs::exists(root_ / path)) {
+            throw MiniGitException("untracked file '" + path + "' would be overwritten; move or commit it first");
+        }
     }
-    for (const auto& path : modifiedInC) {
-        writeFile(root_ / path, store_.loadAs<Blob>(pTree.at(path))->content());
-        index_.set(path, pTree.at(path));
+
+    Hash oldHead = refs_.headCommit();
+    try {
+        for (const auto& path : addedInC) {
+            if (fs::exists(root_ / path)) fs::remove(root_ / path);
+            for (fs::path d = (root_ / path).parent_path(); d != root_ && fs::is_empty(d); d = d.parent_path()) {
+                fs::remove(d);
+            }
+            index_.remove(path);
+        }
+        for (const auto& path : removedInC) {
+            writeFile(root_ / path, store_.loadAs<Blob>(pTree.at(path))->content());
+            index_.set(path, pTree.at(path));
+        }
+        for (const auto& path : modifiedInC) {
+            writeFile(root_ / path, store_.loadAs<Blob>(pTree.at(path))->content());
+            index_.set(path, pTree.at(path));
+        }
+        index_.save();
+        return commit("Revert \"" + c->message() + "\"");
+    } catch (...) {
+        if (!oldHead.empty()) {
+            restoreCommit(oldHead);
+        }
+        throw;
     }
-    index_.save();
-    return commit("Revert \"" + c->message() + "\"");
 }
 
 Hash Repository::commit(const std::string& message) {
     if (message.empty()) throw MiniGitException("commit message must not be empty");
-    if (index_.empty()) throw NothingToCommitException("nothing to commit (staging area is empty)");
-
-    Tree tree;
-    for (const auto& [path, h] : index_.entries()) tree.set(path, h);
 
     Hash parent = refs_.headCommit();
     fs::path mergeHeadFile = gitDir_ / "MERGE_HEAD";
@@ -304,6 +390,63 @@ Hash Repository::commit(const std::string& message) {
     if (fs::exists(mergeHeadFile)) {
         parent2 = Hash(trim(readFile(mergeHeadFile)));
     }
+
+    if (!parent2.empty()) {
+        // Fix 6: Check unresolved conflicts
+        auto remainingConflicts = conflictedPaths();
+        if (!remainingConflicts.empty()) {
+            throw MergeException("cannot commit with unresolved conflicts");
+        }
+        // Check if staged content of any originally conflicted path (or all staged files) still contains conflict markers
+        std::vector<std::string> allConflicted;
+        fs::path allConfPath = gitDir_ / "MERGE_CONFLICTS_ALL";
+        if (fs::exists(allConfPath)) {
+            std::ifstream ifs(allConfPath);
+            std::string line;
+            while (std::getline(ifs, line)) {
+                while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
+                while (!line.empty() && (line.front() == ' ')) line.erase(line.begin());
+                if (!line.empty()) allConflicted.push_back(line);
+            }
+        }
+        for (const auto& cp : allConflicted) {
+            if (index_.has(cp)) {
+                Hash bHash = index_.get(cp);
+                if (store_.exists(bHash)) {
+                    std::string c = store_.loadAs<Blob>(bHash)->content();
+                    if ((c.find("<<<<<<<") != std::string::npos && c.find("=======") != std::string::npos && c.find(">>>>>>>") != std::string::npos) ||
+                        c.find("<<<<<<< ours") != std::string::npos) {
+                        throw MergeException("cannot commit: staged content of '" + cp + "' still contains conflict markers");
+                    }
+                }
+            }
+        }
+        for (const auto& [path, h] : index_.entries()) {
+            if (store_.exists(h)) {
+                std::string c = store_.loadAs<Blob>(h)->content();
+                if (c.find("<<<<<<< ours") != std::string::npos) {
+                    throw MergeException("cannot commit: staged content of '" + path + "' still contains conflict markers");
+                }
+            }
+        }
+    }
+
+    bool headHasFiles = false;
+    if (!parent.empty()) {
+        auto parentCommit = store_.loadAs<Commit>(parent);
+        auto parentTree = store_.loadAs<Tree>(parentCommit->tree());
+        headHasFiles = !parentTree->entries().empty();
+    }
+
+    // Fix 11: allow empty-tree commit when HEAD's tree is not empty
+    if (index_.empty()) {
+        if (!headHasFiles) {
+            throw NothingToCommitException("nothing to commit (staging area is empty)");
+        }
+    }
+
+    Tree tree;
+    for (const auto& [path, h] : index_.entries()) tree.set(path, h);
 
     if (parent2.empty() && !parent.empty() && store_.loadAs<Commit>(parent)->tree() == tree.hash())
         throw NothingToCommitException("nothing to commit (no changes staged)");
@@ -313,8 +456,14 @@ Hash Repository::commit(const std::string& message) {
     refs_.updateHead(h);
     if (!parent2.empty()) {
         fs::remove(mergeHeadFile);
+        std::error_code ec;
+        fs::remove(gitDir_ / "MERGE_CONFLICTS", ec);
+        fs::remove(gitDir_ / "MERGE_CONFLICTS_ALL", ec);
         recordReflog("merge", parent, h, message);
     } else {
+        std::error_code ec;
+        fs::remove(gitDir_ / "MERGE_CONFLICTS", ec);
+        fs::remove(gitDir_ / "MERGE_CONFLICTS_ALL", ec);
         recordReflog("commit", parent, h, message);
     }
     return h;
@@ -472,9 +621,18 @@ CommitStat Repository::commitStats(const Hash& commitHash) const {
     return result;
 }
 
-void Repository::createBranch(const std::string& name) {
-    Hash tip = refs_.headCommit();
-    if (tip.empty()) throw BranchException("cannot create a branch before the first commit");
+void Repository::createBranch(const std::string& name, const Hash& at) {
+    if (isMerging()) {
+        throw MergeException("merge in progress; commit or abort it first");
+    }
+    Hash tip;
+    if (at.empty()) {
+        tip = refs_.headCommit();
+        if (tip.empty()) throw BranchException("cannot create a branch before the first commit");
+    } else {
+        tip = store_.resolvePrefix(at.str());
+        store_.loadAs<Commit>(tip); // validates tip resolves to a commit
+    }
     refs_.createBranch(name, tip);
     recordReflog("branch", tip, tip, "Created branch " + name);
 }
@@ -557,11 +715,34 @@ std::string Repository::mergeAbort() {
         throw MergeException("no merge in progress to abort");
     }
     fs::remove(mergeHead);
+    std::error_code ec;
+    fs::remove(gitDir_ / "MERGE_CONFLICTS", ec);
+    fs::remove(gitDir_ / "MERGE_CONFLICTS_ALL", ec);
     Hash cur = refs_.headCommit();
     if (!cur.empty()) {
         restoreCommit(cur);
     }
     return "Merge aborted.";
+}
+
+bool Repository::isMerging() const {
+    return fs::exists(gitDir_ / "MERGE_HEAD");
+}
+
+std::vector<std::string> Repository::conflictedPaths() const {
+    fs::path p = gitDir_ / "MERGE_CONFLICTS";
+    if (!fs::exists(p)) return {};
+    std::vector<std::string> out;
+    std::ifstream ifs(p);
+    std::string line;
+    while (std::getline(ifs, line)) {
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
+        while (!line.empty() && (line.front() == ' ')) line.erase(line.begin());
+        if (!line.empty()) out.push_back(line);
+    }
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+    return out;
 }
 
 void Repository::checkUntrackedOverwrite(const std::map<std::string, Hash>& targetTree) const {
@@ -591,6 +772,7 @@ void Repository::restoreCommit(const Hash& c) {
 }
 
 void Repository::checkout(const std::string& target) {
+    if (isMerging()) throw MergeException("merge in progress; commit or abort it first");
     if (isDirty()) throw CheckoutException("you have uncommitted changes; commit them first");
     Hash oldHead = refs_.headCommit();
     bool isBranch = refs_.branchExists(target);
@@ -736,6 +918,12 @@ std::string Repository::merge(const std::string& branch) {
         index_.save();
         writeFile(mergeHeadFile, tgt.str() + "\n");
 
+        std::sort(conflictedPaths.begin(), conflictedPaths.end());
+        std::ostringstream cStream;
+        for (const auto& cp : conflictedPaths) cStream << cp << "\n";
+        writeFile(gitDir_ / "MERGE_CONFLICTS", cStream.str());
+        writeFile(gitDir_ / "MERGE_CONFLICTS_ALL", cStream.str());
+
         std::string listStr;
         for (size_t i = 0; i < conflictedPaths.size(); ++i) {
             if (i > 0) listStr += ", ";
@@ -789,6 +977,24 @@ Snapshot Repository::snapshot() const {
     for (const auto& [path, h] : head)
         if (!index_.has(path)) s.stagedDeleted.push_back(path);
     s.status = status();
+    s.detached = !refs_.onBranch();
+    s.merging = isMerging();
+    s.conflicts = conflictedPaths();
+
+    for (const auto& [path, h] : index_.entries()) {
+        auto it = head.find(path);
+        if (it == head.end()) {
+            s.stagedStatus[path] = 'A';
+        } else if (it->second != h) {
+            s.stagedStatus[path] = 'M';
+        }
+    }
+    for (const auto& [path, h] : head) {
+        if (!index_.has(path)) {
+            s.stagedStatus[path] = 'D';
+        }
+    }
+
     return s;
 }
 
@@ -879,6 +1085,7 @@ std::vector<ReflogEntry> Repository::reflog() const {
 }
 
 std::string Repository::undo() {
+    if (isMerging()) throw MergeException("merge in progress; commit or abort it first");
     Hash cur = refs_.headCommit();
     if (cur.empty()) throw MiniGitException("nothing to undo (repository has no commits)");
     auto c = store_.loadAs<Commit>(cur);
@@ -902,6 +1109,7 @@ bool Repository::hasStash() const {
 }
 
 std::string Repository::stashSave(const std::string& message, bool includeUntracked) {
+    if (isMerging()) throw MergeException("merge in progress; commit or abort it first");
     if (head().empty()) {
         throw MiniGitException("cannot stash before the first commit");
     }
@@ -956,6 +1164,9 @@ std::string Repository::stashSave(const std::string& message, bool includeUntrac
 }
 
 std::string Repository::stashPop() {
+    if (isMerging()) {
+        throw MergeException("merge in progress; commit or abort it first");
+    }
     auto list = stashList();
     if (list.empty()) throw MiniGitException("no stash entries found to pop");
 
@@ -967,25 +1178,98 @@ std::string Repository::stashPop() {
 
     auto c = store_.loadAs<Commit>(entry.commitHash);
     auto t = store_.loadAs<Tree>(c->tree());
-    const auto& workEntries = t->entries();
+    const auto& stashTree = t->entries();
 
-    checkUntrackedOverwrite(workEntries);
+    Hash baseHash = c->parent();
+    std::map<std::string, Hash> baseTree;
+    if (!baseHash.empty() && store_.exists(baseHash)) {
+        baseTree = store_.loadAs<Tree>(store_.loadAs<Commit>(baseHash)->tree())->entries();
+    }
 
     auto curHeadTree = headTree();
-    for (const auto& [p, h] : curHeadTree) {
-        if (!workEntries.count(p) && fs::exists(root_ / p)) {
-            fs::remove(root_ / p);
+
+    std::set<std::string> allPaths;
+    for (const auto& [p, _] : baseTree) allPaths.insert(p);
+    for (const auto& [p, _] : stashTree) allPaths.insert(p);
+    for (const auto& [p, _] : curHeadTree) allPaths.insert(p);
+
+    std::vector<std::string> stashAdded;
+    std::vector<std::string> stashDeleted;
+    std::vector<std::string> stashModified;
+
+    for (const auto& p : allPaths) {
+        Hash bHash = baseTree.count(p) ? baseTree.at(p) : Hash();
+        Hash sHash = stashTree.count(p) ? stashTree.at(p) : Hash();
+        Hash cHash = curHeadTree.count(p) ? curHeadTree.at(p) : Hash();
+
+        bool changedInStash = (sHash != bHash);
+        bool changedInHead = (cHash != bHash);
+
+        if (changedInStash && changedInHead) {
+            throw MiniGitException("conflict: path '" + p + "' changed in both stash and current HEAD");
+        }
+
+        if (changedInStash) {
+            if (bHash.empty() && !sHash.empty()) {
+                stashAdded.push_back(p);
+            } else if (!bHash.empty() && sHash.empty()) {
+                stashDeleted.push_back(p);
+            } else {
+                stashModified.push_back(p);
+            }
         }
     }
-    for (const auto& [p, blobHash] : workEntries) {
-        writeFile(root_ / p, store_.loadAs<Blob>(blobHash)->content());
+
+    // Check untracked files before touching disk
+    Status s = status();
+    std::set<std::string> untracked(s.untracked.begin(), s.untracked.end());
+    for (const auto& p : stashAdded) {
+        if (untracked.count(p)) {
+            throw MiniGitException("untracked file '" + p + "' would be overwritten; move or commit it first");
+        }
+    }
+    for (const auto& p : stashModified) {
+        if (untracked.count(p)) {
+            throw MiniGitException("untracked file '" + p + "' would be overwritten; move or commit it first");
+        }
     }
 
-    if (!entry.indexTreeHash.empty() && store_.exists(entry.indexTreeHash)) {
-        auto idxTree = store_.loadAs<Tree>(entry.indexTreeHash);
-        index_.replace(idxTree->entries());
+    // Apply stash's delta to working tree on disk
+    for (const auto& p : stashDeleted) {
+        if (fs::exists(root_ / p)) fs::remove(root_ / p);
+        for (fs::path d = (root_ / p).parent_path(); d != root_ && fs::is_empty(d); d = d.parent_path()) {
+            fs::remove(d);
+        }
+    }
+    for (const auto& p : stashAdded) {
+        writeFile(root_ / p, store_.loadAs<Blob>(stashTree.at(p))->content());
+    }
+    for (const auto& p : stashModified) {
+        writeFile(root_ / p, store_.loadAs<Blob>(stashTree.at(p))->content());
+    }
+
+    // Update index
+    if (this->head() == baseHash) {
+        if (!entry.indexTreeHash.empty() && store_.exists(entry.indexTreeHash)) {
+            auto idxTree = store_.loadAs<Tree>(entry.indexTreeHash);
+            index_.replace(idxTree->entries());
+        } else {
+            index_.replace(curHeadTree);
+        }
     } else {
-        index_.replace(curHeadTree);
+        if (!entry.indexTreeHash.empty() && store_.exists(entry.indexTreeHash)) {
+            auto stagedTree = store_.loadAs<Tree>(entry.indexTreeHash)->entries();
+            for (const auto& [p, h] : stagedTree) {
+                if (!baseTree.count(p) || baseTree.at(p) != h) {
+                    index_.set(p, h);
+                }
+            }
+            for (const auto& [p, h] : baseTree) {
+                if (!stagedTree.count(p)) {
+                    index_.remove(p);
+                }
+            }
+        }
     }
     index_.save();
 
@@ -1392,14 +1676,26 @@ std::string Repository::exportToGit() {
         writeFile(gitIgnore, giContent);
     }
 
-    std::string rootArg = "\"" + root_.string() + "\"";
-    std::string msgFileArg = "\"" + tmpMsgFile.string() + "\"";
+    auto quotePath = [](const fs::path& p) {
+        std::string s = p.string();
+        std::string out = "\"";
+        for (char c : s) {
+            if (c == '"') out += "\\\"";
+            else out += c;
+        }
+        out += "\"";
+        return out;
+    };
 
+    std::string rootArg = quotePath(root_);
+    std::string msgFileArg = quotePath(tmpMsgFile);
+
+#if defined(_WIN32)
     int retCheck = std::system("git --version >nul 2>&1");
-#ifndef _WIN32
-    retCheck = std::system("git --version >/dev/null 2>&1");
+#else
+    int retCheck = std::system("git --version >/dev/null 2>&1");
 #endif
-    if (retCheck != 0) {
+    if (processExitCode(retCheck) != 0) {
         fs::remove(tmpMsgFile, ec);
         throw MiniGitException("git is not installed or not available in PATH");
     }
@@ -1407,24 +1703,46 @@ std::string Repository::exportToGit() {
     if (!fs::exists(root_ / ".git")) {
         std::string cmdInit = "git -C " + rootArg + " init";
         int retInit = std::system(cmdInit.c_str());
-        if (retInit != 0) {
+        int exitInit = processExitCode(retInit);
+        if (exitInit != 0) {
             fs::remove(tmpMsgFile, ec);
-            throw MiniGitException("git init failed with exit code " + std::to_string(retInit));
+            throw MiniGitException("git init failed with exit code " + std::to_string(exitInit));
         }
     }
 
     std::string cmdAdd = "git -C " + rootArg + " add -A";
     int retAdd = std::system(cmdAdd.c_str());
-    if (retAdd != 0) {
+    int exitAdd = processExitCode(retAdd);
+    if (exitAdd != 0) {
         fs::remove(tmpMsgFile, ec);
-        throw MiniGitException("git add failed with exit code " + std::to_string(retAdd));
+        throw MiniGitException("git add failed with exit code " + std::to_string(exitAdd));
     }
 
-    std::string cmdCommit = "git -C " + rootArg + " commit -F " + msgFileArg;
+    fs::path tmpOutFile = tempDir / ("mg_git_out_" + std::to_string(std::time(nullptr)) + "_" + std::to_string(std::rand()) + ".txt");
+    std::string outRedirect = " >" + quotePath(tmpOutFile) + " 2>&1";
+    std::string cmdCommit = "git -C " + rootArg + " commit -F " + msgFileArg + outRedirect;
     int retCommit = std::system(cmdCommit.c_str());
+    int commitExitCode = processExitCode(retCommit);
+
+    std::string commitOutput;
+    if (fs::exists(tmpOutFile)) {
+        try { commitOutput = readFile(tmpOutFile); } catch (...) {}
+        fs::remove(tmpOutFile, ec);
+    }
     fs::remove(tmpMsgFile, ec);
-    if (retCommit != 0) {
-        throw MiniGitException("git commit failed with exit code " + std::to_string(retCommit));
+
+    if (commitExitCode != 0) {
+        if (commitOutput.find("nothing to commit") != std::string::npos ||
+            commitOutput.find("working tree clean") != std::string::npos) {
+            throw MiniGitException("nothing to commit");
+        }
+        if (commitOutput.find("Please tell me who you are") != std::string::npos ||
+            commitOutput.find("user.name") != std::string::npos ||
+            commitOutput.find("user.email") != std::string::npos ||
+            commitOutput.find("Author identity unknown") != std::string::npos) {
+            throw MiniGitException("git user.name and user.email are not configured");
+        }
+        throw MiniGitException("git commit failed with exit code " + std::to_string(commitExitCode) + (commitOutput.empty() ? "" : ": " + trim(commitOutput)));
     }
 
     recordReflog("git_export", head(), head(), "Exported to standard Git (.git)");
@@ -1436,7 +1754,12 @@ std::string Repository::importFromGit() {
         throw MiniGitException("no .git repository found in current directory");
     }
     add(".");
-    Hash h = commit("Imported snapshot from standard Git repository (.git)");
+    Hash h;
+    try {
+        h = commit("Imported snapshot from standard Git repository (.git)");
+    } catch (const NothingToCommitException&) {
+        return "already up to date";
+    }
     recordReflog("git_import", Hash(), h, "Imported from standard Git");
-    return "Successfully imported Git repository as commit [" + h.shortStr() + "].";
+    return "Successfully imported current working tree as commit [" + h.shortStr() + "].";
 }
