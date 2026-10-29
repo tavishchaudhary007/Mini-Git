@@ -6,8 +6,20 @@
 #include <string>
 #include <vector>
 #include "Exceptions.h"
+#ifndef _WIN32
+#include <sys/wait.h>
+#endif
 
 namespace fs = std::filesystem;
+
+inline int processExitCode(int status) {
+#if defined(_WIN32)
+    return status;
+#else
+    if (WIFEXITED(status)) return WEXITSTATUS(status);
+    return status;
+#endif
+}
 
 inline std::string isoTime(std::time_t t) {
     char buf[32];
