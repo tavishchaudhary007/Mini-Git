@@ -4,18 +4,22 @@
 #include <iomanip>
 #include <ctime>
 #include <algorithm>
+#include <cstdint>
 
 namespace {
 
 std::string generateRandomHex(size_t numChars) {
     static const char hexChars[] = "0123456789abcdef";
     std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<> dis(0, 15);
     std::string s;
     s.reserve(numChars);
-    for (size_t i = 0; i < numChars; ++i) {
-        s += hexChars[dis(gen)];
+    size_t i = 0;
+    while (i < numChars) {
+        unsigned int r = rd();
+        for (size_t b = 0; b < sizeof(r) * 2 && i < numChars; ++b) {
+            s += hexChars[(r >> (b * 4)) & 0x0F];
+            i++;
+        }
     }
     return s;
 }
@@ -41,9 +45,14 @@ PairingManager::PairingManager() {
 
 std::string PairingManager::generate6DigitCode() {
     std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<> dis(100000, 999999);
-    return std::to_string(dis(gen));
+    const uint32_t range = 900000;
+    const uint32_t limit = (0xFFFFFFFFu / range) * range;
+    uint32_t val = 0;
+    do {
+        val = rd();
+    } while (val >= limit);
+    uint32_t code = 100000 + (val % range);
+    return std::to_string(code);
 }
 
 std::string PairingManager::generate32ByteSessionToken() {
