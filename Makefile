@@ -37,9 +37,19 @@ build/test_fixes$(EXE): tests/test_fixes.cpp $(OBJ_LIB) | build
 build/test_p2p$(EXE): tests/test_p2p.cpp $(OBJ_LIB) | build
 	$(CXX) $(CXXFLAGS) $< $(OBJ_LIB) -o $@ $(LDFLAGS)
 
-test: build/test_fixes$(EXE) build/test_p2p$(EXE)
+build/test_cli_server$(EXE): tests/test_cli_server.cpp $(OBJ_LIB) | build
+	$(CXX) $(CXXFLAGS) $< $(OBJ_LIB) -o $@ $(LDFLAGS)
+
+build/test_core_fixes$(EXE): tests/test_core_fixes.cpp $(OBJ_LIB) | build
+	$(CXX) $(CXXFLAGS) $< $(OBJ_LIB) -o $@ $(LDFLAGS)
+
+TEST_TARGETS := build/test_fixes$(EXE) build/test_p2p$(EXE) build/test_cli_server$(EXE) build/test_core_fixes$(EXE)
+
+test: $(TEST_TARGETS)
 	./build/test_fixes$(EXE)
 	./build/test_p2p$(EXE)
+	./build/test_cli_server$(EXE)
+	./build/test_core_fixes$(EXE)
 
 clean:
 	@$(PYTHON) -c "import shutil, os, glob; shutil.rmtree('build', ignore_errors=True); [os.remove(f) for f in glob.glob('minigit*') if f in ('minigit', 'minigit.exe') and os.path.isfile(f)]"
