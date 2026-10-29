@@ -158,12 +158,15 @@ void sendAll(socket_t sock, const std::string& data) {
 void sendHttpResponse(socket_t sock, int statusCode, const std::string& statusText,
                       const std::string& contentType, const std::string& body,
                       const std::string& origin = "", bool isSyncOrPairEndpoint = false,
-                      bool lan = false) {
+                      bool lan = false, const std::string& extraHeaders = "") {
     (void)lan;
     std::ostringstream oss;
     oss << "HTTP/1.1 " << statusCode << " " << statusText << "\r\n"
         << "Content-Type: " << contentType << "\r\n"
         << "Content-Length: " << body.size() << "\r\n";
+    if (!extraHeaders.empty()) {
+        oss << extraHeaders;
+    }
     if (isSyncOrPairEndpoint) {
         std::string allowOrigin = (!origin.empty() && origin != "null") ? origin : "*";
         oss << "Access-Control-Allow-Origin: " << allowOrigin << "\r\n"
@@ -415,7 +418,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                     std::string parseErr;
                     if (!parseRequestBody(body, bodyJson, parseErr)) {
                         sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                         "{\"ok\":false,\"error\":\"Invalid JSON: " + parseErr + "\"}", origin, isSyncOrPairEndpoint, lan);
+                                         "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + "}", origin, isSyncOrPairEndpoint, lan);
                         CLOSESOCKET(clientSock);
                         continue;
                     }
@@ -430,7 +433,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                     } else {
                         int sc = res.locked ? 403 : 401;
                         sendHttpResponse(clientSock, sc, sc == 403 ? "Forbidden" : "Unauthorized", "application/json; charset=utf-8",
-                                         "{\"ok\":false,\"error\":\"" + res.error + "\",\"locked\":" + (res.locked ? "true" : "false") +
+                                         "{\"ok\":false,\"error\":" + jsonString(res.error) + ",\"locked\":" + (res.locked ? "true" : "false") +
                                          ",\"remainingAttempts\":" + std::to_string(res.remainingAttempts) + "}",
                                          origin, isSyncOrPairEndpoint, lan);
                     }
@@ -480,7 +483,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                     std::string parseErr;
                     if (!parseRequestBody(body, bodyJson, parseErr)) {
                         sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                         "{\"ok\":false,\"error\":\"Invalid JSON: " + parseErr + "\"}", origin, isSyncOrPairEndpoint, lan);
+                                         "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + "}", origin, isSyncOrPairEndpoint, lan);
                         CLOSESOCKET(clientSock);
                         continue;
                     }
@@ -518,7 +521,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                     std::string parseErr;
                     if (!parseRequestBody(body, bodyJson, parseErr)) {
                         sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                         "{\"ok\":false,\"error\":\"Invalid JSON: " + parseErr + "\"}", origin, isSyncOrPairEndpoint, lan);
+                                         "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + "}", origin, isSyncOrPairEndpoint, lan);
                         CLOSESOCKET(clientSock);
                         continue;
                     }
@@ -531,14 +534,27 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                                      origin, isSyncOrPairEndpoint, lan);
                 }
             } else if (method == "GET" && path == "/api/snapshot") {
-                std::string json = HtmlExporter::toJson(repo->snapshot(), repoName);
-                sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8", json, origin, isSyncOrPairEndpoint, lan);
+                Snapshot snap = repo->snapshot();
+                std::string ver = HtmlExporter::computeVersion(snap);
+                std::string quotedEtag = "\"" + ver + "\"";
+                std::string ifNoneMatch = getHeaderValue(request, "If-None-Match");
+                if (!ifNoneMatch.empty() && (ifNoneMatch == quotedEtag || ifNoneMatch == ver || ifNoneMatch == "W/" + quotedEtag || ifNoneMatch == "*")) {
+                    std::ostringstream oss;
+                    oss << "HTTP/1.1 304 Not Modified\r\n"
+                        << "ETag: " << quotedEtag << "\r\n"
+                        << "Content-Length: 0\r\n"
+                        << "Connection: close\r\n\r\n";
+                    sendAll(clientSock, oss.str());
+                } else {
+                    std::string json = HtmlExporter::toJson(snap, repoName);
+                    sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8", json, origin, isSyncOrPairEndpoint, lan, "ETag: " + quotedEtag + "\r\n");
+                }
             } else if (method == "POST" && (path == "/api/file/save" || path == "/api/file/write")) {
                 JsonValue bodyJson;
                 std::string parseErr, p;
                 if (!parseRequestBody(body, bodyJson, parseErr)) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                     "{\"ok\":false,\"error\":\"Invalid JSON: " + parseErr + "\"}", origin, isSyncOrPairEndpoint, lan);
+                                     "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + "}", origin, isSyncOrPairEndpoint, lan);
                 } else if (!getRequiredString(bodyJson, "path", p, parseErr) || p.empty()) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
                                      "{\"ok\":false,\"error\":\"Path is required\"}", origin, isSyncOrPairEndpoint, lan);
@@ -565,7 +581,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                 std::string parseErr, p;
                 if (!parseRequestBody(body, bodyJson, parseErr)) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                     "{\"ok\":false,\"error\":\"Invalid JSON: " + parseErr + "\"}", origin, isSyncOrPairEndpoint, lan);
+                                     "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + "}", origin, isSyncOrPairEndpoint, lan);
                 } else if (!getRequiredString(bodyJson, "path", p, parseErr) || p.empty()) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
                                      "{\"ok\":false,\"error\":\"Path is required\"}", origin, isSyncOrPairEndpoint, lan);
@@ -590,7 +606,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                 std::string parseErr, p;
                 if (!parseRequestBody(body, bodyJson, parseErr)) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                     "{\"ok\":false,\"error\":\"Invalid JSON: " + parseErr + "\"}", origin, isSyncOrPairEndpoint, lan);
+                                     "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + "}", origin, isSyncOrPairEndpoint, lan);
                 } else if (!getRequiredString(bodyJson, "path", p, parseErr) || p.empty()) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
                                      "{\"ok\":false,\"error\":\"Path is required\"}", origin, isSyncOrPairEndpoint, lan);
@@ -610,7 +626,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                 std::string parseErr, p;
                 if (!parseRequestBody(body, bodyJson, parseErr)) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                     "{\"ok\":false,\"error\":\"Invalid JSON: " + parseErr + "\"}", origin, isSyncOrPairEndpoint, lan);
+                                     "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + "}", origin, isSyncOrPairEndpoint, lan);
                 } else {
                     try {
                         p = getOptionalString(bodyJson, "path");
@@ -628,7 +644,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                 std::string parseErr, p;
                 if (!parseRequestBody(body, bodyJson, parseErr)) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                     "{\"ok\":false,\"error\":\"Invalid JSON: " + parseErr + "\"}", origin, isSyncOrPairEndpoint, lan);
+                                     "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + "}", origin, isSyncOrPairEndpoint, lan);
                 } else if (!getRequiredString(bodyJson, "path", p, parseErr) || p.empty() || p == "." || p == ".." || fs::path(p).is_absolute()) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
                                      "{\"ok\":false,\"error\":\"Invalid or missing path for discard\"}", origin, isSyncOrPairEndpoint, lan);
@@ -648,7 +664,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                 std::string parseErr, msg;
                 if (!parseRequestBody(body, bodyJson, parseErr)) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                     "{\"ok\":false,\"error\":\"Invalid JSON: " + parseErr + "\"}", origin, isSyncOrPairEndpoint, lan);
+                                     "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + "}", origin, isSyncOrPairEndpoint, lan);
                 } else if (!getRequiredString(bodyJson, "message", msg, parseErr) || msg.empty()) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
                                      "{\"ok\":false,\"error\":\"Commit message cannot be empty\"}", origin, isSyncOrPairEndpoint, lan);
@@ -663,12 +679,20 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                 std::string parseErr, name;
                 if (!parseRequestBody(body, bodyJson, parseErr)) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                     "{\"ok\":false,\"error\":\"Invalid JSON: " + parseErr + "\"}", origin, isSyncOrPairEndpoint, lan);
+                                     "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + "}", origin, isSyncOrPairEndpoint, lan);
                 } else if (!getRequiredString(bodyJson, "name", name, parseErr) || name.empty()) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                     "{\"ok\":false,\"error\":\"Branch name cannot be empty\"}", origin, isSyncOrPairEndpoint, lan);
+                                     "{\"ok\":false,\"error\":" + jsonString("Branch name cannot be empty") + "}", origin, isSyncOrPairEndpoint, lan);
                 } else {
-                    repo->createBranch(name);
+                    Hash atHash;
+                    if (bodyJson.contains("at") && bodyJson["at"].is_string()) {
+                        std::string atStr = bodyJson["at"].as_string();
+                        if (!atStr.empty()) {
+                            ObjectStore store(repo->root() / ".minigit" / "objects");
+                            atHash = store.resolvePrefix(atStr);
+                        }
+                    }
+                    repo->createBranch(name, atHash);
                     std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
                     sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
                                      "{\"ok\":true,\"message\":\"created branch\",\"snapshot\":" + snap + "}", origin, isSyncOrPairEndpoint, lan);
@@ -678,10 +702,10 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                 std::string parseErr, name;
                 if (!parseRequestBody(body, bodyJson, parseErr)) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                     "{\"ok\":false,\"error\":\"Invalid JSON: " + parseErr + "\"}", origin, isSyncOrPairEndpoint, lan);
+                                     "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + "}", origin, isSyncOrPairEndpoint, lan);
                 } else if (!getRequiredString(bodyJson, "name", name, parseErr) || name.empty()) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                     "{\"ok\":false,\"error\":\"Branch name cannot be empty\"}", origin, isSyncOrPairEndpoint, lan);
+                                     "{\"ok\":false,\"error\":" + jsonString("Branch name cannot be empty") + "}", origin, isSyncOrPairEndpoint, lan);
                 } else {
                     repo->deleteBranch(name);
                     std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
@@ -693,22 +717,28 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                 std::string parseErr, target;
                 if (!parseRequestBody(body, bodyJson, parseErr)) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                     "{\"ok\":false,\"error\":\"Invalid JSON: " + parseErr + "\"}", origin, isSyncOrPairEndpoint, lan);
+                                     "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + "}", origin, isSyncOrPairEndpoint, lan);
                 } else if (!getRequiredString(bodyJson, "target", target, parseErr) || target.empty()) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                     "{\"ok\":false,\"error\":\"Target cannot be empty\"}", origin, isSyncOrPairEndpoint, lan);
+                                     "{\"ok\":false,\"error\":" + jsonString("Target cannot be empty") + "}", origin, isSyncOrPairEndpoint, lan);
                 } else {
-                    repo->checkout(target);
-                    std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
-                    sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
-                                     "{\"ok\":true,\"message\":\"checked out\",\"snapshot\":" + snap + "}", origin, isSyncOrPairEndpoint, lan);
+                    try {
+                        repo->checkout(target);
+                        std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
+                        sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
+                                         "{\"ok\":true,\"message\":\"checked out\",\"snapshot\":" + snap + "}", origin, isSyncOrPairEndpoint, lan);
+                    } catch (const MiniGitException& e) {
+                        std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
+                        sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
+                                         "{\"ok\":false,\"error\":" + jsonString(e.what()) + ",\"snapshot\":" + snap + "}", origin, isSyncOrPairEndpoint, lan);
+                    }
                 }
             } else if (method == "POST" && path == "/api/merge") {
                 JsonValue bodyJson;
                 std::string parseErr, branch;
                 if (!parseRequestBody(body, bodyJson, parseErr)) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                     "{\"ok\":false,\"error\":\"Invalid JSON: " + parseErr + "\"}", origin, isSyncOrPairEndpoint, lan);
+                                     "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + "}", origin, isSyncOrPairEndpoint, lan);
                 } else {
                     bool isAbort = (bodyJson.contains("abort") && bodyJson["abort"].is_bool() && bodyJson["abort"].as_bool());
                     if (!isAbort && bodyJson.contains("branch") && bodyJson["branch"].is_string() && bodyJson["branch"].as_string() == "--abort") {
@@ -745,7 +775,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                 std::string parseErr, hash;
                 if (!parseRequestBody(body, bodyJson, parseErr)) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                     "{\"ok\":false,\"error\":\"Invalid JSON: " + parseErr + "\"}", origin, isSyncOrPairEndpoint, lan);
+                                     "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + "}", origin, isSyncOrPairEndpoint, lan);
                 } else if (!getRequiredString(bodyJson, "hash", hash, parseErr) || hash.empty()) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
                                      "{\"ok\":false,\"error\":\"Hash cannot be empty\"}", origin, isSyncOrPairEndpoint, lan);
@@ -813,7 +843,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                 std::string parseErr, hash;
                 if (!parseRequestBody(body, bodyJson, parseErr)) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                     "{\"ok\":false,\"error\":\"Invalid JSON: " + parseErr + "\"}", origin, isSyncOrPairEndpoint, lan);
+                                     "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + "}", origin, isSyncOrPairEndpoint, lan);
                 } else if (!getRequiredString(bodyJson, "hash", hash, parseErr) || hash.empty()) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
                                      "{\"ok\":false,\"error\":\"Hash cannot be empty\"}", origin, isSyncOrPairEndpoint, lan);
@@ -830,16 +860,17 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                 std::string resJson = repo->importBundleJson(body);
                 JsonValue parsedRes = JsonValue::parse(resJson);
                 bool isOk = parsedRes.is_object() && parsedRes.contains("ok") && parsedRes["ok"].as_bool();
+                std::string peerRefsJson = (parsedRes.is_object() && parsedRes.contains("peerRefs")) ? parsedRes["peerRefs"].serialize() : "[]";
                 std::string snap = HtmlExporter::toJson(repo->snapshot(), repoName);
                 if (isOk) {
-                    std::string msg = parsedRes["message"].as_string();
+                    std::string msg = (parsedRes.is_object() && parsedRes.contains("message")) ? parsedRes["message"].as_string() : "Import succeeded";
                     sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
-                                     "{\"ok\":true,\"message\":" + jsonString(msg) + ",\"result\":" + resJson + ",\"snapshot\":" + snap + "}",
+                                     "{\"ok\":true,\"message\":" + jsonString(msg) + ",\"peerRefs\":" + peerRefsJson + ",\"result\":" + resJson + ",\"snapshot\":" + snap + "}",
                                      origin, isSyncOrPairEndpoint, lan);
                 } else {
-                    std::string err = parsedRes.contains("error") ? parsedRes["error"].as_string() : "Import failed";
+                    std::string err = (parsedRes.is_object() && parsedRes.contains("error")) ? parsedRes["error"].as_string() : "Import failed";
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                     "{\"ok\":false,\"error\":" + jsonString(err) + ",\"result\":" + resJson + "}",
+                                     "{\"ok\":false,\"error\":" + jsonString(err) + ",\"peerRefs\":" + peerRefsJson + ",\"result\":" + resJson + ",\"snapshot\":" + snap + "}",
                                      origin, isSyncOrPairEndpoint, lan);
                 }
             } else if (method == "GET" && path == "/api/git/status") {
@@ -858,18 +889,12 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
             } else {
                 sendHttpResponse(clientSock, 404, "Not Found", "application/json", "{\"ok\":false,\"error\":\"endpoint not found\"}", origin, isSyncOrPairEndpoint, lan);
             }
-} catch (const MiniGitException& e) {
-            std::string err = e.what();
-            std::string cleanErr;
-            for (char c : err) { if (c == '"') cleanErr += "\\\""; else cleanErr += c; }
+        } catch (const MiniGitException& e) {
             sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                             "{\"ok\":false,\"error\":\"" + cleanErr + "\"}", origin, isSyncOrPairEndpoint, lan);
+                             "{\"ok\":false,\"error\":" + jsonString(e.what()) + "}", origin, isSyncOrPairEndpoint, lan);
         } catch (const std::exception& e) {
-            std::string err = e.what();
-            std::string cleanErr;
-            for (char c : err) { if (c == '"') cleanErr += "\\\""; else cleanErr += c; }
             sendHttpResponse(clientSock, 500, "Internal Server Error", "application/json; charset=utf-8",
-                             "{\"ok\":false,\"error\":\"" + cleanErr + "\"}", origin, isSyncOrPairEndpoint, lan);
+                             "{\"ok\":false,\"error\":" + jsonString(e.what()) + "}", origin, isSyncOrPairEndpoint, lan);
         }
 
         CLOSESOCKET(clientSock);
