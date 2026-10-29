@@ -54,6 +54,10 @@ struct Snapshot {
     std::map<std::string, Hash> staged;             // index entries that differ from HEAD
     std::vector<std::string> stagedDeleted;         // in HEAD but removed from the index
     Status status;                                  // live status (staged, modified, deleted, untracked)
+    bool detached{false};
+    bool merging{false};
+    std::vector<std::string> conflicts;
+    std::map<std::string, char> stagedStatus;
 };
 
 // Backend facade. Composes ObjectStore + Index + RefManager; contains no I/O to cout/cin.
@@ -62,6 +66,10 @@ class Repository {
     ObjectStore store_;
     Index index_;
     RefManager refs_;
+
+    mutable fs::file_time_type ignoreMtime_{};
+    mutable bool ignoreFileCached_{false};
+    mutable std::vector<std::string> ignorePatterns_;
 
     std::string relPath(const fs::path& p) const;
     bool isIgnored(const fs::path& fullPath, const std::string& relPath, bool isDir) const;
@@ -93,7 +101,7 @@ public:
     CommitStat commitStats(const Hash& commitHash) const;
     Snapshot snapshot() const;
 
-    void createBranch(const std::string& name);
+    void createBranch(const std::string& name, const Hash& at = Hash());
     void deleteBranch(const std::string& name) { refs_.deleteBranch(name); }
     std::vector<std::string> branches() const { return refs_.listBranches(); }
     std::string currentBranch() const { return refs_.currentBranch(); }
@@ -104,6 +112,8 @@ public:
     Hash findMergeBase(const Hash& h1, const Hash& h2) const;
     std::string merge(const std::string& branch);
     std::string mergeAbort();
+    bool isMerging() const;
+    std::vector<std::string> conflictedPaths() const;
 
     // Safety Nets & Reflog
     void recordReflog(const std::string& action, const Hash& oldH, const Hash& newH, const std::string& desc);
