@@ -31,7 +31,7 @@ Authors: Tavish Chaudhary (251159), Prasad Gotmukale (251124)
 
 ## Features
 
-**Command line (12 commands)**
+**Command line (16 commands)**
 
 | Command | Purpose |
 |---|---|
@@ -41,14 +41,18 @@ Authors: Tavish Chaudhary (251159), Prasad Gotmukale (251124)
 | `log` | Show history (`--oneline`, `--stat`) |
 | `status` | Staged, modified, deleted and untracked files |
 | `diff` | Line-by-line changes (LCS) since the last `add` |
-| `branch` | List or create branches |
+| `branch` | List, create, or delete branches (`-d`) |
 | `checkout` | Switch branch, or go to a commit (detached HEAD) |
 | `merge` | Fast-forward or three-way merge; `--abort` cancels a conflicted merge |
+| `undo` | Undo the last commit, preserving working directory changes |
+| `revert` | Create a new commit that reverts a previous commit |
+| `stash` | Save, pop, or list uncommitted changes |
+| `reflog` | Show chronological history of HEAD updates and actions |
 | `html` | Write a read-only visual report and open it |
 | `ui` | Start the interactive Web Studio |
 | `serve` | Same as `ui` |
 
-**Web Studio only** (through the local REST API): edit and save files, unstage, discard changes, delete branches, revert a commit, undo the last commit, stash save/pop/list, reflog view and restore, time-travel through commits, repository health banner, LAN pairing with a 6-digit code, pull/push sync bundles, and Git export/import.
+**Web Studio** (through the local REST API and UI): edit and save files, stage/unstage, discard changes, create/delete branches, revert a commit, undo the last commit, stash save/pop/list, reflog view and restore, time-travel through commits, repository health banner, LAN pairing with a 6-digit code, pull/push sync bundles, and Git export/import.
 
 ## Requirements
 
@@ -355,15 +359,19 @@ It transfers the current **snapshot**, not the complete history. Git must be ins
 | `init` | `minigit init` | Fails if already initialized |
 | `add` | `minigit add <file\|dir\|.>...` | Several paths allowed; stages deletions |
 | `commit` | `minigit commit -m "message"` | Needs staged changes; finishes a merge if `MERGE_HEAD` exists |
-| `log` | `minigit log [--oneline] [--stat]` | Newest first; merge commits show `Merge:` |
-| `status` | `minigit status` | Staged / modified / deleted / untracked |
+| `log` | `minigit log [--oneline] [--stat]` | Newest first; merge commits show `Merge:`; readable local timestamp |
+| `status` | `minigit status` | Staged / modified / deleted / untracked / unmerged paths |
 | `diff` | `minigit diff [file]` | Working file vs staged version |
-| `branch` | `minigit branch [name]` | No name = list |
+| `branch` | `minigit branch [name] \| minigit branch -d <name>` | No name = list; `-d` deletes branch |
 | `checkout` | `minigit checkout <branch\|hash>` | Hash prefix of 4+ characters; refuses with uncommitted changes |
 | `merge` | `minigit merge <branch>` / `minigit merge --abort` | Up to date, fast-forward, or three-way |
+| `undo` | `minigit undo` | Undoes the last commit while keeping working directory changes |
+| `revert` | `minigit revert <hash>` | Reverts specified commit and creates a revert commit |
+| `stash` | `minigit stash [save [-u] [-m msg] \| pop \| list]` | Save (optional `-u` untracked, `-m`), pop, or list stashes |
+| `reflog` | `minigit reflog` | Chronological reflog entries with action and description |
 | `html` | `minigit html [--no-open]` | Writes `.minigit/report.html` |
-| `ui` | `minigit ui [--port <N>] [--no-open] [--lan]` | Default port 8080 |
-| `serve` | `minigit serve [--port <N>] [--no-open] [--lan]` | Alias of `ui` |
+| `ui` | `minigit ui [--port <port>] [--no-open] [--lan]` | Validates port 1–65535 (default 8080) |
+| `serve` | `minigit serve [--port <port>] [--no-open] [--lan]` | Alias of `ui` |
 
 Exit codes: `0` success, `1` Mini-Git error, `2` unexpected error.
 

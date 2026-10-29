@@ -1,5 +1,6 @@
 #include "Commands.h"
 #include <cstdlib>
+#include <ctime>
 #include <iostream>
 #include "HtmlExporter.h"
 #include "HttpServer.h"
@@ -7,6 +8,18 @@
 using std::cout;
 
 static void usageError(const Command& c) { throw MiniGitException("usage: " + c.usage()); }
+
+static std::string formatCommitDate(std::time_t t) {
+    std::tm tmBuf{};
+#ifdef _WIN32
+    localtime_s(&tmBuf, &t);
+#else
+    localtime_r(&t, &tmBuf);
+#endif
+    char buf[128];
+    size_t len = std::strftime(buf, sizeof(buf), "%a %b %d %H:%M:%S %Y %z", &tmBuf);
+    return std::string(buf, len);
+}
 
 void InitCmd::execute(Repository*, const Args&) {
     fs::path cwd = fs::current_path();
@@ -48,7 +61,7 @@ void LogCmd::execute(Repository* repo, const Args& args) {
             if (c.hasParent2()) {
                 cout << "Merge: " << c.parent().shortStr() << " " << c.parent2().shortStr() << "\n";
             }
-            cout << "Author: " << c.author() << "\nDate:   " << c.time() << "\n\n    "
+            cout << "Author: " << c.author() << "\nDate:   " << formatCommitDate(c.time()) << "\n\n    "
                  << c.message() << "\n\n";
         }
         if (stat) {
@@ -93,7 +106,15 @@ void StatusCmd::execute(Repository* repo, const Args& args) {
     Status s = repo->status();
     std::string b = repo->currentBranch();
     cout << "On branch " << (b.empty() ? "(detached)" : b) << "\n";
-    if (s.clean()) { cout << "nothing to commit, working tree clean\n"; return; }
+    if (repo->isMerging()) {
+        cout << "You are in the middle of a merge.\n";
+        auto conflicts = repo->conflictedPaths();
+        if (!conflicts.empty()) {
+            cout << "\nUnmerged paths:\n";
+            for (const auto& f : conflicts) cout << "  " << f << "\n";
+        }
+    }
+    if (s.clean() && !repo->isMerging()) { cout << "nothing to commit, working tree clean\n"; return; }
     if (!s.staged.empty()) {
         cout << "\nChanges to be committed:\n";
         for (const auto& f : s.staged) cout << "  staged:    " << f << "\n";
@@ -117,14 +138,26 @@ void DiffCmd::execute(Repository* repo, const Args& args) {
 
 void BranchCmd::execute(Repository* repo, const Args& args) {
     if (args.empty()) {
+        auto branchList = repo->branches();
+        if (branchList.empty()) {
+            std::string cur = repo->currentBranch();
+            if (cur.empty()) cur = "main";
+            cout << "* " << cur << "\n";
+            return;
+        }
         std::string cur = repo->currentBranch();
-        for (const auto& b : repo->branches()) {
+        for (const auto& b : branchList) {
             if (b == cur) cout << "* " << b << "\n";
             else          cout << "  " << b << "\n";
         }
         return;
     }
-    if (args.size() == 1) {
+    if (args.size() == 2 && args[0] == "-d") {
+        repo->deleteBranch(args[1]);
+        cout << "Deleted branch " << args[1] << "\n";
+        return;
+    }
+    if (args.size() == 1 && args[0] != "-d") {
         repo->createBranch(args[0]);
         cout << "Created branch " << args[0] << "\n";
         return;
@@ -134,6 +167,10 @@ void BranchCmd::execute(Repository* repo, const Args& args) {
 
 void CheckoutCmd::execute(Repository* repo, const Args& args) {
     if (args.size() != 1) usageError(*this);
+    if (repo->head().empty()) {
+        cout << "branch '" << args[0] << "' has no commits yet\n";
+        return;
+    }
     repo->checkout(args[0]);
     std::string b = repo->currentBranch();
     if (!b.empty()) cout << "Switched to branch '" << b << "'\n";
@@ -147,6 +184,67 @@ void MergeCmd::execute(Repository* repo, const Args& args) {
         return;
     }
     cout << repo->merge(args[0]) << "\n";
+}
+
+void UndoCmd::execute(Repository* repo, const Args& args) {
+    if (!args.empty()) usageError(*this);
+    std::string msg = repo->undo();
+    cout << msg << "\n";
+}
+
+void RevertCmd::execute(Repository* repo, const Args& args) {
+    if (args.size() != 1) usageError(*this);
+    ObjectStore store(repo->root() / ".minigit" / "objects");
+    Hash targetHash = store.resolvePrefix(args[0]);
+    Hash h = repo->revert(targetHash);
+    std::string b = repo->currentBranch();
+    cout << "[" << (b.empty() ? "detached" : b) << " " << h.shortStr() << "] Revert \"" << targetHash.shortStr() << "\"\n";
+}
+
+void StashCmd::execute(Repository* repo, const Args& args) {
+    if (args.empty() || args[0] == "save") {
+        std::string msg;
+        bool includeUntracked = false;
+        size_t startIdx = args.empty() ? 0 : 1;
+        for (size_t i = startIdx; i < args.size(); ++i) {
+            if (args[i] == "-u" || args[i] == "--include-untracked") {
+                includeUntracked = true;
+            } else if (args[i] == "-m" && i + 1 < args.size()) {
+                msg = args[++i];
+            } else {
+                usageError(*this);
+            }
+        }
+        std::string res = repo->stashSave(msg, includeUntracked);
+        cout << res << "\n";
+        return;
+    }
+    if (args[0] == "pop") {
+        if (args.size() > 1) usageError(*this);
+        std::string res = repo->stashPop();
+        cout << res << "\n";
+        return;
+    }
+    if (args[0] == "list") {
+        if (args.size() > 1) usageError(*this);
+        auto list = repo->stashList();
+        for (const auto& s : list) {
+            cout << "stash@{" << s.index << "}: " << s.message << "\n";
+        }
+        return;
+    }
+    usageError(*this);
+}
+
+void ReflogCmd::execute(Repository* repo, const Args& args) {
+    if (!args.empty()) usageError(*this);
+    auto entries = repo->reflog();
+    for (size_t i = 0; i < entries.size(); ++i) {
+        const auto& e = entries[i];
+        std::string h = e.newHash.empty() ? e.oldHash : e.newHash;
+        std::string shortHash = h.size() >= 7 ? h.substr(0, 7) : h;
+        cout << shortHash << " HEAD@{" << i << "}: " << e.action << ": " << e.description << "\n";
+    }
 }
 
 static bool openInBrowser(const fs::path& file) {
@@ -186,7 +284,17 @@ void UiCmd::execute(Repository* repo, const Args& args) {
         } else if (args[i] == "--lan") {
             lan = true;
         } else if (args[i] == "--port" && i + 1 < args.size()) {
-            port = std::stoi(args[++i]);
+            std::string pStr = args[++i];
+            try {
+                size_t idx = 0;
+                int val = std::stoi(pStr, &idx);
+                if (idx != pStr.size() || val < 1 || val > 65535) {
+                    usageError(*this);
+                }
+                port = val;
+            } catch (...) {
+                usageError(*this);
+            }
         } else {
             usageError(*this);
         }

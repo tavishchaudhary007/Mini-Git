@@ -11,6 +11,10 @@ CLI::CLI() {
     registerCommand(std::make_unique<BranchCmd>());
     registerCommand(std::make_unique<CheckoutCmd>());
     registerCommand(std::make_unique<MergeCmd>());
+    registerCommand(std::make_unique<UndoCmd>());
+    registerCommand(std::make_unique<RevertCmd>());
+    registerCommand(std::make_unique<StashCmd>());
+    registerCommand(std::make_unique<ReflogCmd>());
     registerCommand(std::make_unique<HtmlCmd>());
     registerCommand(std::make_unique<UiCmd>());
     registerCommand(std::make_unique<ServeCmd>());
