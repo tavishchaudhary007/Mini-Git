@@ -4,6 +4,7 @@
 #include <sstream>
 #include "Base64.h"
 #include "FrontendTemplate.h"
+#include "Hasher.h"
 #include "Json.h"
 
 namespace {
@@ -14,18 +15,76 @@ void jsonHashOrNull(std::ostream& os, const Hash& h) {
 
 }  // namespace
 
+std::string HtmlExporter::computeVersion(const Snapshot& snap) {
+    std::ostringstream ss;
+    ss << "branch:" << snap.currentBranch << "\n";
+    ss << "head:" << snap.head.str() << "\n";
+    ss << "detached:" << (snap.detached ? "1" : "0") << "\n";
+    ss << "merging:" << (snap.merging ? "1" : "0") << "\n";
+    for (const auto& [b, tip] : snap.branches) {
+        ss << "b:" << b << "=" << tip.str() << "\n";
+    }
+    for (const auto& [p, tip] : snap.staged) {
+        ss << "s:" << p << "=" << tip.str() << "\n";
+    }
+    for (const auto& p : snap.stagedDeleted) {
+        ss << "sd:" << p << "\n";
+    }
+    for (const auto& [p, st] : snap.stagedStatus) {
+        ss << "ss:" << p << "=" << st << "\n";
+    }
+    for (const auto& c : snap.conflicts) {
+        ss << "c:" << c << "\n";
+    }
+    for (const auto& f : snap.status.modified) {
+        ss << "m:" << f << "\n";
+    }
+    for (const auto& f : snap.status.deleted) {
+        ss << "d:" << f << "\n";
+    }
+    for (const auto& f : snap.status.untracked) {
+        ss << "u:" << f << "\n";
+    }
+    for (const auto& [p, content] : snap.files) {
+        ss << "f:" << p << "=" << content << "\n";
+    }
+    return Hasher::sha1(ss.str());
+}
+
 std::string HtmlExporter::toJson(const Snapshot& snap, const std::string& repoName, bool isSyncBundle) {
     std::ostringstream o;
 
-    // The page needs a "current branch" entry even before the first commit or when detached.
     std::string current = snap.currentBranch;
     std::map<std::string, Hash> branches = snap.branches;
-    if (current.empty()) { current = "(detached " + snap.head.shortStr() + ")"; branches[current] = snap.head; }
-    else if (!branches.count(current)) branches[current] = Hash();
+    if (!current.empty() && !branches.count(current)) {
+        branches[current] = Hash();
+    }
+
+    std::string version = computeVersion(snap);
 
     o << "{\"repoName\":";      jsonString(o, repoName);
     o << ",\"generated\":";     jsonString(o, isoTime(std::time(nullptr)));
     o << ",\"currentBranch\":"; jsonString(o, current);
+    o << ",\"head\":";          jsonHashOrNull(o, snap.head);
+    o << ",\"detached\":" <<    (snap.detached ? "true" : "false");
+    o << ",\"merging\":" <<     (snap.merging ? "true" : "false");
+
+    o << ",\"conflicts\":[";
+    bool firstConflict = true;
+    for (const auto& c : snap.conflicts) {
+        if (!firstConflict) o << ',';
+        firstConflict = false;
+        jsonString(o, c);
+    }
+    o << "],\"stagedStatus\":{";
+    bool firstStatus = true;
+    for (const auto& [path, st] : snap.stagedStatus) {
+        if (!firstStatus) o << ',';
+        firstStatus = false;
+        jsonString(o, path);
+        o << ":\"" << st << "\"";
+    }
+    o << "},\"version\":"; jsonString(o, version);
 
     o << ",\"branches\":{";
     bool first = true;
