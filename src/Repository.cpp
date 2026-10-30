@@ -374,29 +374,58 @@ Hash Repository::revert(const Hash& commitHash) {
         throw MiniGitException("nothing to revert");
     }
 
-    // Check untracked files before touching disk
-    for (const auto& path : removedInC) {
-        if (fs::exists(root_ / path)) {
-            throw MiniGitException("untracked file '" + path + "' would be overwritten; move or commit it first");
+    std::map<std::string, Hash> toWriteRevert;
+    for (const auto& path : removedInC) toWriteRevert[path] = pTree.at(path);
+    for (const auto& path : modifiedInC) toWriteRevert[path] = pTree.at(path);
+
+    checkUntrackedOverwrite(toWriteRevert);
+
+    for (const auto& path : addedInC) {
+        if (!isSafeRepoPath(path)) throw MiniGitException("refusing operation with unsafe path: " + path);
+        ensureNoSymlinkComponents(root_, path);
+        fs::path full = root_ / path;
+        std::error_code ec;
+        if (fs::exists(full, ec) && fs::is_directory(full, ec) && !fs::is_empty(full, ec)) {
+            throw MiniGitException("refusing to remove non-empty directory at tracked path: " + path);
         }
+    }
+    for (const auto& [path, _] : toWriteRevert) {
+        if (!isSafeRepoPath(path)) throw MiniGitException("refusing operation with unsafe path: " + path);
+        ensureNoSymlinkComponents(root_, path);
+        fs::path full = root_ / path;
+        std::error_code ec;
+        if (fs::exists(full, ec) && fs::is_directory(full, ec) && !fs::is_empty(full, ec)) {
+            throw MiniGitException("cannot restore over non-empty directory: " + path);
+        }
+    }
+
+    std::map<std::string, std::string> loadedRevertBlobs;
+    for (const auto& [path, h] : toWriteRevert) {
+        auto blob = store_.loadAs<Blob>(h);
+        if (!blob) throw MiniGitException("missing blob object for path: " + path);
+        loadedRevertBlobs[path] = blob->content();
     }
 
     Hash oldHead = refs_.headCommit();
     try {
         for (const auto& path : addedInC) {
-            if (fs::exists(root_ / path)) fs::remove(root_ / path);
-            for (fs::path d = (root_ / path).parent_path(); d != root_ && fs::is_empty(d); d = d.parent_path()) {
-                fs::remove(d);
+            fs::path full = root_ / path;
+            std::error_code ec;
+            if (fs::exists(full, ec)) {
+                if (fs::is_directory(full, ec)) {
+                    if (fs::is_empty(full, ec)) fs::remove(full, ec);
+                } else {
+                    fs::remove(full, ec);
+                }
+            }
+            for (fs::path d = full.parent_path(); d != root_ && !d.empty() && fs::is_directory(d, ec) && fs::is_empty(d, ec); d = d.parent_path()) {
+                fs::remove(d, ec);
             }
             index_.remove(path);
         }
-        for (const auto& path : removedInC) {
-            writeFile(root_ / path, store_.loadAs<Blob>(pTree.at(path))->content());
-            index_.set(path, pTree.at(path));
-        }
-        for (const auto& path : modifiedInC) {
-            writeFile(root_ / path, store_.loadAs<Blob>(pTree.at(path))->content());
-            index_.set(path, pTree.at(path));
+        for (const auto& [path, content] : loadedRevertBlobs) {
+            writeFile(root_ / path, content);
+            index_.set(path, toWriteRevert[path]);
         }
         index_.save();
         return commit("Revert \"" + c->message() + "\"");
@@ -788,38 +817,91 @@ std::vector<std::string> Repository::conflictedPaths() const {
 
 void Repository::checkUntrackedOverwrite(const std::map<std::string, Hash>& targetTree) const {
     Status s = status();
+    std::set<std::string> untrackedSet(s.untracked.begin(), s.untracked.end());
+
+    // 1. Direct match with untracked files
     for (const auto& f : s.untracked) {
         if (targetTree.count(f)) {
             throw MiniGitException("untracked file '" + f + "' would be overwritten; move or commit it first");
         }
     }
-}
 
-void Repository::restoreCommit(const Hash& c) {
-    auto tree = store_.loadAs<Tree>(store_.loadAs<Commit>(c)->tree());
-    const auto& target = tree->entries();
-
-    for (const auto& [path, h] : target) {
-        if (!isSafeRepoPath(path)) {
-            throw MiniGitException("refusing to restore commit with unsafe path: " + path);
-        }
-        fs::path cur = root_;
-        std::error_code ec;
-        for (const auto& elem : fs::path(path)) {
-            cur /= elem;
-            if (isLinkOrSymlink(cur)) {
-                throw MiniGitException("refusing to write through symlink: " + path);
+    // 2. Parent prefix check:
+    // If target has d/x, and d is an untracked file or untracked symlink on disk
+    for (const auto& [tp, _] : targetTree) {
+        fs::path rel(tp);
+        fs::path cur;
+        for (const auto& part : rel) {
+            if (cur.empty()) cur = part;
+            else cur /= part;
+            std::string curStr = cur.generic_string();
+            if (curStr == tp) break; // only check parent prefixes
+            fs::path full = root_ / cur;
+            std::error_code ec;
+            if (isLinkOrSymlink(full)) {
+                throw MiniGitException("untracked file '" + curStr + "' would be overwritten; move or commit it first");
+            }
+            if (fs::exists(full, ec) && !fs::is_directory(full, ec)) {
+                if (!index_.has(curStr) || untrackedSet.count(curStr)) {
+                    throw MiniGitException("untracked file '" + curStr + "' would be overwritten; move or commit it first");
+                }
             }
         }
     }
 
-    for (const auto& [path, h] : index_.entries()) {       // remove files absent in target
+    // 3. Any untracked item in s.untracked that sits as a parent prefix of target path
+    for (const auto& f : s.untracked) {
+        for (const auto& [tp, _] : targetTree) {
+            if (tp.size() > f.size() && tp[f.size()] == '/' && tp.rfind(f, 0) == 0) {
+                throw MiniGitException("untracked file '" + f + "' would be overwritten; move or commit it first");
+            }
+        }
+    }
+}
+
+void Repository::restoreCommit(const Hash& c) {
+    auto commit = store_.loadAs<Commit>(c);
+    auto tree = store_.loadAs<Tree>(commit->tree());
+    const auto& target = tree->entries();
+
+    // 1. Pre-load all blobs and validate target paths
+    std::map<std::string, std::string> loadedBlobs;
+    for (const auto& [path, h] : target) {
+        if (!isSafeRepoPath(path)) {
+            throw MiniGitException("refusing to restore commit with unsafe path: " + path);
+        }
+        ensureNoSymlinkComponents(root_, path);
+        auto blob = store_.loadAs<Blob>(h);
+        if (!blob) {
+            throw MiniGitException("missing blob object for path: " + path);
+        }
+        loadedBlobs[path] = blob->content();
+    }
+
+    // 2. Validate index paths: refuse if any tracked path is now a non-empty directory
+    for (const auto& [path, h] : index_.entries()) {
+        if (!isSafeRepoPath(path)) {
+            throw MiniGitException("refusing operation with unsafe path: " + path);
+        }
+        ensureNoSymlinkComponents(root_, path);
+        fs::path full = root_ / path;
+        std::error_code ec;
+        if (fs::exists(full, ec) && fs::is_directory(full, ec) && !fs::is_empty(full, ec)) {
+            throw MiniGitException("tracked path is now a non-empty directory: " + path);
+        }
+    }
+
+    // 3. Refuse if untracked file sits at path or parent prefix
+    checkUntrackedOverwrite(target);
+
+    // 5. Delete absent files (no remove_all on user content)
+    for (const auto& [path, h] : index_.entries()) {
         if (target.count(path)) continue;
         fs::path full = root_ / path;
         std::error_code ec;
         if (fs::exists(full, ec)) {
             if (fs::is_directory(full, ec)) {
-                fs::remove_all(full, ec);
+                if (fs::is_empty(full, ec)) fs::remove(full, ec);
             } else {
                 fs::remove(full, ec);
             }
@@ -828,18 +910,24 @@ void Repository::restoreCommit(const Hash& c) {
             fs::remove(d, ec);
         }
     }
-    for (const auto& [path, h] : target) {                  // write files from target
+
+    // 6. Write target files
+    for (const auto& [path, content] : loadedBlobs) {
         fs::path full = root_ / path;
         std::error_code ec;
         if (fs::exists(full, ec) && fs::is_directory(full, ec)) {
-            fs::remove_all(full, ec);
+            if (fs::is_empty(full, ec)) {
+                fs::remove(full, ec);
+            } else {
+                throw MiniGitException("cannot restore over non-empty directory: " + path);
+            }
         }
         for (fs::path d = full.parent_path(); d != root_ && !d.empty(); d = d.parent_path()) {
             if (fs::exists(d, ec) && !fs::is_directory(d, ec)) {
                 fs::remove(d, ec);
             }
         }
-        writeFile(full, store_.loadAs<Blob>(h)->content());
+        writeFile(full, content);
     }
 
     index_.replace(target);
@@ -955,28 +1043,55 @@ std::string Repository::merge(const std::string& branch) {
     }
 
     // Safety: check untracked overwrite before any modifications to disk
-    Status s = status();
-    std::set<std::string> untrackedSet(s.untracked.begin(), s.untracked.end());
-    for (const auto& [p, _] : filesToWriteTheirs) {
-        if (untrackedSet.count(p)) {
-            throw MiniGitException("untracked file '" + p + "' would be overwritten; move or commit it first");
+    std::map<std::string, Hash> toWriteMerge;
+    for (const auto& [p, h] : filesToWriteTheirs) toWriteMerge[p] = h;
+    for (const auto& c : conflicts) toWriteMerge[c.path] = Hash();
+
+    checkUntrackedOverwrite(toWriteMerge);
+
+    for (const auto& p : filesToDelete) {
+        if (!isSafeRepoPath(p)) throw MiniGitException("refusing operation with unsafe path: " + p);
+        ensureNoSymlinkComponents(root_, p);
+        fs::path full = root_ / p;
+        std::error_code ec;
+        if (fs::exists(full, ec) && fs::is_directory(full, ec) && !fs::is_empty(full, ec)) {
+            throw MiniGitException("refusing to remove non-empty directory at tracked path: " + p);
         }
     }
-    for (const auto& c : conflicts) {
-        if (untrackedSet.count(c.path)) {
-            throw MiniGitException("untracked file '" + c.path + "' would be overwritten; move or commit it first");
+    for (const auto& [p, _] : toWriteMerge) {
+        if (!isSafeRepoPath(p)) throw MiniGitException("refusing operation with unsafe path: " + p);
+        ensureNoSymlinkComponents(root_, p);
+        fs::path full = root_ / p;
+        std::error_code ec;
+        if (fs::exists(full, ec) && fs::is_directory(full, ec) && !fs::is_empty(full, ec)) {
+            throw MiniGitException("cannot restore over non-empty directory: " + p);
         }
+    }
+
+    std::map<std::string, std::string> loadedTheirsBlobs;
+    for (const auto& [p, h] : filesToWriteTheirs) {
+        auto blob = store_.loadAs<Blob>(h);
+        if (!blob) throw MiniGitException("missing blob object for path: " + p);
+        loadedTheirsBlobs[p] = blob->content();
     }
 
     if (!conflicts.empty()) {
         // Apply non-conflicted updates
         for (const auto& p : filesToDelete) {
-            fs::remove(root_ / p);
+            fs::path full = root_ / p;
+            std::error_code ec;
+            if (fs::exists(full, ec)) {
+                if (fs::is_directory(full, ec)) {
+                    if (fs::is_empty(full, ec)) fs::remove(full, ec);
+                } else {
+                    fs::remove(full, ec);
+                }
+            }
             index_.remove(p);
         }
-        for (const auto& [p, h] : filesToWriteTheirs) {
-            writeFile(root_ / p, store_.loadAs<Blob>(h)->content());
-            index_.set(p, h);
+        for (const auto& [p, content] : loadedTheirsBlobs) {
+            writeFile(root_ / p, content);
+            index_.set(p, filesToWriteTheirs[p]);
         }
 
         // Apply conflict markers or keep ours for binary
@@ -1016,12 +1131,20 @@ std::string Repository::merge(const std::string& branch) {
 
     // No conflicts: write working tree & index, create 2-parent merge commit
     for (const auto& p : filesToDelete) {
-        fs::remove(root_ / p);
-        for (fs::path d = (root_ / p).parent_path(); d != root_ && fs::is_empty(d); d = d.parent_path())
-            fs::remove(d);
+        fs::path full = root_ / p;
+        std::error_code ec;
+        if (fs::exists(full, ec)) {
+            if (fs::is_directory(full, ec)) {
+                if (fs::is_empty(full, ec)) fs::remove(full, ec);
+            } else {
+                fs::remove(full, ec);
+            }
+        }
+        for (fs::path d = full.parent_path(); d != root_ && !d.empty() && fs::is_directory(d, ec) && fs::is_empty(d, ec); d = d.parent_path())
+            fs::remove(d, ec);
     }
-    for (const auto& [p, h] : filesToWriteTheirs) {
-        writeFile(root_ / p, store_.loadAs<Blob>(h)->content());
+    for (const auto& [p, content] : loadedTheirsBlobs) {
+        writeFile(root_ / p, content);
     }
 
     index_.replace(cleanEntries);
@@ -1326,31 +1449,55 @@ std::string Repository::stashPop() {
     }
 
     // Check untracked files before touching disk
-    Status s = status();
-    std::set<std::string> untracked(s.untracked.begin(), s.untracked.end());
-    for (const auto& p : stashAdded) {
-        if (untracked.count(p)) {
-            throw MiniGitException("untracked file '" + p + "' would be overwritten; move or commit it first");
+    std::map<std::string, Hash> toWriteStash;
+    for (const auto& p : stashAdded) toWriteStash[p] = stashTree.at(p);
+    for (const auto& p : stashModified) toWriteStash[p] = stashTree.at(p);
+
+    checkUntrackedOverwrite(toWriteStash);
+
+    for (const auto& p : stashDeleted) {
+        if (!isSafeRepoPath(p)) throw MiniGitException("refusing operation with unsafe path: " + p);
+        ensureNoSymlinkComponents(root_, p);
+        fs::path full = root_ / p;
+        std::error_code ec;
+        if (fs::exists(full, ec) && fs::is_directory(full, ec) && !fs::is_empty(full, ec)) {
+            throw MiniGitException("refusing to remove non-empty directory at tracked path: " + p);
         }
     }
-    for (const auto& p : stashModified) {
-        if (untracked.count(p)) {
-            throw MiniGitException("untracked file '" + p + "' would be overwritten; move or commit it first");
+    for (const auto& [p, _] : toWriteStash) {
+        if (!isSafeRepoPath(p)) throw MiniGitException("refusing operation with unsafe path: " + p);
+        ensureNoSymlinkComponents(root_, p);
+        fs::path full = root_ / p;
+        std::error_code ec;
+        if (fs::exists(full, ec) && fs::is_directory(full, ec) && !fs::is_empty(full, ec)) {
+            throw MiniGitException("cannot restore over non-empty directory: " + p);
         }
+    }
+
+    std::map<std::string, std::string> loadedStashBlobs;
+    for (const auto& [p, h] : toWriteStash) {
+        auto blob = store_.loadAs<Blob>(h);
+        if (!blob) throw MiniGitException("missing blob object for path: " + p);
+        loadedStashBlobs[p] = blob->content();
     }
 
     // Apply stash's delta to working tree on disk
     for (const auto& p : stashDeleted) {
-        if (fs::exists(root_ / p)) fs::remove(root_ / p);
-        for (fs::path d = (root_ / p).parent_path(); d != root_ && fs::is_empty(d); d = d.parent_path()) {
-            fs::remove(d);
+        fs::path full = root_ / p;
+        std::error_code ec;
+        if (fs::exists(full, ec)) {
+            if (fs::is_directory(full, ec)) {
+                if (fs::is_empty(full, ec)) fs::remove(full, ec);
+            } else {
+                fs::remove(full, ec);
+            }
+        }
+        for (fs::path d = full.parent_path(); d != root_ && !d.empty() && fs::is_directory(d, ec) && fs::is_empty(d, ec); d = d.parent_path()) {
+            fs::remove(d, ec);
         }
     }
-    for (const auto& p : stashAdded) {
-        writeFile(root_ / p, store_.loadAs<Blob>(stashTree.at(p))->content());
-    }
-    for (const auto& p : stashModified) {
-        writeFile(root_ / p, store_.loadAs<Blob>(stashTree.at(p))->content());
+    for (const auto& [p, content] : loadedStashBlobs) {
+        writeFile(root_ / p, content);
     }
 
     // Update index
@@ -1513,11 +1660,15 @@ std::string Repository::importBundleJson(const std::string& bundleJson) {
             } else {
                 content = objVal["content"].as_string();
             }
-            Blob b(content);
-            if (b.hash() != expectedHash) {
+            try {
+                Blob b(content);
+                if (b.hash() != expectedHash) {
+                    objectsRejected++;
+                } else {
+                    verifiedBlobs.push_back({expectedHash, std::move(content)});
+                }
+            } catch (...) {
                 objectsRejected++;
-            } else {
-                verifiedBlobs.push_back({expectedHash, std::move(content)});
             }
         } else if (type == "tree") {
             Tree t;
@@ -1535,10 +1686,15 @@ std::string Repository::importBundleJson(const std::string& bundleJson) {
                     t.set(p, Hash(hVal.as_string()));
                 }
             }
-            if (t.hash() != expectedHash) {
+            try {
+                Tree parsedTree = Tree::parse(t.serialize());
+                if (parsedTree.hash() != expectedHash) {
+                    objectsRejected++;
+                } else {
+                    verifiedTrees.push_back({expectedHash, std::move(parsedTree)});
+                }
+            } catch (...) {
                 objectsRejected++;
-            } else {
-                verifiedTrees.push_back({expectedHash, std::move(t)});
             }
         } else if (type == "commit") {
             if (objVal.contains("data") && objVal["data"].is_object()) {
@@ -1547,6 +1703,18 @@ std::string Repository::importBundleJson(const std::string& bundleJson) {
                 std::string parentStr = (d.contains("parent") && !d["parent"].is_null()) ? d["parent"].as_string() : "";
                 std::string authorStr = d["author"].as_string();
                 std::string messageStr = d["message"].as_string();
+                bool badAuthor = false;
+                for (char ch : authorStr) {
+                    unsigned char uc = static_cast<unsigned char>(ch);
+                    if (uc < 32 || uc == 127) {
+                        badAuthor = true;
+                        break;
+                    }
+                }
+                if (badAuthor) {
+                    objectsRejected++;
+                    continue;
+                }
                 std::time_t t = 0;
                 if (d.contains("time") && d["time"].is_number()) {
                     t = static_cast<std::time_t>(d["time"].as_int64());
@@ -1554,11 +1722,16 @@ std::string Repository::importBundleJson(const std::string& bundleJson) {
                     t = parseIsoTimestamp(d["timestamp"].as_string());
                 }
                 std::string parent2Str = (d.contains("parent2") && !d["parent2"].is_null()) ? d["parent2"].as_string() : "";
-                Commit c(Hash(treeStr), Hash(parentStr), authorStr, messageStr, t, Hash(parent2Str));
-                if (c.hash() != expectedHash) {
+                try {
+                    Commit c(Hash(treeStr), Hash(parentStr), authorStr, messageStr, t, Hash(parent2Str));
+                    Commit parsedCommit = Commit::parse(c.serialize());
+                    if (parsedCommit.hash() != expectedHash) {
+                        objectsRejected++;
+                    } else {
+                        verifiedCommits.push_back({expectedHash, std::move(parsedCommit)});
+                    }
+                } catch (...) {
                     objectsRejected++;
-                } else {
-                    verifiedCommits.push_back({expectedHash, std::move(c)});
                 }
             } else {
                 objectsRejected++;
@@ -1607,6 +1780,75 @@ std::string Repository::importBundleJson(const std::string& bundleJson) {
             store_.save(item.commit);
             objectsImported++;
         }
+    }
+
+    // Before creating or fast-forwarding any branch, verify the tip commit, its tree, all blobs and parents exist; otherwise reject the whole bundle
+    bool bundleInvalid = false;
+    std::string bundleInvalidReason;
+    if (root.contains("branches") && root["branches"].is_object()) {
+        for (const auto& [bName, tipVal] : root["branches"].as_object()) {
+            if (!RefManager::isValidBranchName(bName) || bName.rfind("peer-", 0) == 0) {
+                continue;
+            }
+            if (tipVal.is_null() || !tipVal.is_string() || tipVal.as_string().size() != 40) {
+                continue;
+            }
+            Hash target(tipVal.as_string());
+            if (!store_.exists(target)) {
+                bundleInvalid = true;
+                bundleInvalidReason = "Missing tip commit " + target.shortStr() + " for branch '" + bName + "'";
+                break;
+            }
+
+            try {
+                auto commit = store_.loadAs<Commit>(target);
+                std::set<Hash> visited;
+                auto verifyCommitTree = [&](auto self, const Hash& ch) -> bool {
+                    if (ch.empty() || ch.str() == "-") return true;
+                    if (visited.count(ch)) return true;
+                    visited.insert(ch);
+                    if (!store_.exists(ch)) return false;
+                    try {
+                        auto c = store_.loadAs<Commit>(ch);
+                        if (!store_.exists(c->tree())) return false;
+                        auto tree = store_.loadAs<Tree>(c->tree());
+                        for (const auto& [path, bHash] : tree->entries()) {
+                            if (!store_.exists(bHash)) return false;
+                        }
+                        if (!c->parent().empty() && c->parent().str() != "-") {
+                            if (!self(self, c->parent())) return false;
+                        }
+                        if (c->hasParent2() && !c->parent2().empty()) {
+                            if (!self(self, c->parent2())) return false;
+                        }
+                    } catch (...) {
+                        return false;
+                    }
+                    return true;
+                };
+
+                if (!verifyCommitTree(verifyCommitTree, target)) {
+                    bundleInvalid = true;
+                    bundleInvalidReason = "Missing object (commit, tree, blob, or parent) for branch '" + bName + "' with tip " + target.shortStr();
+                    break;
+                }
+            } catch (const InvalidObjectException&) {
+                // Non-commit tip (handled by branchesSkippedInvalid with warning in branch loop)
+                continue;
+            } catch (...) {
+                continue;
+            }
+        }
+    }
+
+    if (bundleInvalid) {
+        std::map<std::string, JsonValue> errRes;
+        errRes["ok"] = JsonValue(false);
+        errRes["error"] = JsonValue("Bundle rejected: " + bundleInvalidReason + "; refs untouched.");
+        errRes["objectsImported"] = JsonValue(objectsImported);
+        errRes["objectsPresent"] = JsonValue(objectsPresent);
+        errRes["objectsRejected"] = JsonValue(objectsRejected);
+        return JsonValue(errRes).serialize();
     }
 
     // Process Branches

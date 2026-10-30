@@ -1174,6 +1174,152 @@ void test_group1_git_export_no_system() {
     std::cout << "PASSED\n";
 }
 
+void test_group2_restore_untracked_prefix_refusal() {
+    std::cout << "[Group 2] Untracked parent prefix refusal on restore/checkout... ";
+    fs::path dir = fs::current_path() / "test_core_repo_g2_prefix";
+    cleanDir(dir);
+    Repository::init(dir);
+    Repository repo(dir);
+
+    writeFile(dir / "a.txt", "initial file");
+    repo.add("a.txt", true);
+    repo.commit("initial");
+
+    repo.createBranch("feat");
+    repo.checkout("feat");
+    fs::create_directories(dir / "d");
+    writeFile(dir / "d" / "sub.txt", "sub file");
+    repo.add("d/sub.txt", true);
+    repo.commit("commit with d/sub.txt");
+
+    repo.checkout("main");
+    CHECK(fs::exists(dir / "a.txt"));
+    CHECK(!fs::exists(dir / "d"));
+
+    // Create untracked file 'd'
+    writeFile(dir / "d", "I am untracked file d");
+
+    bool threw = false;
+    try {
+        repo.checkout("feat");
+    } catch (const MiniGitException& e) {
+        threw = true;
+        std::string msg = e.what();
+        CHECK(msg.find("untracked file 'd' would be overwritten") != std::string::npos);
+    }
+    CHECK(threw);
+
+    // Ensure untracked file d was NOT deleted or overwritten
+    CHECK(fs::exists(dir / "d"));
+    CHECK(!fs::is_directory(dir / "d"));
+    CHECK(readFile(dir / "d") == "I am untracked file d");
+
+    removeDir(dir);
+    std::cout << "PASSED\n";
+}
+
+void test_group2_restore_nonempty_dir_refusal() {
+    std::cout << "[Group 2] Non-empty directory at tracked path refusal (no remove_all)... ";
+    fs::path dir = fs::current_path() / "test_core_repo_g2_nonempty";
+    cleanDir(dir);
+    Repository::init(dir);
+    Repository repo(dir);
+
+    writeFile(dir / "tracked.txt", "tracked content");
+    repo.add("tracked.txt", true);
+    repo.commit("commit with tracked.txt");
+
+    repo.createBranch("other");
+    repo.checkout("other");
+    fs::remove(dir / "tracked.txt");
+    writeFile(dir / "other.txt", "other");
+    repo.add("other.txt", true);
+    repo.add("tracked.txt", true);
+    repo.commit("commit without tracked.txt");
+
+    repo.checkout("main");
+    CHECK(fs::exists(dir / "tracked.txt"));
+
+    // Replace tracked.txt with a non-empty directory
+    fs::remove(dir / "tracked.txt");
+    fs::create_directories(dir / "tracked.txt");
+    writeFile(dir / "tracked.txt" / "user_secret.txt", "precious user data");
+
+    bool threw = false;
+    try {
+        repo.checkout("other");
+    } catch (const MiniGitException& e) {
+        threw = true;
+    }
+    CHECK(threw);
+
+    // User content in non-empty directory must NOT have been deleted
+    CHECK(fs::exists(dir / "tracked.txt" / "user_secret.txt"));
+    CHECK(readFile(dir / "tracked.txt" / "user_secret.txt") == "precious user data");
+
+    removeDir(dir);
+    std::cout << "PASSED\n";
+}
+
+void test_group2_import_bundle_validation() {
+    std::cout << "[Group 2] importBundleJson object re-parsing and branch completeness verification... ";
+    fs::path dir = fs::current_path() / "test_core_repo_g2_bundle";
+    cleanDir(dir);
+    Repository::init(dir);
+    Repository repo(dir);
+
+    writeFile(dir / "base.txt", "base");
+    repo.add("base.txt", true);
+    repo.commit("initial");
+
+    // 1. Commit::parse must throw InvalidObjectException on invalid time stoll
+    bool timeThrew = false;
+    try {
+        Commit::parse("tree 0000000000000000000000000000000000000000\nauthor test\ntime not_a_number\n\nmsg");
+    } catch (const InvalidObjectException&) {
+        timeThrew = true;
+    }
+    CHECK(timeThrew);
+
+    // 2. Commit with control char / newline in author must be rejected
+    bool authorThrew = false;
+    try {
+        Commit::parse("tree 0000000000000000000000000000000000000000\nauthor bad\x01author\ntime 1000\n\nmsg");
+    } catch (const InvalidObjectException&) {
+        authorThrew = true;
+    }
+    CHECK(authorThrew);
+
+    // 3. Bundle with missing blob must reject the entire bundle before creating branch
+    // Let's create a valid blob and tree, but commit references a tree with a missing blob
+    Tree t;
+    Hash missingBlob("1111111111111111111111111111111111111111");
+    t.set("missing.txt", missingBlob);
+    Commit c(t.hash(), Hash(), "Author", "Message", 1234567890);
+
+    std::ostringstream bundleJson;
+    bundleJson << "{\n"
+               << "  \"version\": 1,\n"
+               << "  \"objects\": {\n"
+               << "    \"" << t.hash().str() << "\": {\"type\": \"tree\", \"data\": {\"missing.txt\": \"" << missingBlob.str() << "\"}},\n"
+               << "    \"" << c.hash().str() << "\": {\"type\": \"commit\", \"data\": {\"tree\": \"" << t.hash().str() << "\", \"author\": \"Author\", \"message\": \"Message\", \"time\": 1234567890}}\n"
+               << "  },\n"
+               << "  \"branches\": {\n"
+               << "    \"new_branch\": \"" << c.hash().str() << "\"\n"
+               << "  }\n"
+               << "}";
+
+    std::string res = repo.importBundleJson(bundleJson.str());
+    CHECK(res.find("\"ok\":false") != std::string::npos || res.find("\"ok\": false") != std::string::npos);
+    CHECK(res.find("Bundle rejected") != std::string::npos);
+
+    // Branch must NOT have been created
+    CHECK(!repo.branchExists("new_branch"));
+
+    removeDir(dir);
+    std::cout << "PASSED\n";
+}
+
 int main() {
     std::cout << "\n============================================\n";
     std::cout << "  Mini-Git Core Fixes Automated Tests\n";
@@ -1207,6 +1353,9 @@ int main() {
     runTest("test_g1_json", test_group1_json_nesting_limit);
     runTest("test_g1_refmgr", test_group1_refmanager_branch_name_validation);
     runTest("test_g1_export", test_group1_git_export_no_system);
+    runTest("test_g2_prefix", test_group2_restore_untracked_prefix_refusal);
+    runTest("test_g2_nonempty", test_group2_restore_nonempty_dir_refusal);
+    runTest("test_g2_bundle", test_group2_import_bundle_validation);
 
     std::cout << "\nALL 10 CORE FIXES TESTS PASSED SUCCESSFULLY!\n";
     return 0;

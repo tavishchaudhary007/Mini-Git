@@ -1613,14 +1613,34 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         }
 
         function getChronologicalCommits() {
-            const commits = [];
-            for (const [hash, obj] of Object.entries(OBJECTS)) {
-                if (obj.type === 'commit') {
-                    commits.push({ hash, ...obj.data });
+            const currentHead = (CURRENT_BRANCH && BRANCHES[CURRENT_BRANCH]) || window.MINIGIT_LIVE?.head || DEMO_HEAD_HASH;
+            if (!currentHead || !OBJECTS[currentHead] || OBJECTS[currentHead].type !== 'commit') {
+                return [];
+            }
+
+            const reachable = new Set();
+            const queue = [currentHead];
+            reachable.add(currentHead);
+
+            while (queue.length > 0) {
+                const h = queue.shift();
+                const obj = OBJECTS[h];
+                if (obj && obj.type === 'commit' && obj.data) {
+                    if (obj.data.parent && !reachable.has(obj.data.parent) && OBJECTS[obj.data.parent]) {
+                        reachable.add(obj.data.parent);
+                        queue.push(obj.data.parent);
+                    }
+                    if (obj.data.parent2 && !reachable.has(obj.data.parent2) && OBJECTS[obj.data.parent2]) {
+                        reachable.add(obj.data.parent2);
+                        queue.push(obj.data.parent2);
+                    }
                 }
             }
-            commits.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-            return commits;
+
+            const { commits } = getGraphCommits(true);
+            const filtered = commits.filter(c => reachable.has(c.hash));
+            filtered.reverse();
+            return filtered;
         }
 
         /* ---------------------------------------------------------------------
@@ -5272,6 +5292,16 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
 
             const ready = candidateCommits.filter(c => childrenCount.get(c.hash) === 0);
 
+            const parentPriority = new Map();
+            for (const c of candidateCommits) {
+                if (c.parent && !parentPriority.has(c.parent)) {
+                    parentPriority.set(c.parent, 1);
+                }
+                if (c.parent2 && !parentPriority.has(c.parent2)) {
+                    parentPriority.set(c.parent2, 2);
+                }
+            }
+
             const getCommitTime = (c) => {
                 if (typeof c.time === 'number' && !isNaN(c.time)) return c.time * 1000;
                 if (c.timestamp) {
@@ -5288,6 +5318,9 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 ready.sort((a, b) => {
                     const diff = getCommitTime(b) - getCommitTime(a);
                     if (diff !== 0) return diff;
+                    const pA = parentPriority.get(a.hash) || 1;
+                    const pB = parentPriority.get(b.hash) || 1;
+                    if (pA !== pB) return pA - pB;
                     if (a.hash === head) return -1;
                     if (b.hash === head) return 1;
                     return b.hash.localeCompare(a.hash);
