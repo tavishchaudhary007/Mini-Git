@@ -523,42 +523,54 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                 if (!lan) {
                     sendHttpResponse(clientSock, 403, "Forbidden", "application/json; charset=utf-8",
                                      "{\"ok\":false,\"error\":\"LAN mode is not enabled on host\"}", corsOrigin);
-                } else {
-                    JsonValue bodyJson;
-                    std::string parseErr;
-                    if (!parseRequestBody(body, bodyJson, parseErr)) {
-                        sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                         "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + "}", corsOrigin);
+                    CLOSESOCKET(clientSock);
+                    continue;
+                }
+                if (isLoopback) {
+                    bool isLocalOrigin = origin.empty() || origin == "null" ||
+                                         origin == ("http://127.0.0.1:" + std::to_string(boundPort)) ||
+                                         origin == ("http://localhost:" + std::to_string(boundPort));
+                    if (!isLocalOrigin) {
+                        sendHttpResponse(clientSock, 403, "Forbidden", "application/json; charset=utf-8",
+                                         "{\"ok\":false,\"error\":\"Forbidden: cross-origin pairing over loopback refused\"}", corsOrigin);
                         CLOSESOCKET(clientSock);
                         continue;
                     }
-                    std::string code = getOptionalString(bodyJson, "code");
-                    std::string peerName = getOptionalString(bodyJson, "peerName");
-                    if (peerName.empty()) peerName = getOptionalString(bodyJson, "clientName");
-                    bool isCrossLoopback = isLoopback && !origin.empty() && origin != "null" &&
-                                           origin != ("http://127.0.0.1:" + std::to_string(boundPort)) &&
-                                           origin != ("http://localhost:" + std::to_string(boundPort));
-                    auto res = pairingMgr.submitCode(code, clientIpStr, peerName, origin, isCrossLoopback);
-                    if (res.rateLimited) {
-                        sendHttpResponse(clientSock, 429, "Too Many Requests", "application/json; charset=utf-8",
-                                         "{\"ok\":false,\"error\":" + jsonString(res.error) + ",\"rateLimited\":true}",
-                                         corsOrigin);
-                    } else if (res.crossOriginLoopbackRefused) {
-                        sendHttpResponse(clientSock, 403, "Forbidden", "application/json; charset=utf-8",
-                                         "{\"ok\":false,\"error\":" + jsonString(res.error) + "}",
-                                         corsOrigin);
-                    } else if (res.success) {
-                        sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
-                                         "{\"ok\":true,\"status\":\"pending\",\"requestId\":\"" + res.requestId +
-                                         "\",\"message\":\"Pairing request submitted. Waiting for host approval.\"}",
-                                         corsOrigin);
-                    } else {
-                        int sc = res.locked ? 403 : 401;
-                        sendHttpResponse(clientSock, sc, sc == 403 ? "Forbidden" : "Unauthorized", "application/json; charset=utf-8",
-                                         "{\"ok\":false,\"error\":" + jsonString(res.error) + ",\"locked\":" + (res.locked ? "true" : "false") +
-                                         ",\"remainingAttempts\":" + std::to_string(res.remainingAttempts) + "}",
-                                         corsOrigin);
-                    }
+                }
+                JsonValue bodyJson;
+                std::string parseErr;
+                if (!parseRequestBody(body, bodyJson, parseErr)) {
+                    sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
+                                     "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + "}", corsOrigin);
+                    CLOSESOCKET(clientSock);
+                    continue;
+                }
+                std::string code = getOptionalString(bodyJson, "code");
+                std::string peerName = getOptionalString(bodyJson, "peerName");
+                if (peerName.empty()) peerName = getOptionalString(bodyJson, "clientName");
+                bool isCrossLoopback = isLoopback && !origin.empty() && origin != "null" &&
+                                       origin != ("http://127.0.0.1:" + std::to_string(boundPort)) &&
+                                       origin != ("http://localhost:" + std::to_string(boundPort));
+                auto res = pairingMgr.submitCode(code, clientIpStr, peerName, origin, isCrossLoopback);
+                if (res.rateLimited) {
+                    sendHttpResponse(clientSock, 429, "Too Many Requests", "application/json; charset=utf-8",
+                                     "{\"ok\":false,\"error\":" + jsonString(res.error) + ",\"rateLimited\":true}",
+                                     corsOrigin);
+                } else if (res.crossOriginLoopbackRefused) {
+                    sendHttpResponse(clientSock, 403, "Forbidden", "application/json; charset=utf-8",
+                                     "{\"ok\":false,\"error\":" + jsonString(res.error) + "}",
+                                     corsOrigin);
+                } else if (res.success) {
+                    sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
+                                     "{\"ok\":true,\"status\":\"pending\",\"requestId\":\"" + res.requestId +
+                                     "\",\"message\":\"Pairing request submitted. Waiting for host approval.\"}",
+                                     corsOrigin);
+                } else {
+                    int sc = res.locked ? 403 : 401;
+                    sendHttpResponse(clientSock, sc, sc == 403 ? "Forbidden" : "Unauthorized", "application/json; charset=utf-8",
+                                     "{\"ok\":false,\"error\":" + jsonString(res.error) + ",\"locked\":" + (res.locked ? "true" : "false") +
+                                     ",\"remainingAttempts\":" + std::to_string(res.remainingAttempts) + "}",
+                                     corsOrigin);
                 }
             } else if (method == "GET" && path == "/api/pair/status") {
                 if (!lan) {
@@ -620,8 +632,16 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                     std::string reqId = getOptionalString(bodyJson, "requestId");
                     std::string action = getOptionalString(bodyJson, "action");
                     std::string label = getOptionalString(bodyJson, "label");
-                    bool allowed = (action == "allow" || action == "approve");
-                    bool ok = pairingMgr.decideRequest(reqId, allowed, label);
+                    bool isAllow = (action == "allow" || action == "approve");
+                    bool isDeny = (action == "deny" || action == "reject");
+                    if (!isAllow && !isDeny) {
+                        sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
+                                         "{\"ok\":false,\"error\":\"Missing or unknown action. Must be 'allow' or 'deny'\"}",
+                                         corsOrigin);
+                        CLOSESOCKET(clientSock);
+                        continue;
+                    }
+                    bool ok = pairingMgr.decideRequest(reqId, isAllow, label);
                     sendHttpResponse(clientSock, ok ? 200 : 400, ok ? "OK" : "Bad Request", "application/json; charset=utf-8",
                                      "{\"ok\":" + std::string(ok ? "true" : "false") + ",\"action\":\"" + action + "\"}",
                                      corsOrigin);

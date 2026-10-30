@@ -142,13 +142,6 @@ PairingManager::PairSubmitResult PairingManager::submitCode(const std::string& c
                        }),
         failedAttemptTimestamps_.end());
 
-    // Global limit across all clients: 10 failed attempts a minute; above it, return 429
-    if (failedAttemptTimestamps_.size() >= 10) {
-        res.rateLimited = true;
-        res.error = "Too many failed pairing attempts across clients. Rate limit exceeded (10 per minute).";
-        return res;
-    }
-
     std::string clientKey = clientIp;
     if (!origin.empty()) {
         clientKey += "|" + origin;
@@ -162,7 +155,7 @@ PairingManager::PairSubmitResult PairingManager::submitCode(const std::string& c
     res.remainingAttempts = std::max(0, 5 - fails);
 
     if (clientLocked) {
-        failedAttemptTimestamps_.push_back(now);
+        // Do not push to failedAttemptTimestamps_ for clients that are already locked
         res.error = "Pairing locked after 5 failed attempts. Please generate a new code on the host.";
         return res;
     }
@@ -177,7 +170,22 @@ PairingManager::PairSubmitResult PairingManager::submitCode(const std::string& c
         return res;
     }
 
-    if (code.size() != 6 || code != currentCode_) {
+    // If cross-origin pairing arriving over loopback -> refuse
+    if (isCrossLoopback) {
+        res.crossOriginLoopbackRefused = true;
+        res.error = "Forbidden: cross-origin pairing over loopback refused";
+        return res;
+    }
+
+    bool codeMatches = (code.size() == 6 && code == currentCode_);
+    if (!codeMatches) {
+        // Global limit across all clients for failed attempts: 10 failed attempts a minute; above it, return 429
+        if (failedAttemptTimestamps_.size() >= 10) {
+            res.rateLimited = true;
+            res.error = "Too many failed pairing attempts across clients. Rate limit exceeded (10 per minute).";
+            return res;
+        }
+
         failedAttemptTimestamps_.push_back(now);
         int newFails = ++failedAttemptsByClient_[clientKey];
         if (newFails >= 5) {
@@ -192,14 +200,7 @@ PairingManager::PairSubmitResult PairingManager::submitCode(const std::string& c
         return res;
     }
 
-    // If code is correct, but cross-origin pairing arriving over loopback -> refuse
-    if (isCrossLoopback) {
-        res.crossOriginLoopbackRefused = true;
-        res.error = "Forbidden: cross-origin pairing over loopback refused";
-        return res;
-    }
-
-    // Code matches and is valid! Real code is never locked out for non-locked clients.
+    // Correct code from an unlocked client succeeds (skips global failed-attempts bucket)
     res.success = true;
     res.locked = false;
     res.remainingAttempts = std::max(0, 5 - fails);
