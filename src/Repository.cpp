@@ -1339,6 +1339,7 @@ Snapshot Repository::snapshot() const {
         }
     }
     s.binaryFiles.assign(binFiles.begin(), binFiles.end());
+    for (const auto& [p, _h] : index_.entries()) s.trackedFiles.push_back(p);
     for (const auto& [path, h] : index_.entries()) {
         auto it = head.find(path);
         if (it == head.end() || it->second != h) s.staged[path] = h;

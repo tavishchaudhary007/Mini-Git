@@ -1,3 +1,4 @@
+#include "HtmlExporter.h"
 #include <iostream>
 #include <cstdlib>
 
@@ -1497,6 +1498,51 @@ void test_group3_workingfiles_skips_symlinks() {
     std::cout << "PASSED\n";
 }
 
+
+// Group 5: HtmlExporter static report tracked files only & frontend hardening
+void test_group5_html_exporter_tracked_files_only() {
+    std::cout << "[Group 5] HtmlExporter static report includes only tracked files... ";
+    fs::path dir = fs::current_path() / "test_g5_repo";
+    cleanDir(dir);
+    Repository::init(dir);
+    Repository repo(dir);
+
+    // Create tracked file
+    writeFile(dir / "tracked.txt", "tracked content\n");
+    repo.add("tracked.txt", true);
+    repo.commit("initial");
+
+    // Create untracked file
+    writeFile(dir / "untracked.txt", "untracked content\n");
+
+    // Static report
+    std::string staticHtml = HtmlExporter::render(repo.snapshot(), "test_g5_repo", true);
+    CHECK(staticHtml.find("tracked.txt") != std::string::npos);
+    // In static HTML, untracked.txt must NOT be present in snapshot files map
+    CHECK(staticHtml.find("\"untracked.txt\"") == std::string::npos);
+    CHECK(staticHtml.find("window.__staticExport = true;") != std::string::npos);
+
+    // Server mode render does include live files
+    std::string serverHtml = HtmlExporter::render(repo.snapshot(), "test_g5_repo", false);
+    CHECK(serverHtml.find("untracked.txt") != std::string::npos);
+
+    // Check Frontend fixes in embedded template:
+    // Bug 17: discardFile server mode syncEditorWithActiveFile
+    CHECK(staticHtml.find("if (ACTIVE_FILE === filepath) syncEditorWithActiveFile();") != std::string::npos);
+    // Bug 18 & 19: Save & Stash and Save & Commit buttons
+    CHECK(staticHtml.find("btnDirtyStash") != std::string::npos);
+    CHECK(staticHtml.find("Save & Commit") != std::string::npos);
+    // Bug 21: saveActiveFileFromEditor area.value === content
+    CHECK(staticHtml.find("if (area.value === content)") != std::string::npos);
+    // Bug 22: beforeunload handler
+    CHECK(staticHtml.find("window.addEventListener('beforeunload'") != std::string::npos);
+    // Bug 23: actionTimeTravelRestore clears playback timer before modal
+    CHECK(staticHtml.find("TIME_TRAVEL_PLAY_TIMER = null;") != std::string::npos);
+
+    removeDir(dir);
+    std::cout << "PASSED\n";
+}
+
 int main() {
     std::cout << "\n============================================\n";
     std::cout << "  Mini-Git Core Fixes Automated Tests\n";
@@ -1538,6 +1584,7 @@ int main() {
     runTest("test_g3_atomic", test_group3_restore_all_or_nothing);
     runTest("test_g3_wf", test_group3_writefile_atomic_and_symlink_refusal);
     runTest("test_g3_sym", test_group3_workingfiles_skips_symlinks);
+    runTest("test_g5_html", test_group5_html_exporter_tracked_files_only);
 
     std::cout << "\nALL 10 CORE FIXES TESTS PASSED SUCCESSFULLY!\n";
     return 0;

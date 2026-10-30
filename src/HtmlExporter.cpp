@@ -1,3 +1,4 @@
+#include <algorithm>
 #include "HtmlExporter.h"
 #include <cstdio>
 #include <ctime>
@@ -54,7 +55,7 @@ std::string HtmlExporter::computeVersion(const Snapshot& snap) {
     return Hasher::sha1(ss.str());
 }
 
-std::string HtmlExporter::toJson(const Snapshot& snap, const std::string& repoName, bool isSyncBundle) {
+std::string HtmlExporter::toJson(const Snapshot& snap, const std::string& repoName, bool isSyncBundle, bool isStaticExport) {
     std::ostringstream o;
 
     std::string current = snap.currentBranch;
@@ -156,6 +157,15 @@ std::string HtmlExporter::toJson(const Snapshot& snap, const std::string& repoNa
         o << ",\"files\":{";
         first = true;
         for (const auto& [path, content] : snap.files) {
+            if (isStaticExport) {
+                bool isTracked = false;
+                if (!snap.trackedFiles.empty()) {
+                    isTracked = (std::find(snap.trackedFiles.begin(), snap.trackedFiles.end(), path) != snap.trackedFiles.end());
+                } else {
+                    isTracked = (std::find(snap.status.untracked.begin(), snap.status.untracked.end(), path) == snap.status.untracked.end());
+                }
+                if (!isTracked) continue;
+            }
             if (!first) o << ',';
             first = false;
             jsonString(o, path); o << ':'; jsonString(o, content);
@@ -204,11 +214,13 @@ std::string HtmlExporter::toJson(const Snapshot& snap, const std::string& repoNa
             jsonString(o, f);
         }
         o << "],\"untracked\":[";
-        fst = true;
-        for (const auto& f : snap.status.untracked) {
-            if (!fst) o << ',';
-            fst = false;
-            jsonString(o, f);
+        if (!isStaticExport) {
+            fst = true;
+            for (const auto& f : snap.status.untracked) {
+                if (!fst) o << ',';
+                fst = false;
+                jsonString(o, f);
+            }
         }
         o << "]}";
     }
@@ -229,6 +241,6 @@ std::string HtmlExporter::render(const Snapshot& snap, const std::string& repoNa
     const std::string marker = "/*__MINIGIT_DATA__*/null";
     size_t pos = html.find(marker);
     if (pos == std::string::npos) throw MiniGitException("frontend template is missing its data placeholder");
-    html.replace(pos, marker.size(), toJson(snap, repoName));
+    html.replace(pos, marker.size(), toJson(snap, repoName, false, isStaticExport));
     return html;
 }

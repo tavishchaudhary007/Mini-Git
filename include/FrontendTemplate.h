@@ -1994,13 +1994,17 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             if (IS_SERVER_MODE) {
                 const res = await apiPost('file/save', { path: ACTIVE_FILE, content });
                 if (res && res.ok) {
-                    delete DIRTY_BUFFERS[ACTIVE_FILE];
+                    if (area.value === content) {
+                        delete DIRTY_BUFFERS[ACTIVE_FILE];
+                    }
                     syncEditorWithActiveFile();
                     showToast(`Saved '${ACTIVE_FILE}'`);
                 }
                 return;
             }
-            delete DIRTY_BUFFERS[ACTIVE_FILE];
+            if (area.value === content) {
+                delete DIRTY_BUFFERS[ACTIVE_FILE];
+            }
             syncEditorWithActiveFile();
             showToast(`Saved '${ACTIVE_FILE}'`);
             updateUI();
@@ -2131,11 +2135,12 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                     modal.innerHTML = `
                         <div class="bg-theme-card border border-theme-border rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
                             <h3 class="text-sm font-semibold text-theme-text">Unsaved Changes</h3>
-                            <p id="dirtySwitchModalText" class="text-xs text-theme-muted">You have unsaved changes in open files. Would you like to save them before switching branches, discard them, or cancel?</p>
+                            <p id="dirtySwitchModalText" class="text-xs text-theme-muted">You have unsaved changes in open files. Would you like to commit or stash them before proceeding, discard them, or cancel?</p>
                             <div class="flex justify-end space-x-2 pt-2">
-                                <button id="btnDirtyCancel" class="px-4 py-1.5 rounded-full border border-theme-border text-xs text-theme-text hover:bg-zinc-100 dark:hover:bg-zinc-800 transition">Cancel</button>
-                                <button id="btnDirtyDiscard" class="px-4 py-1.5 rounded-full bg-rose-600 hover:bg-rose-700 text-xs text-white transition">Discard</button>
-                                <button id="btnDirtySave" class="px-4 py-1.5 rounded-full bg-black dark:bg-white text-white dark:text-black text-xs font-semibold hover:opacity-90 transition">Save</button>
+                                <button id="btnDirtyCancel" class="px-3.5 py-1.5 rounded-full border border-theme-border text-xs text-theme-text hover:bg-zinc-100 dark:hover:bg-zinc-800 transition">Cancel</button>
+                                <button id="btnDirtyDiscard" class="px-3.5 py-1.5 rounded-full bg-rose-600 hover:bg-rose-700 text-xs text-white transition">Discard</button>
+                                <button id="btnDirtyStash" class="px-3.5 py-1.5 rounded-full bg-indigo-600 hover:bg-indigo-700 text-xs text-white font-medium transition">Save & Stash</button>
+                                <button id="btnDirtySave" class="px-3.5 py-1.5 rounded-full bg-black dark:bg-white text-white dark:text-black text-xs font-semibold hover:opacity-90 transition">Save & Commit</button>
                             </div>
                         </div>
                     `;
@@ -2143,7 +2148,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 }
                 const textEl = document.getElementById('dirtySwitchModalText');
                 if (textEl) {
-                    textEl.textContent = `You have unsaved changes in open files. Would you like to save them before ${actionLabel || 'proceeding'}, discard them, or cancel?`;
+                    textEl.textContent = `You have unsaved changes in open files. Would you like to commit or stash them before ${actionLabel || 'proceeding'}, discard them, or cancel?`;
                 }
                 modal.classList.remove('hidden');
 
@@ -2154,7 +2159,8 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
 
                 document.getElementById('btnDirtyCancel').onclick = () => cleanup('cancel');
                 document.getElementById('btnDirtyDiscard').onclick = () => cleanup('discard');
-                document.getElementById('btnDirtySave').onclick = () => cleanup('save');
+                document.getElementById('btnDirtyStash').onclick = () => cleanup('stash');
+                document.getElementById('btnDirtySave').onclick = () => cleanup('commit');
             });
         }
 
@@ -2164,7 +2170,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             if (choice === 'cancel') {
                 return false;
             }
-            if (choice === 'save') {
+            if (choice === 'stash') {
                 for (const fp of Object.keys(DIRTY_BUFFERS)) {
                     const ok = await saveFileBuffer(fp);
                     if (!ok) {
@@ -2172,11 +2178,66 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                         return false;
                     }
                 }
+                if (IS_SERVER_MODE) {
+                    const sRes = await apiPost('stash/save', { message: `Auto-stash before ${actionLabel || 'action'}`, includeUntracked: true });
+                    if (!sRes || !sRes.ok) {
+                        showToast(`Stash failed: ${sRes?.error || 'error'}. ${actionLabel || 'Action'} aborted.`, "error");
+                        return false;
+                    }
+                    await refreshStashList();
+                } else {
+                    await executeQuickStash();
+                }
+                return true;
+            }
+            if (choice === 'commit' || choice === 'save') {
+                const commitMsg = prompt(`Commit message for unsaved changes before ${actionLabel || 'proceeding'}:`, `WIP: before ${actionLabel || 'action'}`);
+                if (!commitMsg || !commitMsg.trim()) {
+                    showToast(`Commit cancelled. ${actionLabel || 'Action'} aborted.`, "warning");
+                    return false;
+                }
+                for (const fp of Object.keys(DIRTY_BUFFERS)) {
+                    const ok = await saveFileBuffer(fp);
+                    if (!ok) {
+                        showToast(`Failed to save '${fp}'. ${actionLabel || 'Action'} aborted.`, "error");
+                        return false;
+                    }
+                }
+                if (IS_SERVER_MODE) {
+                    for (const fp of Object.keys(DIRTY_BUFFERS)) {
+                        await apiPost('stage', { path: fp });
+                    }
+                    const cRes = await apiPost('commit', { message: commitMsg.trim() });
+                    if (!cRes || !cRes.ok) {
+                        showToast(`Commit failed: ${cRes?.error || 'error'}. ${actionLabel || 'Action'} aborted.`, "error");
+                        return false;
+                    }
+                } else {
+                    for (const fp of Object.keys(DIRTY_BUFFERS)) {
+                        STAGING_INDEX[fp] = 'staged';
+                    }
+                    await executeGitCommit(commitMsg.trim());
+                }
                 return true;
             }
             if (choice === 'discard') {
                 for (const fp of Object.keys(DIRTY_BUFFERS)) {
                     delete DIRTY_BUFFERS[fp];
+                    if (window.MINIGIT_LIVE?.files && window.MINIGIT_LIVE.files[fp] !== undefined) {
+                        VFS[fp] = window.MINIGIT_LIVE.files[fp];
+                    } else if (!IS_SERVER_MODE && VFS[fp] !== undefined) {
+                        let headTreeBlobs = {};
+                        const headCommitHash = (CURRENT_BRANCH && BRANCHES[CURRENT_BRANCH]) ? BRANCHES[CURRENT_BRANCH] : (DEMO_HEAD_HASH || DEMO_REFLOG[0]?.newHash);
+                        if (headCommitHash && OBJECTS[headCommitHash]) {
+                            const treeHash = OBJECTS[headCommitHash].data.tree;
+                            headTreeBlobs = OBJECTS[treeHash]?.data || {};
+                        }
+                        if (headTreeBlobs[fp]) {
+                            VFS[fp] = getBlobText(headTreeBlobs[fp]);
+                        } else {
+                            delete VFS[fp];
+                        }
+                    }
                 }
                 syncEditorWithActiveFile();
                 updateUI();
@@ -2237,10 +2298,22 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             if (!confirm(promptMsg)) return;
 
             if (IS_SERVER_MODE) {
+                delete DIRTY_BUFFERS[filepath];
+                if (window.MINIGIT_LIVE?.files && window.MINIGIT_LIVE.files[filepath] !== undefined) {
+                    VFS[filepath] = window.MINIGIT_LIVE.files[filepath];
+                } else {
+                    delete VFS[filepath];
+                }
+                if (ACTIVE_FILE === filepath) syncEditorWithActiveFile();
                 const res = await apiPost('discard', { path: filepath });
                 if (res && res.ok) {
-                    delete DIRTY_BUFFERS[filepath];
+                    if (res.snapshot) {
+                        window.MINIGIT_LIVE = res.snapshot;
+                        loadLiveRepo();
+                    }
+                    if (ACTIVE_FILE === filepath) syncEditorWithActiveFile();
                     showToast(isUntracked ? `Deleted untracked file '${filepath}'` : `Discarded '${filepath}'`);
+                    updateUI();
                 }
                 return;
             }
@@ -3009,9 +3082,15 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         }
 
         async function actionTimeTravelRestore() {
-            if (!await confirmDirtyBuffersBefore("restore")) return;
+            if (TIME_TRAVEL_PLAY_TIMER) {
+                clearInterval(TIME_TRAVEL_PLAY_TIMER);
+                TIME_TRAVEL_PLAY_TIMER = null;
+                const icon = document.getElementById('timeTravelPlayIcon');
+                if (icon) icon.className = "ph ph-play text-sm";
+            }
             const c = TIME_TRAVEL_COMMITS[TIME_TRAVEL_INDEX];
             if (!c) return;
+            if (!await confirmDirtyBuffersBefore("restore")) return;
             const short = c.hash.substring(0, 7);
             const confirmed = confirm(`Checkout commit [${short}] (detached HEAD)?\n\nTo start new work here without detaching HEAD, you can use "Branch Here" instead.`);
             if (!confirmed) return;
@@ -5208,6 +5287,20 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             branchChains.forEach((chainObj, chainIdx) => {
                 let assignedLane = -1;
                 const rows = chainObj.commits.map(h => commitRowIndex.get(h)).filter(r => r !== undefined);
+                for (const h of chainObj.commits) {
+                    const node = commitMap.get(h);
+                    if (node) {
+                        if (node.parent && commitRowIndex.has(node.parent)) rows.push(commitRowIndex.get(node.parent));
+                        if (node.parent2 && commitRowIndex.has(node.parent2)) rows.push(commitRowIndex.get(node.parent2));
+                    }
+                }
+                const chainCommitSet = new Set(chainObj.commits);
+                for (const c of sortedCommits) {
+                    if ((c.parent && chainCommitSet.has(c.parent)) || (c.parent2 && chainCommitSet.has(c.parent2))) {
+                        const r = commitRowIndex.get(c.hash);
+                        if (r !== undefined) rows.push(r);
+                    }
+                }
                 const minR = Math.min(...rows);
                 const maxR = Math.max(...rows);
 
@@ -5218,7 +5311,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 } else {
                     for (let l = 1; l < laneRowIntervals.length; l++) {
                         const intervals = laneRowIntervals[l] || [];
-                        const overlaps = intervals.some(([r1, r2]) => !(maxR < r1 - 1 || minR > r2 + 1));
+                        const overlaps = intervals.some(([r1, r2]) => !(maxR < r1 || minR > r2));
                         if (!overlaps) {
                             assignedLane = l;
                             break;
@@ -5754,6 +5847,14 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         /* ---------------------------------------------------------------------
          * WINDOW LOAD BOOTSTRAP
          * --------------------------------------------------------------------- */
+        window.addEventListener('beforeunload', (e) => {
+            if (hasUnsavedEdits()) {
+                e.preventDefault();
+                e.returnValue = 'You have unsaved changes in open files. Are you sure you want to leave?';
+                return e.returnValue;
+            }
+        });
+
         window.addEventListener('keydown', (e) => {
             if ((e.ctrlKey || e.metaKey) && e.key === 's') {
                 const editorView = document.getElementById('viewContainerEditor');

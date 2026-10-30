@@ -61,6 +61,7 @@ struct Snapshot {
     bool lan{false};
     std::string lanUrl;
     std::vector<std::string> binaryFiles;
+    std::vector<std::string> trackedFiles;
 };
 
 // Backend facade. Composes ObjectStore + Index + RefManager; contains no I/O to cout/cin.
