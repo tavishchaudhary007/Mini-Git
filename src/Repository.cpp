@@ -188,14 +188,23 @@ bool Repository::isIgnored(const fs::path& fullPath, const std::string& relPath,
 
 std::vector<std::string> Repository::workingFiles() const {
     std::vector<std::string> files;
-    for (auto it = fs::recursive_directory_iterator(root_); it != fs::recursive_directory_iterator(); ++it) {
+    std::error_code ec;
+    for (auto it = fs::recursive_directory_iterator(root_, fs::directory_options::none, ec);
+         it != fs::recursive_directory_iterator(); ++it) {
+        fs::file_status symStatus = it->symlink_status(ec);
+        if (fs::is_symlink(symStatus) || isLinkOrSymlink(it->path())) {
+            if (it->is_directory(ec)) {
+                it.disable_recursion_pending();
+            }
+            continue;
+        }
         std::string rel = it->path().lexically_relative(root_).generic_string();
-        if (it->is_directory()) {
+        if (fs::is_directory(symStatus)) {
             if (isIgnored(it->path(), rel, true)) {
                 it.disable_recursion_pending();
                 continue;
             }
-        } else if (it->is_regular_file()) {
+        } else if (fs::is_regular_file(symStatus)) {
             if (!isIgnored(it->path(), rel, false)) {
                 files.push_back(rel);
             }
@@ -214,6 +223,16 @@ std::map<std::string, Hash> Repository::headTree() const {
 Hash Repository::hashWorking(const std::string& rel) const { return Blob(readFile(root_ / rel)).hash(); }
 
 void Repository::addFile(const std::string& rel) {
+    std::string prefix = rel + "/";
+    std::vector<std::string> subGone;
+    for (const auto& [p, _] : index_.entries()) {
+        if (p.rfind(prefix, 0) == 0) {
+            subGone.push_back(p);
+        }
+    }
+    for (const auto& sg : subGone) {
+        index_.remove(sg);
+    }
     index_.set(rel, store_.save(Blob(readFile(root_ / rel))));
 }
 
@@ -261,8 +280,18 @@ void Repository::add(const std::string& pathArg, bool isRepoRelative) {
         removeConflicts(gitDir_, gone);
     } else if (fs::is_regular_file(full)) {
         if (!isIgnored(full, rel, false)) {
+            std::string prefix = rel + "/";
+            std::vector<std::string> subGone;
+            for (const auto& [p, _] : index_.entries()) {
+                if (p.rfind(prefix, 0) == 0) {
+                    subGone.push_back(p);
+                }
+            }
             addFile(rel);
             removeConflicts(gitDir_, {rel});
+            if (!subGone.empty()) {
+                removeConflicts(gitDir_, subGone);
+            }
         }
     } else if (index_.has(rel)) {
         index_.remove(rel);  // staging a deletion
@@ -739,32 +768,35 @@ bool Repository::isAncestor(const Hash& ancestor, const Hash& descendant) const 
 Hash Repository::findMergeBase(const Hash& h1, const Hash& h2) const {
     if (h1.empty() || h2.empty()) return Hash();
     if (h1 == h2) return h1;
-    std::unordered_set<std::string> visited;
-    std::queue<Hash> q;
-    q.push(h1);
-    visited.insert(h1.str());
-    while (!q.empty()) {
-        Hash cur = q.front();
-        q.pop();
+
+    std::unordered_set<std::string> visited1;
+    std::queue<Hash> q1;
+    q1.push(h1);
+    visited1.insert(h1.str());
+    while (!q1.empty()) {
+        Hash cur = q1.front();
+        q1.pop();
         if (store_.exists(cur)) {
             auto commit = store_.loadAs<Commit>(cur);
-            if (!commit->parent().empty() && visited.insert(commit->parent().str()).second) {
-                q.push(commit->parent());
+            if (!commit->parent().empty() && visited1.insert(commit->parent().str()).second) {
+                q1.push(commit->parent());
             }
-            if (commit->hasParent2() && !commit->parent2().empty() && visited.insert(commit->parent2().str()).second) {
-                q.push(commit->parent2());
+            if (commit->hasParent2() && !commit->parent2().empty() && visited1.insert(commit->parent2().str()).second) {
+                q1.push(commit->parent2());
             }
         }
     }
+
+    std::vector<Hash> common;
+    std::unordered_set<std::string> visited2;
     std::queue<Hash> q2;
     q2.push(h2);
-    std::unordered_set<std::string> visited2;
     visited2.insert(h2.str());
     while (!q2.empty()) {
         Hash cur = q2.front();
         q2.pop();
-        if (visited.count(cur.str())) {
-            return cur;
+        if (visited1.count(cur.str())) {
+            common.push_back(cur);
         }
         if (store_.exists(cur)) {
             auto commit = store_.loadAs<Commit>(cur);
@@ -776,7 +808,35 @@ Hash Repository::findMergeBase(const Hash& h1, const Hash& h2) const {
             }
         }
     }
-    return Hash();
+
+    if (common.empty()) return Hash();
+    if (common.size() == 1) return common.front();
+
+    // Drop any candidate that is an ancestor of another candidate
+    std::vector<Hash> lcaCandidates;
+    for (size_t i = 0; i < common.size(); ++i) {
+        bool isOlder = false;
+        for (size_t j = 0; j < common.size(); ++j) {
+            if (i == j) continue;
+            if (isAncestor(common[i], common[j])) {
+                isOlder = true;
+                break;
+            }
+        }
+        if (!isOlder) {
+            lcaCandidates.push_back(common[i]);
+        }
+    }
+
+    if (lcaCandidates.empty()) return common.front();
+
+    std::sort(lcaCandidates.begin(), lcaCandidates.end(), [&](const Hash& a, const Hash& b) {
+        std::time_t ta = store_.loadAs<Commit>(a)->time();
+        std::time_t tb = store_.loadAs<Commit>(b)->time();
+        return ta > tb;
+    });
+
+    return lcaCandidates.front();
 }
 
 std::string Repository::mergeAbort() {
@@ -894,44 +954,81 @@ void Repository::restoreCommit(const Hash& c) {
     // 3. Refuse if untracked file sits at path or parent prefix
     checkUntrackedOverwrite(target);
 
-    // 5. Delete absent files (no remove_all on user content)
-    for (const auto& [path, h] : index_.entries()) {
-        if (target.count(path)) continue;
-        fs::path full = root_ / path;
-        std::error_code ec;
-        if (fs::exists(full, ec)) {
-            if (fs::is_directory(full, ec)) {
-                if (fs::is_empty(full, ec)) fs::remove(full, ec);
-            } else {
-                fs::remove(full, ec);
-            }
+    auto oldIndex = index_.entries();
+    std::map<std::string, std::string> backupFiles;
+    std::vector<std::string> createdFiles;
+
+    for (const auto& [p, _] : oldIndex) {
+        fs::path full = root_ / p;
+        if (fs::is_regular_file(full)) {
+            backupFiles[p] = readFile(full);
         }
-        for (fs::path d = full.parent_path(); d != root_ && !d.empty() && fs::is_directory(d, ec) && fs::is_empty(d, ec); d = d.parent_path()) {
-            fs::remove(d, ec);
+    }
+    for (const auto& [p, _] : target) {
+        if (!backupFiles.count(p)) {
+            fs::path full = root_ / p;
+            if (fs::is_regular_file(full)) {
+                backupFiles[p] = readFile(full);
+            }
         }
     }
 
-    // 6. Write target files
-    for (const auto& [path, content] : loadedBlobs) {
-        fs::path full = root_ / path;
-        std::error_code ec;
-        if (fs::exists(full, ec) && fs::is_directory(full, ec)) {
-            if (fs::is_empty(full, ec)) {
-                fs::remove(full, ec);
-            } else {
-                throw MiniGitException("cannot restore over non-empty directory: " + path);
+    try {
+        // 5. Delete absent files (no remove_all on user content)
+        for (const auto& [path, h] : index_.entries()) {
+            if (target.count(path)) continue;
+            fs::path full = root_ / path;
+            std::error_code ec;
+            if (fs::exists(full, ec)) {
+                if (fs::is_directory(full, ec)) {
+                    if (fs::is_empty(full, ec)) fs::remove(full, ec);
+                } else {
+                    fs::remove(full, ec);
+                }
             }
+            pruneEmptyParents(root_, full);
         }
-        for (fs::path d = full.parent_path(); d != root_ && !d.empty(); d = d.parent_path()) {
-            if (fs::exists(d, ec) && !fs::is_directory(d, ec)) {
-                fs::remove(d, ec);
-            }
-        }
-        writeFile(full, content);
-    }
 
-    index_.replace(target);
-    index_.save();
+        // 6. Write target files
+        for (const auto& [path, content] : loadedBlobs) {
+            fs::path full = root_ / path;
+            std::error_code ec;
+            if (fs::exists(full, ec) && fs::is_directory(full, ec)) {
+                if (fs::is_empty(full, ec)) {
+                    fs::remove(full, ec);
+                } else {
+                    throw MiniGitException("cannot restore over non-empty directory: " + path);
+                }
+            }
+            for (fs::path d = full.parent_path(); d != root_ && !d.empty(); d = d.parent_path()) {
+                if (fs::exists(d, ec) && !fs::is_directory(d, ec)) {
+                    fs::remove(d, ec);
+                }
+            }
+            if (!fs::exists(full, ec)) {
+                createdFiles.push_back(path);
+            }
+            writeFile(full, content);
+        }
+
+        index_.replace(target);
+        index_.save();
+    } catch (...) {
+        // Rollback on exception
+        std::error_code ec;
+        for (const auto& cPath : createdFiles) {
+            fs::path full = root_ / cPath;
+            if (fs::exists(full, ec)) fs::remove(full, ec);
+            pruneEmptyParents(root_, full);
+        }
+        for (const auto& [bPath, bContent] : backupFiles) {
+            fs::path full = root_ / bPath;
+            writeFile(full, bContent);
+        }
+        index_.replace(oldIndex);
+        index_.save();
+        throw;
+    }
 }
 
 void Repository::checkout(const std::string& target) {
@@ -1076,57 +1173,101 @@ std::string Repository::merge(const std::string& branch) {
     }
 
     if (!conflicts.empty()) {
-        // Apply non-conflicted updates
-        for (const auto& p : filesToDelete) {
+        auto oldIndex = index_.entries();
+        std::map<std::string, std::string> backupFiles;
+        std::vector<std::string> createdFiles;
+
+        for (const auto& [p, _] : oldIndex) {
             fs::path full = root_ / p;
-            std::error_code ec;
-            if (fs::exists(full, ec)) {
-                if (fs::is_directory(full, ec)) {
-                    if (fs::is_empty(full, ec)) fs::remove(full, ec);
+            if (fs::is_regular_file(full)) backupFiles[p] = readFile(full);
+        }
+        for (const auto& [p, _] : toWriteMerge) {
+            if (!backupFiles.count(p)) {
+                fs::path full = root_ / p;
+                if (fs::is_regular_file(full)) backupFiles[p] = readFile(full);
+            }
+        }
+
+        try {
+            // Apply non-conflicted updates
+            for (const auto& p : filesToDelete) {
+                fs::path full = root_ / p;
+                std::error_code ec;
+                if (fs::exists(full, ec)) {
+                    if (fs::is_directory(full, ec)) {
+                        if (fs::is_empty(full, ec)) fs::remove(full, ec);
+                    } else {
+                        fs::remove(full, ec);
+                    }
+                }
+                pruneEmptyParents(root_, full);
+                index_.remove(p);
+            }
+            for (const auto& [p, content] : loadedTheirsBlobs) {
+                fs::path full = root_ / p;
+                std::error_code ec;
+                if (!fs::exists(full, ec)) createdFiles.push_back(p);
+                writeFile(full, content);
+                index_.set(p, filesToWriteTheirs[p]);
+            }
+
+            // Apply conflict markers or keep ours for binary
+            for (const auto& c : conflicts) {
+                fs::path full = root_ / c.path;
+                std::error_code ec;
+                if (!fs::exists(full, ec)) createdFiles.push_back(c.path);
+                if (c.isBinary) {
+                    if (!c.oursContent.empty()) {
+                        writeFile(full, c.oursContent);
+                    }
                 } else {
-                    fs::remove(full, ec);
+                    std::string text = "<<<<<<< ours\n";
+                    text += c.oursContent;
+                    if (!c.oursContent.empty() && c.oursContent.back() != '\n') text += "\n";
+                    text += "=======\n";
+                    text += c.theirsContent;
+                    if (!c.theirsContent.empty() && c.theirsContent.back() != '\n') text += "\n";
+                    text += ">>>>>>> " + branch + "\n";
+                    writeFile(full, text);
                 }
             }
-            index_.remove(p);
-        }
-        for (const auto& [p, content] : loadedTheirsBlobs) {
-            writeFile(root_ / p, content);
-            index_.set(p, filesToWriteTheirs[p]);
-        }
+            index_.save();
+            writeFile(mergeHeadFile, tgt.str() + "\n");
 
-        // Apply conflict markers or keep ours for binary
-        for (const auto& c : conflicts) {
-            if (c.isBinary) {
-                // keep ours
-                if (!c.oursContent.empty()) {
-                    writeFile(root_ / c.path, c.oursContent);
-                }
-            } else {
-                std::string text = "<<<<<<< ours\n";
-                text += c.oursContent;
-                if (!c.oursContent.empty() && c.oursContent.back() != '\n') text += "\n";
-                text += "=======\n";
-                text += c.theirsContent;
-                if (!c.theirsContent.empty() && c.theirsContent.back() != '\n') text += "\n";
-                text += ">>>>>>> " + branch + "\n";
-                writeFile(root_ / c.path, text);
+            std::sort(conflictedPaths.begin(), conflictedPaths.end());
+            std::ostringstream cStream;
+            for (const auto& cp : conflictedPaths) cStream << cp << "\n";
+            writeFile(gitDir_ / "MERGE_CONFLICTS", cStream.str());
+            writeFile(gitDir_ / "MERGE_CONFLICTS_ALL", cStream.str());
+
+            std::string listStr;
+            for (size_t i = 0; i < conflictedPaths.size(); ++i) {
+                if (i > 0) listStr += ", ";
+                listStr += conflictedPaths[i];
             }
+            throw MergeException("Automatic merge failed; fix conflicts and then commit the result. Conflicted files: " + listStr);
+        } catch (const MergeException&) {
+            // Expected MergeException for conflict reporting, rethrow directly
+            throw;
+        } catch (...) {
+            // Rollback on unexpected exception
+            std::error_code ec;
+            fs::remove(mergeHeadFile, ec);
+            fs::remove(gitDir_ / "MERGE_CONFLICTS", ec);
+            fs::remove(gitDir_ / "MERGE_CONFLICTS_ALL", ec);
+            for (const auto& cPath : createdFiles) {
+                fs::path full = root_ / cPath;
+                if (fs::exists(full, ec)) fs::remove(full, ec);
+                pruneEmptyParents(root_, full);
+            }
+            for (const auto& [bPath, bContent] : backupFiles) {
+                fs::path full = root_ / bPath;
+                writeFile(full, bContent);
+            }
+            index_.replace(oldIndex);
+            index_.save();
+            throw;
         }
-        index_.save();
-        writeFile(mergeHeadFile, tgt.str() + "\n");
-
-        std::sort(conflictedPaths.begin(), conflictedPaths.end());
-        std::ostringstream cStream;
-        for (const auto& cp : conflictedPaths) cStream << cp << "\n";
-        writeFile(gitDir_ / "MERGE_CONFLICTS", cStream.str());
-        writeFile(gitDir_ / "MERGE_CONFLICTS_ALL", cStream.str());
-
-        std::string listStr;
-        for (size_t i = 0; i < conflictedPaths.size(); ++i) {
-            if (i > 0) listStr += ", ";
-            listStr += conflictedPaths[i];
-        }
-        throw MergeException("Automatic merge failed; fix conflicts and then commit the result. Conflicted files: " + listStr);
     }
 
     // No conflicts: write working tree & index, create 2-parent merge commit

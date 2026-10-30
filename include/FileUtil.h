@@ -6,8 +6,12 @@
 #include <string>
 #include <vector>
 #include "Exceptions.h"
+#include "PathSafety.h"
+#include <atomic>
+#include <chrono>
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
+#include <winsock2.h>
 #include <windows.h>
 #include <shellapi.h>
 #else
@@ -45,10 +49,62 @@ inline std::string readFile(const fs::path& p) {
 }
 
 inline void writeFile(const fs::path& p, const std::string& data) {
-    if (p.has_parent_path()) fs::create_directories(p.parent_path());
-    std::ofstream out(p, std::ios::binary | std::ios::trunc);
-    if (!out) throw MiniGitException("cannot write file: " + p.generic_string());
-    out << data;
+    if (isLinkOrSymlink(p)) {
+        throw MiniGitException("refusing to write through symlink at destination: " + p.generic_string());
+    }
+    fs::path parent = p.has_parent_path() ? p.parent_path() : fs::current_path();
+    if (p.has_parent_path()) {
+        fs::create_directories(parent);
+    }
+    if (isLinkOrSymlink(parent)) {
+        throw MiniGitException("refusing to write into symlinked directory: " + parent.generic_string());
+    }
+
+    static std::atomic<uint64_t> tmpCounter{0};
+    auto now = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    std::string tmpName = p.filename().string() + ".tmp." + std::to_string(now) + "." + std::to_string(++tmpCounter);
+    fs::path tmpPath = parent / tmpName;
+
+    {
+        std::ofstream out(tmpPath, std::ios::binary | std::ios::trunc);
+        if (!out) {
+            throw MiniGitException("cannot write file: " + p.generic_string());
+        }
+        if (!data.empty()) {
+            out.write(data.data(), data.size());
+        }
+        out.flush();
+        if (!out.good()) {
+            out.close();
+            std::error_code ec;
+            fs::remove(tmpPath, ec);
+            throw MiniGitException("stream error while writing file: " + p.generic_string());
+        }
+    }
+
+    if (isLinkOrSymlink(p)) {
+        std::error_code ec;
+        fs::remove(tmpPath, ec);
+        throw MiniGitException("refusing to overwrite symlink at destination: " + p.generic_string());
+    }
+
+#if defined(_WIN32)
+    if (!MoveFileExW(p.wstring().c_str(), nullptr, 0)) {
+        // Destination might not exist yet, which is fine
+    }
+    if (!MoveFileExW(tmpPath.wstring().c_str(), p.wstring().c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        std::error_code ec;
+        fs::remove(tmpPath, ec);
+        throw MiniGitException("cannot rename temp file to: " + p.generic_string());
+    }
+#else
+    std::error_code ec;
+    fs::rename(tmpPath, p, ec);
+    if (ec) {
+        fs::remove(tmpPath, ec);
+        throw MiniGitException("cannot rename temp file to: " + p.generic_string() + ": " + ec.message());
+    }
+#endif
 }
 
 inline std::vector<std::string> splitLines(const std::string& s) {

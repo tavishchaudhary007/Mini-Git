@@ -5,6 +5,10 @@
 #include <vector>
 #include <cstdio>
 #ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
 #include <windows.h>
 #endif
 
@@ -100,4 +104,11 @@ inline bool isSafeRepoPath(const std::string& path) {
     }
 
     return true;
+}
+
+inline void pruneEmptyParents(const std::filesystem::path& root, const std::filesystem::path& p) {
+    std::error_code ec;
+    for (std::filesystem::path d = p.parent_path(); d != root && !d.empty() && std::filesystem::is_directory(d, ec) && std::filesystem::is_empty(d, ec); d = d.parent_path()) {
+        std::filesystem::remove(d, ec);
+    }
 }

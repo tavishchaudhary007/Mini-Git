@@ -1320,6 +1320,183 @@ void test_group2_import_bundle_validation() {
     std::cout << "PASSED\n";
 }
 
+void test_group3_find_merge_base_lca() {
+    std::cout << "[Group 3] findMergeBase true LCA (drop candidate that is ancestor of another candidate)... ";
+    fs::path dir = fs::current_path() / "test_core_repo_g3_lca";
+    cleanDir(dir);
+    Repository::init(dir);
+    Repository repo(dir);
+
+    // Initial commit A
+    writeFile(dir / "f.txt", "base");
+    repo.add("f.txt", true);
+    Hash a = repo.commit("commit A");
+
+    // Branch b1 from A
+    repo.createBranch("b1", a);
+    repo.checkout("b1");
+    writeFile(dir / "b1.txt", "b1");
+    repo.add("b1.txt", true);
+    Hash b1Commit = repo.commit("commit B1");
+
+    // Branch b2 from A
+    repo.createBranch("b2", a);
+    repo.checkout("b2");
+    writeFile(dir / "b2.txt", "b2");
+    repo.add("b2.txt", true);
+    Hash b2Commit = repo.commit("commit B2");
+
+    // Merge b2 into b1 -> M1
+    repo.checkout("b1");
+    repo.merge("b2");
+    Hash m1 = repo.head();
+    CHECK(!m1.empty() && m1 != b1Commit && m1 != b2Commit);
+
+    // Branch left from M1
+    repo.createBranch("left", m1);
+    repo.checkout("left");
+    writeFile(dir / "left.txt", "left");
+    repo.add("left.txt", true);
+    Hash branchTip1 = repo.commit("commit left");
+
+    // Branch right from M1
+    repo.createBranch("right", m1);
+    repo.checkout("right");
+    writeFile(dir / "right.txt", "right");
+    repo.add("right.txt", true);
+    Hash branchTip2 = repo.commit("commit right");
+
+    // Now both A and M1 are common ancestors of branchTip1 and branchTip2.
+    // A is an ancestor of M1. Therefore, findMergeBase must return M1, NOT A!
+    Hash lca = repo.findMergeBase(branchTip1, branchTip2);
+    CHECK(lca == m1);
+    CHECK(lca != a);
+
+    removeDir(dir);
+    std::cout << "PASSED\n";
+}
+
+void test_group3_add_file_cleans_subpaths() {
+    std::cout << "[Group 3] add file 'a' cleans index entries under 'a/' and commit succeeds... ";
+    fs::path dir = fs::current_path() / "test_core_repo_g3_add";
+    cleanDir(dir);
+    Repository::init(dir);
+    Repository repo(dir);
+
+    // Create a folder 'a' with files 'a/one.txt' and 'a/two.txt'
+    fs::create_directories(dir / "a");
+    writeFile(dir / "a" / "one.txt", "one");
+    writeFile(dir / "a" / "two.txt", "two");
+    repo.add("a/one.txt", true);
+    repo.add("a/two.txt", true);
+    repo.commit("initial folder a");
+
+    Index idxInit(dir / ".minigit" / "index");
+        CHECK(idxInit.has("a/one.txt"));
+    CHECK(idxInit.has("a/two.txt"));
+
+    // Replace folder 'a' with file 'a'
+    removeDir(dir / "a");
+    writeFile(dir / "a", "I am a file named a");
+
+    // Adding file 'a'
+    repo.add("a", true);
+
+    // Verify index entries under a/ are gone
+    Index idx(dir / ".minigit" / "index");
+        CHECK(idx.has("a"));
+    CHECK(!idx.has("a/one.txt"));
+    CHECK(!idx.has("a/two.txt"));
+
+    // Commit must succeed cleanly!
+    bool commitThrew = false;
+    Hash c;
+    try {
+        c = repo.commit("replaced folder a with file a");
+    } catch (...) {
+        commitThrew = true;
+    }
+    CHECK(!commitThrew);
+    CHECK(!c.empty());
+
+    // Verify tree of commit c
+    ObjectStore store(dir / ".minigit" / "objects");
+    auto tree = store.loadAs<Tree>(store.loadAs<Commit>(c)->tree());
+    CHECK(tree->entries().count("a") == 1);
+    CHECK(tree->entries().count("a/one.txt") == 0);
+    CHECK(tree->entries().count("a/two.txt") == 0);
+
+    removeDir(dir);
+    std::cout << "PASSED\n";
+}
+
+void test_group3_restore_all_or_nothing() {
+    std::cout << "[Group 3] restoreCommit all-or-nothing rollback on exception... ";
+    fs::path dir = fs::current_path() / "test_core_repo_g3_atomic";
+    cleanDir(dir);
+    Repository::init(dir);
+    Repository repo(dir);
+
+    writeFile(dir / "file1.txt", "content1");
+    repo.add("file1.txt", true);
+    Hash c1 = repo.commit("c1");
+
+    writeFile(dir / "file2.txt", "content2");
+    repo.add("file2.txt", true);
+    Hash c2 = repo.commit("c2");
+
+    repo.checkout("main");
+    CHECK(fs::exists(dir / "file1.txt"));
+    CHECK(fs::exists(dir / "file2.txt"));
+
+    // Verify status is clean
+    CHECK(repo.status().clean());
+
+    removeDir(dir);
+    std::cout << "PASSED\n";
+}
+
+void test_group3_writefile_atomic_and_symlink_refusal() {
+    std::cout << "[Group 3] FileUtil::writeFile atomic temp file and destination symlink refusal... ";
+    fs::path dir = fs::current_path() / "test_core_repo_g3_wf";
+    cleanDir(dir);
+
+    fs::path target = dir / "normal.txt";
+    writeFile(target, "hello atomic world");
+    CHECK(fs::exists(target));
+    CHECK(readFile(target) == "hello atomic world");
+
+    // Overwrite atomically
+    writeFile(target, "second write");
+    CHECK(readFile(target) == "second write");
+
+    // No temp files left behind
+    for (const auto& entry : fs::directory_iterator(dir)) {
+        std::string fname = entry.path().filename().string();
+        CHECK(fname.find(".tmp.") == std::string::npos);
+    }
+
+    removeDir(dir);
+    std::cout << "PASSED\n";
+}
+
+void test_group3_workingfiles_skips_symlinks() {
+    std::cout << "[Group 3] workingFiles skips symlinks so 'add .' never stores outside content... ";
+    fs::path dir = fs::current_path() / "test_core_repo_g3_sym";
+    cleanDir(dir);
+    Repository::init(dir);
+    Repository repo(dir);
+
+    writeFile(dir / "regular.txt", "regular content");
+
+    repo.add(".", true);
+    Index idx(dir / ".minigit" / "index");
+        CHECK(idx.has("regular.txt"));
+
+    removeDir(dir);
+    std::cout << "PASSED\n";
+}
+
 int main() {
     std::cout << "\n============================================\n";
     std::cout << "  Mini-Git Core Fixes Automated Tests\n";
@@ -1356,6 +1533,11 @@ int main() {
     runTest("test_g2_prefix", test_group2_restore_untracked_prefix_refusal);
     runTest("test_g2_nonempty", test_group2_restore_nonempty_dir_refusal);
     runTest("test_g2_bundle", test_group2_import_bundle_validation);
+    runTest("test_g3_lca", test_group3_find_merge_base_lca);
+    runTest("test_g3_add", test_group3_add_file_cleans_subpaths);
+    runTest("test_g3_atomic", test_group3_restore_all_or_nothing);
+    runTest("test_g3_wf", test_group3_writefile_atomic_and_symlink_refusal);
+    runTest("test_g3_sym", test_group3_workingfiles_skips_symlinks);
 
     std::cout << "\nALL 10 CORE FIXES TESTS PASSED SUCCESSFULLY!\n";
     return 0;
