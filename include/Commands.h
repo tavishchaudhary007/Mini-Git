@@ -41,3 +41,5 @@ MG_COMMAND(ReflogCmd,   "reflog",   "minigit reflog", true)
 MG_COMMAND(HtmlCmd,     "html",     "minigit html [--no-open]", true)
 MG_COMMAND(UiCmd,       "ui",       "minigit ui [--port <port>] [--no-open] [--lan]", true)
 MG_COMMAND(ServeCmd,    "serve",    "minigit serve [--port <port>] [--no-open] [--lan]", true)
+
+std::string escapePath(const std::string& name);

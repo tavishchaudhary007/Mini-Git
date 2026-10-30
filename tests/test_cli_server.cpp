@@ -983,10 +983,37 @@ void test_http_server_endpoints() {
 
         // 12d. Cross-origin peer page pairs: POST /api/pair with peerOrigin
         std::string pairBody = "{\"code\":\"" + currentCode + "\",\"clientName\":\"Peer Laptop\"}";
-        std::string pairReq = "POST /api/pair HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
+        // Cross-origin pair arriving over loopback is refused (R4-1)
+        std::string loopbackPairReq = "POST /api/pair HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
             "\r\nOrigin: " + peerOrigin + "\r\nContent-Type: application/json\r\nContent-Length: " +
             std::to_string(pairBody.size()) + "\r\nConnection: close\r\n\r\n" + pairBody;
-        std::string pairResp = httpExchange("127.0.0.1", testPort, pairReq);
+        std::string loopbackPairResp = httpExchange("127.0.0.1", testPort, loopbackPairReq);
+        CHECK(loopbackPairResp.find("403 Forbidden") != std::string::npos);
+
+        // Discover LAN IP for LAN peer connection
+        socket_t sTmp = socket(AF_INET, SOCK_DGRAM, 0);
+        sockaddr_in loopbackAddr{};
+        loopbackAddr.sin_family = AF_INET;
+        loopbackAddr.sin_addr.s_addr = inet_addr("8.8.8.8");
+        loopbackAddr.sin_port = htons(53);
+        connect(sTmp, (struct sockaddr*)&loopbackAddr, sizeof(loopbackAddr));
+        sockaddr_in nameAddr{};
+#ifdef _WIN32
+        int nameLen = sizeof(nameAddr);
+#else
+        socklen_t nameLen = sizeof(nameAddr);
+#endif
+        getsockname(sTmp, (struct sockaddr*)&nameAddr, &nameLen);
+        char lanIpBuf[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &nameAddr.sin_addr, lanIpBuf, sizeof(lanIpBuf));
+        CLOSESOCK(sTmp);
+        std::string lanIp = lanIpBuf;
+        std::string peerHost = (!lanIp.empty() && lanIp != "127.0.0.1") ? lanIp : "127.0.0.1";
+
+        std::string pairReq = "POST /api/pair HTTP/1.1\r\nHost: " + peerHost + ":" + std::to_string(testPort) +
+            "\r\nOrigin: " + peerOrigin + "\r\nContent-Type: application/json\r\nContent-Length: " +
+            std::to_string(pairBody.size()) + "\r\nConnection: close\r\n\r\n" + pairBody;
+        std::string pairResp = httpExchange(peerHost, testPort, pairReq);
         CHECK(pairResp.find("200 OK") != std::string::npos);
         CHECK(pairResp.find("Access-Control-Allow-Origin: " + peerOrigin) != std::string::npos);
         size_t pBodyPos = pairResp.find("\r\n\r\n");
@@ -1004,9 +1031,9 @@ void test_http_server_endpoints() {
         CHECK(approveResp.find("200 OK") != std::string::npos);
 
         // 12f. Cross-origin peer checks status: GET /api/pair/status?requestId=... with peerOrigin
-        std::string statusReq = "GET /api/pair/status?requestId=" + reqId + " HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
+        std::string statusReq = "GET /api/pair/status?requestId=" + reqId + " HTTP/1.1\r\nHost: " + peerHost + ":" + std::to_string(testPort) +
             "\r\nOrigin: " + peerOrigin + "\r\nConnection: close\r\n\r\n";
-        std::string statusResp = httpExchange("127.0.0.1", testPort, statusReq);
+        std::string statusResp = httpExchange(peerHost, testPort, statusReq);
         CHECK(statusResp.find("200 OK") != std::string::npos);
         CHECK(statusResp.find("Access-Control-Allow-Origin: " + peerOrigin) != std::string::npos);
         size_t stBodyPos = statusResp.find("\r\n\r\n");
@@ -1017,9 +1044,9 @@ void test_http_server_endpoints() {
         CHECK(!sessionToken.empty());
 
         // 12g. Peer pulls bundle with token from different origin: GET /api/sync/bundle
-        std::string bundleReq = "GET /api/sync/bundle HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
+        std::string bundleReq = "GET /api/sync/bundle HTTP/1.1\r\nHost: " + peerHost + ":" + std::to_string(testPort) +
             "\r\nOrigin: " + peerOrigin + "\r\nX-MiniGit-Token: " + sessionToken + "\r\nConnection: close\r\n\r\n";
-        std::string bundleResp = httpExchange("127.0.0.1", testPort, bundleReq);
+        std::string bundleResp = httpExchange(peerHost, testPort, bundleReq);
         CHECK(bundleResp.find("200 OK") != std::string::npos);
         CHECK(bundleResp.find("Access-Control-Allow-Origin: " + peerOrigin) != std::string::npos);
         size_t bResBodyPos = bundleResp.find("\r\n\r\n");
@@ -1029,10 +1056,10 @@ void test_http_server_endpoints() {
 
         // 12h. Peer pushes import-bundle with token from different origin: POST /api/sync/import-bundle
         std::string impBody = bundleResp.substr(bResBodyPos + 4);
-        std::string impReq = "POST /api/sync/import-bundle HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
+        std::string impReq = "POST /api/sync/import-bundle HTTP/1.1\r\nHost: " + peerHost + ":" + std::to_string(testPort) +
             "\r\nOrigin: " + peerOrigin + "\r\nX-MiniGit-Token: " + sessionToken + "\r\nContent-Type: application/json\r\nContent-Length: " +
             std::to_string(impBody.size()) + "\r\nConnection: close\r\n\r\n" + impBody;
-        std::string impResp = httpExchange("127.0.0.1", testPort, impReq);
+        std::string impResp = httpExchange(peerHost, testPort, impReq);
         CHECK(impResp.find("200 OK") != std::string::npos);
         CHECK(impResp.find("Access-Control-Allow-Origin: " + peerOrigin) != std::string::npos);
     }
@@ -1080,30 +1107,22 @@ void test_http_server_endpoints() {
         CHECK(wrongCodeResp.find("Vary: Origin") != std::string::npos);
     }
 
-    // 15. R3-4: Websites cannot lock pairing; lockout is per-client, never locks out real code for everyone
+    // 15. R4-1: Count failed codes per client IP + Origin (loopback included), lock that client after 5, never locks out real code for others
     {
         PairingManager pm;
         std::string code = pm.currentCode();
-        // Loopback requests submitting wrong codes 10 times do not lock pairing
-        for (int i = 0; i < 10; ++i) {
-            auto res = pm.submitCode("000000", "127.0.0.1");
-            CHECK(!res.success);
-            CHECK(!res.locked);
-        }
-        CHECK(!pm.isLocked());
-
-        // LAN client A fails 5 times and gets locked
+        // Loopback client fails 5 times and gets locked
         for (int i = 1; i <= 5; ++i) {
-            auto resA = pm.submitCode("000000", "192.168.1.101");
-            CHECK(!resA.success);
-            if (i == 5) CHECK(resA.locked);
+            auto res = pm.submitCode("000000", "127.0.0.1", "", "http://evil.com");
+            CHECK(!res.success);
+            if (i == 5) CHECK(res.locked);
         }
-        CHECK(pm.isClientLocked("192.168.1.101"));
+        CHECK(pm.isClientLocked("127.0.0.1|http://evil.com"));
 
-        // LAN client A is locked even with real code
-        auto resALocked = pm.submitCode(code, "192.168.1.101");
-        CHECK(!resALocked.success);
-        CHECK(resALocked.locked);
+        // Attacker is locked even with real code
+        auto resAtkLocked = pm.submitCode(code, "127.0.0.1", "", "http://evil.com", true);
+        CHECK(!resAtkLocked.success);
+        CHECK(resAtkLocked.locked);
 
         // LAN client B is NOT locked and submits the real code successfully!
         CHECK(!pm.isClientLocked("192.168.1.102"));
@@ -1206,6 +1225,199 @@ void test_http_server_endpoints() {
     std::cout << "PASSED" << std::endl;
 }
 
+void test_r4_security_and_fixes() {
+    std::cout << "[Test R4] Pairing brute force (50 bad codes, 429 limit, non-LAN 403, real peer pairing), escapePath & dir delete... " << std::flush;
+
+    // R4-5: In status, escape backslashes too (\\) and print every control byte below 0x20, and 0x7F, as \xNN
+    {
+        CHECK(escapePath("normal.txt") == "normal.txt");
+        CHECK(escapePath("file\\name.txt") == "file\\\\name.txt");
+        CHECK(escapePath("file\nname.txt") == "file\\x0aname.txt");
+        CHECK(escapePath("file\rname.txt") == "file\\x0dname.txt");
+        CHECK(escapePath("file\tname.txt") == "file\\x09name.txt");
+        CHECK(escapePath("file\x01name.txt") == "file\\x01name.txt");
+        CHECK(escapePath("file\x1bname.txt") == "file\\x1bname.txt");
+        CHECK(escapePath("file\x7fname.txt") == "file\\x7fname.txt");
+    }
+
+    fs::path dir = fs::current_path() / "test_repo_r4";
+    removeDir(dir);
+    fs::create_directories(dir);
+    Repository::init(dir.string());
+    Repository repo(dir.string());
+    writeFile(dir / "hello.txt", "world\n");
+    repo.add("hello.txt", true);
+    repo.commit("initial");
+
+    // Non-LAN server on port 19935
+    int nonLanPort = 19935;
+    std::thread nonLanThread([&]() {
+        try {
+            HttpServer::run(&repo, nonLanPort, false, false); // lan = false
+        } catch (...) {}
+    });
+    nonLanThread.detach();
+
+    // LAN server on port 19936
+    int lanPort = 19936;
+    std::thread lanThread([&]() {
+        try {
+            HttpServer::run(&repo, lanPort, false, true); // lan = true
+        } catch (...) {}
+    });
+    lanThread.detach();
+
+    // Probe both ports
+    for (int retry = 0; retry < 50; ++retry) {
+        std::string ping1 = httpExchange("127.0.0.1", nonLanPort, "GET /api/snapshot HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(nonLanPort) + "\r\nConnection: close\r\n\r\n");
+        std::string ping2 = httpExchange("127.0.0.1", lanPort, "GET /api/snapshot HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(lanPort) + "\r\nConnection: close\r\n\r\n");
+        if (ping1.find("200 OK") != std::string::npos && ping2.find("200 OK") != std::string::npos) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    // 1. Non-LAN mode returns 403 on /api/pair and /api/pair/status
+    {
+        std::string pairBody = "{\"code\":\"123456\"}";
+        std::string pairReq = "POST /api/pair HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(nonLanPort) +
+            "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(pairBody.size()) + "\r\nConnection: close\r\n\r\n" + pairBody;
+        std::string pairResp = httpExchange("127.0.0.1", nonLanPort, pairReq);
+        CHECK(pairResp.find("403 Forbidden") != std::string::npos);
+        CHECK(pairResp.find("LAN mode is not enabled") != std::string::npos);
+
+        std::string statusReq = "GET /api/pair/status?requestId=req_test HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(nonLanPort) + "\r\nConnection: close\r\n\r\n";
+        std::string statusResp = httpExchange("127.0.0.1", nonLanPort, statusReq);
+        CHECK(statusResp.find("403 Forbidden") != std::string::npos);
+        CHECK(statusResp.find("LAN mode is not enabled") != std::string::npos);
+    }
+
+    // 2. R4-6: /api/file/delete on a directory returns ok:false (400 Bad Request)
+    {
+        fs::create_directories(dir / "subfolder");
+        writeFile(dir / "subfolder" / "nested.txt", "inside");
+        std::string delDirBody = "{\"path\":\"subfolder\"}";
+        std::string delDirReq = "POST /api/file/delete HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(lanPort) +
+            "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(delDirBody.size()) + "\r\nConnection: close\r\n\r\n" + delDirBody;
+        std::string delDirResp = httpExchange("127.0.0.1", lanPort, delDirReq);
+        CHECK(delDirResp.find("400 Bad Request") != std::string::npos);
+        size_t bPos = delDirResp.find("\r\n\r\n");
+        CHECK(bPos != std::string::npos);
+        JsonValue delJson = JsonValue::parse(delDirResp.substr(bPos + 4));
+        CHECK(delJson["ok"].as_bool() == false);
+        CHECK(fs::exists(dir / "subfolder"));
+    }
+
+    // 3. Brute force: 50 bad codes from evil origin over loopback must never find code and must hit the limit (429)
+    {
+        bool hitRateLimit = false;
+        bool foundSuccess = false;
+        for (int i = 1; i <= 50; ++i) {
+            std::string badBody = "{\"code\":\"" + std::to_string(100000 + i) + "\"}";
+            std::string req = "POST /api/pair HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(lanPort) +
+                "\r\nOrigin: http://evil.com\r\nContent-Type: application/json\r\nContent-Length: " +
+                std::to_string(badBody.size()) + "\r\nConnection: close\r\n\r\n" + badBody;
+            std::string resp = httpExchange("127.0.0.1", lanPort, req);
+            if (resp.find("200 OK") != std::string::npos) {
+                foundSuccess = true;
+            }
+            if (resp.find("429 Too Many Requests") != std::string::npos) {
+                hitRateLimit = true;
+            }
+        }
+        CHECK(!foundSuccess);
+        CHECK(hitRateLimit);
+    }
+
+    // 4. The real LAN peer can still pair after an attacker is locked
+    {
+        // Host generates a fresh pair code
+        std::string genReq = "POST /api/pair/generate-code HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(lanPort) +
+            "\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}";
+        std::string genResp = httpExchange("127.0.0.1", lanPort, genReq);
+        size_t gPos = genResp.find("\r\n\r\n");
+        CHECK(gPos != std::string::npos);
+        JsonValue genJson = JsonValue::parse(genResp.substr(gPos + 4));
+        std::string correctCode = genJson["code"].as_string();
+        CHECK(correctCode.size() == 6);
+
+        // Attacker sends 5 bad codes to lock out attacker client
+        for (int i = 1; i <= 5; ++i) {
+            std::string badBody = "{\"code\":\"000000\"}";
+            std::string atkReq = "POST /api/pair HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(lanPort) +
+                "\r\nOrigin: http://attacker.local\r\nContent-Type: application/json\r\nContent-Length: " +
+                std::to_string(badBody.size()) + "\r\nConnection: close\r\n\r\n" + badBody;
+            std::string atkResp = httpExchange("127.0.0.1", lanPort, atkReq);
+            if (i == 5) {
+                CHECK(atkResp.find("403 Forbidden") != std::string::npos);
+                CHECK(atkResp.find("locked") != std::string::npos);
+            }
+        }
+
+        // Check lockedClientsCount on host
+        std::string codeCheckReq = "GET /api/pair/code HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(lanPort) + "\r\nConnection: close\r\n\r\n";
+        std::string codeCheckResp = httpExchange("127.0.0.1", lanPort, codeCheckReq);
+        size_t ccPos = codeCheckResp.find("\r\n\r\n");
+        CHECK(ccPos != std::string::npos);
+        JsonValue codeCheckJson = JsonValue::parse(codeCheckResp.substr(ccPos + 4));
+        CHECK(codeCheckJson["lockedClientsCount"].as_int64() >= 1);
+
+        // Real LAN peer connecting from LAN IP (or non-locked client) submits the correct code
+        socket_t sTmp = socket(AF_INET, SOCK_DGRAM, 0);
+        sockaddr_in loopbackAddr{};
+        loopbackAddr.sin_family = AF_INET;
+        loopbackAddr.sin_addr.s_addr = inet_addr("8.8.8.8");
+        loopbackAddr.sin_port = htons(53);
+        connect(sTmp, (struct sockaddr*)&loopbackAddr, sizeof(loopbackAddr));
+        sockaddr_in nameAddr{};
+#ifdef _WIN32
+        int nameLen = sizeof(nameAddr);
+#else
+        socklen_t nameLen = sizeof(nameAddr);
+#endif
+        getsockname(sTmp, (struct sockaddr*)&nameAddr, &nameLen);
+        char lanIpBuf[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &nameAddr.sin_addr, lanIpBuf, sizeof(lanIpBuf));
+        CLOSESOCK(sTmp);
+        std::string lanIp = lanIpBuf;
+        std::string peerHost = (!lanIp.empty() && lanIp != "127.0.0.1") ? lanIp : "127.0.0.1";
+
+        std::string realBody = "{\"code\":\"" + correctCode + "\",\"peerName\":\"Real Peer\"}";
+        std::string realReq = "POST /api/pair HTTP/1.1\r\nHost: " + peerHost + ":" + std::to_string(lanPort) +
+            "\r\nOrigin: http://real-peer.local\r\nContent-Type: application/json\r\nContent-Length: " +
+            std::to_string(realBody.size()) + "\r\nConnection: close\r\n\r\n" + realBody;
+        std::string realResp = httpExchange(peerHost, lanPort, realReq);
+        CHECK(realResp.find("200 OK") != std::string::npos);
+        size_t rPos = realResp.find("\r\n\r\n");
+        CHECK(rPos != std::string::npos);
+        JsonValue realJson = JsonValue::parse(realResp.substr(rPos + 4));
+        CHECK(realJson["ok"].as_bool() == true);
+        std::string realReqId = realJson["requestId"].as_string();
+        CHECK(!realReqId.empty());
+
+        // Host checks pending list: origin is present
+        std::string pendReq = "GET /api/pair/pending HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(lanPort) + "\r\nConnection: close\r\n\r\n";
+        std::string pendResp = httpExchange("127.0.0.1", lanPort, pendReq);
+        CHECK(pendResp.find("200 OK") != std::string::npos);
+        CHECK(pendResp.find("http://real-peer.local") != std::string::npos);
+
+        // Host approves
+        std::string allowBody = "{\"requestId\":\"" + realReqId + "\",\"action\":\"allow\"}";
+        std::string allowReq = "POST /api/pair/decide HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(lanPort) +
+            "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(allowBody.size()) + "\r\nConnection: close\r\n\r\n" + allowBody;
+        std::string allowResp = httpExchange("127.0.0.1", lanPort, allowReq);
+        CHECK(allowResp.find("200 OK") != std::string::npos);
+
+        // Real peer checks status and gets token
+        std::string statReq = "GET /api/pair/status?requestId=" + realReqId + " HTTP/1.1\r\nHost: " + peerHost + ":" + std::to_string(lanPort) +
+            "\r\nOrigin: http://real-peer.local\r\nConnection: close\r\n\r\n";
+        std::string statResp = httpExchange(peerHost, lanPort, statReq);
+        CHECK(statResp.find("200 OK") != std::string::npos);
+        CHECK(statResp.find("approved") != std::string::npos);
+    }
+
+    removeDir(dir);
+    std::cout << "PASSED" << std::endl;
+}
+
 int main() {
 #ifdef _WIN32
     WSADATA wsaData;
@@ -1226,6 +1438,7 @@ int main() {
     test_cli_polish_and_stash();
     test_git_export_identity_and_up_to_date();
     test_http_server_endpoints();
+    test_r4_security_and_fixes();
 
     std::cout << "\nALL CLI & SERVER TESTS PASSED SUCCESSFULLY!\n";
     return 0;

@@ -486,6 +486,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                                             "\",\"remainingSeconds\":" + std::to_string(pairingMgr.remainingSeconds()) +
                                             ",\"isExpired\":" + (pairingMgr.isExpired() ? "true" : "false") +
                                             ",\"isLocked\":" + (pairingMgr.isLocked() ? "true" : "false") +
+                                            ",\"lockedClientsCount\":" + std::to_string(pairingMgr.lockedClientsCount()) +
                                             ",\"isUsed\":" + (pairingMgr.isUsed() ? "true" : "false") +
                                             ",\"lan\":" + (lan ? "true" : "false") +
                                             ",\"lanUrl\":\"" + lanUrl + "\"}";
@@ -500,6 +501,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                                            "\",\"remainingSeconds\":" + std::to_string(pairingMgr.remainingSeconds()) +
                                            ",\"isExpired\":" + (pairingMgr.isExpired() ? "true" : "false") +
                                            ",\"isLocked\":" + (pairingMgr.isLocked() ? "true" : "false") +
+                                           ",\"lockedClientsCount\":" + std::to_string(pairingMgr.lockedClientsCount()) +
                                            ",\"isUsed\":" + (pairingMgr.isUsed() ? "true" : "false") +
                                            ",\"failedAttempts\":" + std::to_string(pairingMgr.failedAttempts()) +
                                            ",\"lan\":" + (lan ? "true" : "false") +
@@ -514,12 +516,12 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                     std::string newCode = pairingMgr.generateNewCode();
                     std::string codeJson = "{\"ok\":true,\"code\":\"" + newCode +
                                            "\",\"remainingSeconds\":" + std::to_string(pairingMgr.remainingSeconds()) +
-                                           ",\"isExpired\":false,\"isLocked\":false,\"isUsed\":false,\"failedAttempts\":0}";
+                                           ",\"isExpired\":false,\"isLocked\":false,\"lockedClientsCount\":0,\"isUsed\":false,\"failedAttempts\":0}";
                     sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8", codeJson, corsOrigin);
                 }
             } else if (method == "POST" && path == "/api/pair") {
-                if (!lan && !isLoopback) {
-                    sendHttpResponse(clientSock, 403, "Forbidden", "application/json",
+                if (!lan) {
+                    sendHttpResponse(clientSock, 403, "Forbidden", "application/json; charset=utf-8",
                                      "{\"ok\":false,\"error\":\"LAN mode is not enabled on host\"}", corsOrigin);
                 } else {
                     JsonValue bodyJson;
@@ -533,8 +535,19 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                     std::string code = getOptionalString(bodyJson, "code");
                     std::string peerName = getOptionalString(bodyJson, "peerName");
                     if (peerName.empty()) peerName = getOptionalString(bodyJson, "clientName");
-                    auto res = pairingMgr.submitCode(code, clientIpStr, peerName);
-                    if (res.success) {
+                    bool isCrossLoopback = isLoopback && !origin.empty() && origin != "null" &&
+                                           origin != ("http://127.0.0.1:" + std::to_string(boundPort)) &&
+                                           origin != ("http://localhost:" + std::to_string(boundPort));
+                    auto res = pairingMgr.submitCode(code, clientIpStr, peerName, origin, isCrossLoopback);
+                    if (res.rateLimited) {
+                        sendHttpResponse(clientSock, 429, "Too Many Requests", "application/json; charset=utf-8",
+                                         "{\"ok\":false,\"error\":" + jsonString(res.error) + ",\"rateLimited\":true}",
+                                         corsOrigin);
+                    } else if (res.crossOriginLoopbackRefused) {
+                        sendHttpResponse(clientSock, 403, "Forbidden", "application/json; charset=utf-8",
+                                         "{\"ok\":false,\"error\":" + jsonString(res.error) + "}",
+                                         corsOrigin);
+                    } else if (res.success) {
                         sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
                                          "{\"ok\":true,\"status\":\"pending\",\"requestId\":\"" + res.requestId +
                                          "\",\"message\":\"Pairing request submitted. Waiting for host approval.\"}",
@@ -548,24 +561,29 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                     }
                 }
             } else if (method == "GET" && path == "/api/pair/status") {
-                std::string reqId = getQueryParam(query, "requestId");
-                if (reqId.empty() && !body.empty()) {
-                    JsonValue bj;
-                    std::string pe;
-                    if (parseRequestBody(body, bj, pe)) reqId = getOptionalString(bj, "requestId");
-                }
-                auto statusReq = pairingMgr.getRequestStatus(reqId);
-                if (statusReq.status == PendingPairRequest::PENDING) {
-                    sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
-                                     "{\"ok\":true,\"status\":\"pending\"}", corsOrigin);
-                } else if (statusReq.status == PendingPairRequest::APPROVED) {
-                    sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
-                                     "{\"ok\":true,\"status\":\"approved\",\"token\":\"" + statusReq.sessionToken + "\"}",
-                                     corsOrigin);
+                if (!lan) {
+                    sendHttpResponse(clientSock, 403, "Forbidden", "application/json; charset=utf-8",
+                                     "{\"ok\":false,\"error\":\"LAN mode is not enabled on host\"}", corsOrigin);
                 } else {
-                    sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
-                                     "{\"ok\":false,\"status\":\"denied\",\"error\":\"Host denied the pairing request.\"}",
-                                     corsOrigin);
+                    std::string reqId = getQueryParam(query, "requestId");
+                    if (reqId.empty() && !body.empty()) {
+                        JsonValue bj;
+                        std::string pe;
+                        if (parseRequestBody(body, bj, pe)) reqId = getOptionalString(bj, "requestId");
+                    }
+                    auto statusReq = pairingMgr.getRequestStatus(reqId);
+                    if (statusReq.status == PendingPairRequest::PENDING) {
+                        sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
+                                         "{\"ok\":true,\"status\":\"pending\"}", corsOrigin);
+                    } else if (statusReq.status == PendingPairRequest::APPROVED) {
+                        sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
+                                         "{\"ok\":true,\"status\":\"approved\",\"token\":\"" + statusReq.sessionToken + "\"}",
+                                         corsOrigin);
+                    } else {
+                        sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
+                                         "{\"ok\":false,\"status\":\"denied\",\"error\":\"Host denied the pairing request.\"}",
+                                         corsOrigin);
+                    }
                 }
             } else if (method == "GET" && path == "/api/pair/pending") {
                 if (!isLoopback) {
@@ -579,6 +597,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                         if (i > 0) oss << ",";
                         oss << "{\"id\":" << jsonString(pending[i].requestId)
                             << ",\"ip\":" << jsonString(pending[i].clientIp)
+                            << ",\"origin\":" << jsonString(pending[i].origin)
                             << ",\"peerName\":" << jsonString(pending[i].peerName)
                             << ",\"code\":" << jsonString(pending[i].code) << "}";
                     }
@@ -709,8 +728,20 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                             CLOSESOCKET(clientSock);
                             continue;
                         }
+                        if (fs::is_directory(full)) {
+                            sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
+                                             "{\"ok\":false,\"error\":\"Cannot delete directory with file delete\",\"snapshot\":" + getSnapJson() + "}", corsOrigin);
+                            CLOSESOCKET(clientSock);
+                            continue;
+                        }
                         std::error_code ec;
                         fs::remove(full, ec);
+                        if (ec) {
+                            sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
+                                             "{\"ok\":false,\"error\":" + jsonString(ec.message()) + ",\"snapshot\":" + getSnapJson() + "}", corsOrigin);
+                            CLOSESOCKET(clientSock);
+                            continue;
+                        }
                         std::string snap = getSnapJson();
                         sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
                                          "{\"ok\":true,\"message\":\"deleted\",\"snapshot\":" + snap + "}", corsOrigin);

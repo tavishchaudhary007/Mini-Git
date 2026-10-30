@@ -15,6 +15,7 @@ struct PairedPeer {
 struct PendingPairRequest {
     std::string requestId;    // e.g. "req_1a2b3c..."
     std::string clientIp;     // Requesting IPv4
+    std::string origin;       // Requesting Origin
     std::string peerName;     // Device / browser name
     std::string code;         // Code entered
     std::chrono::steady_clock::time_point requestedAt;
@@ -32,19 +33,24 @@ public:
     int remainingSeconds() const;
     bool isExpired() const;
     bool isLocked() const;
-    bool isClientLocked(const std::string& clientIp) const;
+    bool isClientLocked(const std::string& clientKey) const;
+    int lockedClientsCount() const;
     bool isUsed() const;
-    int failedAttempts(const std::string& clientIp = "") const;
+    int failedAttempts(const std::string& clientKey = "") const;
 
     // Submitting a pair code from a peer
     struct PairSubmitResult {
-        bool success;
-        bool locked;
-        int remainingAttempts;
+        bool success = false;
+        bool locked = false;
+        bool rateLimited = false;
+        bool crossOriginLoopbackRefused = false;
+        int remainingAttempts = 5;
         std::string requestId;
         std::string error;
     };
-    PairSubmitResult submitCode(const std::string& code, const std::string& clientIp, const std::string& peerName = "");
+    PairSubmitResult submitCode(const std::string& code, const std::string& clientIp,
+                                const std::string& peerName = "", const std::string& origin = "",
+                                bool isCrossLoopback = false);
 
     // Managing pending requests (Host Allow/Deny)
     std::vector<PendingPairRequest> pendingRequests() const;
@@ -67,6 +73,7 @@ private:
     std::chrono::steady_clock::time_point codeCreatedAt_;
     int failedAttempts_ = 0;
     std::map<std::string, int> failedAttemptsByClient_;
+    std::vector<std::chrono::steady_clock::time_point> failedAttemptTimestamps_;
     bool isLocked_ = false;
     bool isUsed_ = false;
     int expirationSeconds_ = 300; // 5 minutes

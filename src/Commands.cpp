@@ -115,16 +115,18 @@ void LogCmd::execute(Repository* repo, const Args& args) {
     }
 }
 
-static std::string escapePath(const std::string& name) {
+std::string escapePath(const std::string& name) {
     std::string out;
     out.reserve(name.size());
-    for (char c : name) {
-        switch (c) {
-            case '\n': out += "\\n"; break;
-            case '\r': out += "\\r"; break;
-            case '\t': out += "\\t"; break;
-            case '\0': out += "\\0"; break;
-            default:   out += c; break;
+    for (unsigned char c : name) {
+        if (c == '\\') {
+            out += "\\\\";
+        } else if (c < 0x20 || c == 0x7F) {
+            char buf[8];
+            std::snprintf(buf, sizeof(buf), "\\x%02x", static_cast<unsigned int>(c));
+            out += buf;
+        } else {
+            out += static_cast<char>(c);
         }
     }
     return out;

@@ -37,10 +37,6 @@ std::string currentTimestamp() {
     return std::string(buf);
 }
 
-bool isLoopbackIp(const std::string& ip) {
-    return ip == "127.0.0.1" || ip == "localhost" || ip == "::1";
-}
-
 } // namespace
 
 PairingManager::PairingManager() {
@@ -69,6 +65,7 @@ std::string PairingManager::generateNewCode() {
     codeCreatedAt_ = std::chrono::steady_clock::now();
     failedAttempts_ = 0;
     failedAttemptsByClient_.clear();
+    failedAttemptTimestamps_.clear();
     isLocked_ = false;
     isUsed_ = false;
     return currentCode_;
@@ -98,9 +95,17 @@ bool PairingManager::isLocked() const {
     return false;
 }
 
-bool PairingManager::isClientLocked(const std::string& clientIp) const {
-    if (clientIp.empty() || isLoopbackIp(clientIp)) return false;
-    auto it = failedAttemptsByClient_.find(clientIp);
+int PairingManager::lockedClientsCount() const {
+    int count = 0;
+    for (const auto& [ip, fails] : failedAttemptsByClient_) {
+        if (fails >= 5) count++;
+    }
+    return count;
+}
+
+bool PairingManager::isClientLocked(const std::string& clientKey) const {
+    if (clientKey.empty()) return false;
+    auto it = failedAttemptsByClient_.find(clientKey);
     return (it != failedAttemptsByClient_.end() && it->second >= 5);
 }
 
@@ -108,9 +113,9 @@ bool PairingManager::isUsed() const {
     return isUsed_;
 }
 
-int PairingManager::failedAttempts(const std::string& clientIp) const {
-    if (!clientIp.empty()) {
-        auto it = failedAttemptsByClient_.find(clientIp);
+int PairingManager::failedAttempts(const std::string& clientKey) const {
+    if (!clientKey.empty()) {
+        auto it = failedAttemptsByClient_.find(clientKey);
         return (it != failedAttemptsByClient_.end()) ? it->second : 0;
     }
     int maxFails = failedAttempts_;
@@ -122,19 +127,42 @@ int PairingManager::failedAttempts(const std::string& clientIp) const {
 
 PairingManager::PairSubmitResult PairingManager::submitCode(const std::string& code,
                                                            const std::string& clientIp,
-                                                           const std::string& peerName) {
+                                                           const std::string& peerName,
+                                                           const std::string& origin,
+                                                           bool isCrossLoopback) {
     PairSubmitResult res{};
     res.success = false;
-    bool clientLocked = isClientLocked(clientIp);
+
+    auto now = std::chrono::steady_clock::now();
+    // Prune failed attempt timestamps older than 60 seconds
+    failedAttemptTimestamps_.erase(
+        std::remove_if(failedAttemptTimestamps_.begin(), failedAttemptTimestamps_.end(),
+                       [&](const auto& tp) {
+                           return std::chrono::duration_cast<std::chrono::seconds>(now - tp).count() >= 60;
+                       }),
+        failedAttemptTimestamps_.end());
+
+    // Global limit across all clients: 10 failed attempts a minute; above it, return 429
+    if (failedAttemptTimestamps_.size() >= 10) {
+        res.rateLimited = true;
+        res.error = "Too many failed pairing attempts across clients. Rate limit exceeded (10 per minute).";
+        return res;
+    }
+
+    std::string clientKey = clientIp;
+    if (!origin.empty()) {
+        clientKey += "|" + origin;
+    }
+
+    bool clientLocked = isClientLocked(clientKey);
     res.locked = clientLocked;
     int fails = 0;
-    if (!clientIp.empty() && !isLoopbackIp(clientIp)) {
-        auto it = failedAttemptsByClient_.find(clientIp);
-        if (it != failedAttemptsByClient_.end()) fails = it->second;
-    }
+    auto it = failedAttemptsByClient_.find(clientKey);
+    if (it != failedAttemptsByClient_.end()) fails = it->second;
     res.remainingAttempts = std::max(0, 5 - fails);
 
     if (clientLocked) {
+        failedAttemptTimestamps_.push_back(now);
         res.error = "Pairing locked after 5 failed attempts. Please generate a new code on the host.";
         return res;
     }
@@ -150,23 +178,24 @@ PairingManager::PairSubmitResult PairingManager::submitCode(const std::string& c
     }
 
     if (code.size() != 6 || code != currentCode_) {
-        if (!clientIp.empty() && !isLoopbackIp(clientIp)) {
-            int newFails = ++failedAttemptsByClient_[clientIp];
-            if (newFails >= 5) {
-                res.locked = true;
-                res.remainingAttempts = 0;
-                res.error = "Pairing locked after 5 failed attempts. Please generate a new code on the host.";
-            } else {
-                res.remainingAttempts = 5 - newFails;
-                res.error = "Invalid pair code (" + std::to_string(res.remainingAttempts) + " attempt" +
-                            (res.remainingAttempts == 1 ? "" : "s") + " remaining).";
-            }
+        failedAttemptTimestamps_.push_back(now);
+        int newFails = ++failedAttemptsByClient_[clientKey];
+        if (newFails >= 5) {
+            res.locked = true;
+            res.remainingAttempts = 0;
+            res.error = "Pairing locked after 5 failed attempts. Please generate a new code on the host.";
         } else {
-            // Loopback / website requests never increment lockout counter and cannot lock pairing
-            res.locked = false;
-            res.remainingAttempts = 5;
-            res.error = "Invalid pair code.";
+            res.remainingAttempts = 5 - newFails;
+            res.error = "Invalid pair code (" + std::to_string(res.remainingAttempts) + " attempt" +
+                        (res.remainingAttempts == 1 ? "" : "s") + " remaining).";
         }
+        return res;
+    }
+
+    // If code is correct, but cross-origin pairing arriving over loopback -> refuse
+    if (isCrossLoopback) {
+        res.crossOriginLoopbackRefused = true;
+        res.error = "Forbidden: cross-origin pairing over loopback refused";
         return res;
     }
 
@@ -179,9 +208,10 @@ PairingManager::PairSubmitResult PairingManager::submitCode(const std::string& c
     PendingPairRequest req{};
     req.requestId = res.requestId;
     req.clientIp = clientIp.empty() ? "unknown" : clientIp;
+    req.origin = origin.empty() ? "local" : origin;
     req.peerName = peerName.empty() ? ("Teammate (" + req.clientIp + ")") : peerName;
     req.code = code;
-    req.requestedAt = std::chrono::steady_clock::now();
+    req.requestedAt = now;
     req.status = PendingPairRequest::PENDING;
 
     pendingRequests_[res.requestId] = req;

@@ -1024,6 +1024,10 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                     <span id="approvalPeerIp" class="font-mono font-bold text-theme-text">192.168.1.50</span>
                 </div>
                 <div class="flex justify-between items-center">
+                    <span class="text-theme-muted">Origin:</span>
+                    <span id="approvalPeerOrigin" class="font-mono text-theme-text truncate max-w-[180px]">local</span>
+                </div>
+                <div class="flex justify-between items-center">
                     <span class="text-theme-muted">Device / Label:</span>
                     <span id="approvalPeerName" class="font-medium text-theme-text">Teammate</span>
                 </div>
@@ -1715,7 +1719,15 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 if (restoreBtn) restoreBtn.classList.add('hidden');
             } else {
                 if (area) {
-                    area.value = isDirty ? DIRTY_BUFFERS[ACTIVE_FILE] : (VFS[ACTIVE_FILE] !== undefined ? VFS[ACTIVE_FILE] : '');
+                    const targetContent = isDirty ? DIRTY_BUFFERS[ACTIVE_FILE] : (VFS[ACTIVE_FILE] !== undefined ? VFS[ACTIVE_FILE] : '');
+                    if (area.value !== targetContent) {
+                        const start = area.selectionStart;
+                        const end = area.selectionEnd;
+                        area.value = targetContent;
+                        if (document.activeElement === area) {
+                            area.setSelectionRange(Math.min(start, targetContent.length), Math.min(end, targetContent.length));
+                        }
+                    }
                     area.readOnly = false;
                 }
                 if (restoreBtn) restoreBtn.classList.add('hidden');
@@ -3092,9 +3104,11 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                         const req = data.pending[0];
                         ACTIVE_PENDING_REQUEST_ID = req.id;
                         const ipEl = document.getElementById('approvalPeerIp');
+                        const originEl = document.getElementById('approvalPeerOrigin');
                         const nameEl = document.getElementById('approvalPeerName');
                         const codeEl = document.getElementById('approvalPeerCode');
                         if (ipEl) ipEl.textContent = req.ip || 'unknown';
+                        if (originEl) originEl.textContent = req.origin || 'local';
                         if (nameEl) nameEl.textContent = req.peerName || 'Teammate Device';
                         if (codeEl) codeEl.textContent = req.code || '';
                         const modal = document.getElementById('hostPairApprovalModal');
@@ -3262,12 +3276,13 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
 
                                 if (LOCAL_PAIR_TIMER) clearInterval(LOCAL_PAIR_TIMER);
 
-                                if (data.isLocked) {
+                                if (data.isLocked || (data.lockedClientsCount && data.lockedClientsCount > 0)) {
+                                    const count = data.lockedClientsCount || 1;
                                     if (codeBadge) {
-                                        codeBadge.textContent = "Locked";
+                                        codeBadge.textContent = `${count} client${count > 1 ? 's' : ''} locked`;
                                         codeBadge.className = "text-[10px] font-mono px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950 text-rose-600 dark:text-rose-400 font-bold";
                                     }
-                                    if (codeStatus) codeStatus.textContent = "Locked after 5 failed tries. Click New Code to reset.";
+                                    if (codeStatus) codeStatus.textContent = `${count} client${count > 1 ? 's' : ''} locked after 5 failed tries. Other devices can still pair.`;
                                 } else if (data.isExpired) {
                                     if (codeBadge) {
                                         codeBadge.textContent = "Expired";
