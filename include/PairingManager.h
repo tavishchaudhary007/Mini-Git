@@ -32,8 +32,9 @@ public:
     int remainingSeconds() const;
     bool isExpired() const;
     bool isLocked() const;
+    bool isClientLocked(const std::string& clientIp) const;
     bool isUsed() const;
-    int failedAttempts() const;
+    int failedAttempts(const std::string& clientIp = "") const;
 
     // Submitting a pair code from a peer
     struct PairSubmitResult {
@@ -65,6 +66,7 @@ private:
     std::string currentCode_;
     std::chrono::steady_clock::time_point codeCreatedAt_;
     int failedAttempts_ = 0;
+    std::map<std::string, int> failedAttemptsByClient_;
     bool isLocked_ = false;
     bool isUsed_ = false;
     int expirationSeconds_ = 300; // 5 minutes

@@ -15,6 +15,7 @@
 #include <vector>
 #include <thread>
 #include <chrono>
+#include "PairingManager.h"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -1034,6 +1035,171 @@ void test_http_server_endpoints() {
         std::string impResp = httpExchange("127.0.0.1", testPort, impReq);
         CHECK(impResp.find("200 OK") != std::string::npos);
         CHECK(impResp.find("Access-Control-Allow-Origin: " + peerOrigin) != std::string::npos);
+    }
+
+    // 13. R3-2: Host header in --lan mode accepts IPv4 literals on port, rejects non-localhost domains
+    {
+        // Two local IP literals work on our port
+        std::string h1Req = "GET /api/snapshot HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) + "\r\nConnection: close\r\n\r\n";
+        std::string h1Resp = httpExchange("127.0.0.1", testPort, h1Req);
+        CHECK(h1Resp.find("200 OK") != std::string::npos);
+
+        std::string h2Req = "GET /api/snapshot HTTP/1.1\r\nHost: 192.168.1.100:" + std::to_string(testPort) + "\r\nConnection: close\r\n\r\n";
+        std::string h2Resp = httpExchange("127.0.0.1", testPort, h2Req);
+        CHECK(h2Resp.find("200 OK") != std::string::npos);
+
+        std::string h3Req = "GET /api/snapshot HTTP/1.1\r\nHost: 10.0.0.42:" + std::to_string(testPort) + "\r\nConnection: close\r\n\r\n";
+        std::string h3Resp = httpExchange("127.0.0.1", testPort, h3Req);
+        CHECK(h3Resp.find("200 OK") != std::string::npos);
+
+        // evil.example:port gets 403 Forbidden
+        std::string evilHostReq = "GET /api/snapshot HTTP/1.1\r\nHost: evil.example:" + std::to_string(testPort) + "\r\nConnection: close\r\n\r\n";
+        std::string evilHostResp = httpExchange("127.0.0.1", testPort, evilHostReq);
+        CHECK(evilHostResp.find("403 Forbidden") != std::string::npos);
+    }
+
+    // 14. R3-3: CORS headers (request Origin, Vary: Origin) on 401/403 from sync and pair endpoints
+    {
+        std::string foreignOrigin = "http://peer-app.local:3000";
+        // 403 from /api/sync/bundle without valid token has CORS headers
+        std::string badTokenReq = "GET /api/sync/bundle HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
+            "\r\nOrigin: " + foreignOrigin + "\r\nX-MiniGit-Token: invalid_token_123\r\nConnection: close\r\n\r\n";
+        std::string badTokenResp = httpExchange("127.0.0.1", testPort, badTokenReq);
+        CHECK(badTokenResp.find("403 Forbidden") != std::string::npos);
+        CHECK(badTokenResp.find("Access-Control-Allow-Origin: " + foreignOrigin) != std::string::npos);
+        CHECK(badTokenResp.find("Vary: Origin") != std::string::npos);
+
+        // 401 from /api/pair on wrong code has CORS headers
+        std::string wrongCodeBody = "{\"code\":\"000000\",\"clientName\":\"Peer\"}";
+        std::string wrongCodeReq = "POST /api/pair HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
+            "\r\nOrigin: " + foreignOrigin + "\r\nContent-Type: application/json\r\nContent-Length: " +
+            std::to_string(wrongCodeBody.size()) + "\r\nConnection: close\r\n\r\n" + wrongCodeBody;
+        std::string wrongCodeResp = httpExchange("127.0.0.1", testPort, wrongCodeReq);
+        CHECK(wrongCodeResp.find("401 Unauthorized") != std::string::npos);
+        CHECK(wrongCodeResp.find("Access-Control-Allow-Origin: " + foreignOrigin) != std::string::npos);
+        CHECK(wrongCodeResp.find("Vary: Origin") != std::string::npos);
+    }
+
+    // 15. R3-4: Websites cannot lock pairing; lockout is per-client, never locks out real code for everyone
+    {
+        PairingManager pm;
+        std::string code = pm.currentCode();
+        // Loopback requests submitting wrong codes 10 times do not lock pairing
+        for (int i = 0; i < 10; ++i) {
+            auto res = pm.submitCode("000000", "127.0.0.1");
+            CHECK(!res.success);
+            CHECK(!res.locked);
+        }
+        CHECK(!pm.isLocked());
+
+        // LAN client A fails 5 times and gets locked
+        for (int i = 1; i <= 5; ++i) {
+            auto resA = pm.submitCode("000000", "192.168.1.101");
+            CHECK(!resA.success);
+            if (i == 5) CHECK(resA.locked);
+        }
+        CHECK(pm.isClientLocked("192.168.1.101"));
+
+        // LAN client A is locked even with real code
+        auto resALocked = pm.submitCode(code, "192.168.1.101");
+        CHECK(!resALocked.success);
+        CHECK(resALocked.locked);
+
+        // LAN client B is NOT locked and submits the real code successfully!
+        CHECK(!pm.isClientLocked("192.168.1.102"));
+        auto resBOk = pm.submitCode(code, "192.168.1.102", "Teammate B");
+        CHECK(resBOk.success);
+        CHECK(!resBOk.locked);
+        CHECK(!resBOk.requestId.empty());
+    }
+
+    // 16. R3-5: Quoted peer names in /api/pair/pending and /api/pair/peers JSON
+    {
+        // Generate fresh code
+        std::string genReq = "POST /api/pair/generate-code HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
+            "\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}";
+        std::string genResp = httpExchange("127.0.0.1", testPort, genReq);
+        size_t gcBodyPos = genResp.find("\r\n\r\n");
+        CHECK(gcBodyPos != std::string::npos);
+        JsonValue genJson = JsonValue::parse(genResp.substr(gcBodyPos + 4));
+        std::string freshCode = genJson["code"].as_string();
+
+        // Submit pair request with quotes and special characters in peer name
+        std::string quoteName = "Alice \"The Engineer\" O'Connor";
+        std::string qBody = "{\"code\":\"" + freshCode + "\",\"peerName\":" + jsonString(quoteName) + "}";
+        std::string qReq = "POST /api/pair HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
+            "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(qBody.size()) + "\r\nConnection: close\r\n\r\n" + qBody;
+        std::string qResp = httpExchange("127.0.0.1", testPort, qReq);
+        CHECK(qResp.find("200 OK") != std::string::npos);
+        size_t qBodyPos = qResp.find("\r\n\r\n");
+        CHECK(qBodyPos != std::string::npos);
+        JsonValue qJson = JsonValue::parse(qResp.substr(qBodyPos + 4));
+        std::string qReqId = qJson["requestId"].as_string();
+
+        // GET /api/pair/pending must return valid parseable JSON containing the quoted name
+        std::string pendReq = "GET /api/pair/pending HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) + "\r\nConnection: close\r\n\r\n";
+        std::string pendResp = httpExchange("127.0.0.1", testPort, pendReq);
+        size_t pBodyPos = pendResp.find("\r\n\r\n");
+        CHECK(pBodyPos != std::string::npos);
+        std::string pErr;
+        JsonValue pendJson = JsonValue::parse(pendResp.substr(pBodyPos + 4), &pErr);
+        CHECK(pErr.empty());
+        CHECK(pendJson.contains("pending") && pendJson["pending"].is_array());
+        bool foundQuotedPending = false;
+        for (const auto& item : pendJson["pending"].as_array()) {
+            if (item["id"].as_string() == qReqId) {
+                CHECK(item["peerName"].as_string() == quoteName);
+                foundQuotedPending = true;
+            }
+        }
+        CHECK(foundQuotedPending);
+
+        // Approve it and check GET /api/pair/peers also parses cleanly with the quoted name
+        std::string approveBody = "{\"requestId\":\"" + qReqId + "\",\"action\":\"approve\"}";
+        std::string approveReq = "POST /api/pair/decide HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
+            "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(approveBody.size()) + "\r\nConnection: close\r\n\r\n" + approveBody;
+        httpExchange("127.0.0.1", testPort, approveReq);
+
+        std::string peersReq = "GET /api/pair/peers HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) + "\r\nConnection: close\r\n\r\n";
+        std::string peersResp = httpExchange("127.0.0.1", testPort, peersReq);
+        size_t peersBodyPos = peersResp.find("\r\n\r\n");
+        CHECK(peersBodyPos != std::string::npos);
+        std::string prsErr;
+        JsonValue peersJson = JsonValue::parse(peersResp.substr(peersBodyPos + 4), &prsErr);
+        CHECK(prsErr.empty());
+        CHECK(peersJson.contains("peers") && peersJson["peers"].is_array());
+        bool foundQuotedPeer = false;
+        for (const auto& item : peersJson["peers"].as_array()) {
+            if (item["peerName"].as_string() == quoteName) {
+                foundQuotedPeer = true;
+            }
+        }
+        CHECK(foundQuotedPeer);
+    }
+
+    // 17. Nit: /api/file/delete and /api/unstage on paths that don't exist return ok:false
+    {
+        std::string delBody = "{\"path\":\"nonexistent_random_file_9876.txt\"}";
+        std::string delReq = "POST /api/file/delete HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
+            "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(delBody.size()) + "\r\nConnection: close\r\n\r\n" + delBody;
+        std::string delResp = httpExchange("127.0.0.1", testPort, delReq);
+        CHECK(delResp.find("400 Bad Request") != std::string::npos);
+        size_t delBodyPos = delResp.find("\r\n\r\n");
+        CHECK(delBodyPos != std::string::npos);
+        JsonValue delJson = JsonValue::parse(delResp.substr(delBodyPos + 4));
+        CHECK(delJson["ok"].as_bool() == false);
+        CHECK(delJson.contains("snapshot"));
+
+        std::string unstageBody = "{\"path\":\"nonexistent_random_file_9876.txt\"}";
+        std::string unstageReq = "POST /api/unstage HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
+            "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(unstageBody.size()) + "\r\nConnection: close\r\n\r\n" + unstageBody;
+        std::string unstageResp = httpExchange("127.0.0.1", testPort, unstageReq);
+        CHECK(unstageResp.find("400 Bad Request") != std::string::npos);
+        size_t unstageBodyPos = unstageResp.find("\r\n\r\n");
+        CHECK(unstageBodyPos != std::string::npos);
+        JsonValue unstageJson = JsonValue::parse(unstageResp.substr(unstageBodyPos + 4));
+        CHECK(unstageJson["ok"].as_bool() == false);
+        CHECK(unstageJson.contains("snapshot"));
     }
 
     removeDir(dir);

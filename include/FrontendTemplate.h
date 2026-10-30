@@ -1064,7 +1064,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         let IS_SERVER_MODE = window.location.protocol.startsWith('http');
         let IS_STATIC_EXPORT = (window.location.protocol === 'file:') || (window.MINIGIT_LIVE && window.MINIGIT_LIVE.__staticExport) || (!!window.__staticExport);
         let LATEST_SNAPSHOT_ETAG = null;
-        let IS_LAN_MODE = !!(window.MINIGIT_LIVE && window.MINIGIT_LIVE.lan);
+        let IS_LAN_MODE = false;
         let _lanPollTimer = null;
         function updateLanMode(lan) {
             IS_LAN_MODE = !!lan;
@@ -1075,6 +1075,8 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 _lanPollTimer = null;
             }
         }
+        updateLanMode(window.MINIGIT_LIVE && window.MINIGIT_LIVE.lan);
+        let LOCAL_LAN_URL = (window.MINIGIT_LIVE && window.MINIGIT_LIVE.lanUrl) ? window.MINIGIT_LIVE.lanUrl : "";
         let SERVER_REFLOG_COUNT = 0;
         const DIRTY_BUFFERS = {};
 
@@ -1399,9 +1401,9 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         }
 
         function getHeadBlobText(filepath) {
-            let headCommitHash = BRANCHES[CURRENT_BRANCH];
+            let headCommitHash = (CURRENT_BRANCH ? BRANCHES[CURRENT_BRANCH] : "") || (IS_SERVER_MODE ? window.MINIGIT_LIVE?.head : DEMO_HEAD_HASH);
             if (!headCommitHash && (window.MINIGIT_LIVE?.detached || CURRENT_BRANCH === "")) {
-                headCommitHash = window.MINIGIT_LIVE?.head;
+                headCommitHash = IS_SERVER_MODE ? window.MINIGIT_LIVE?.head : DEMO_HEAD_HASH;
             }
             if (!headCommitHash && window.MINIGIT_LIVE?.head) {
                 headCommitHash = window.MINIGIT_LIVE.head;
@@ -1781,6 +1783,9 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             if (live.lan !== undefined) {
                 updateLanMode(live.lan);
             }
+            if (live.lanUrl) {
+                LOCAL_LAN_URL = live.lanUrl;
+            }
             const serverFiles = live.files || {};
 
             // Preserve dirty buffers
@@ -1814,7 +1819,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
 
             const area = document.getElementById('codeEditorArea');
             if (area && ACTIVE_FILE) {
-                if (!DIRTY_BUFFERS[ACTIVE_FILE] && document.activeElement !== area) {
+                if (!DIRTY_BUFFERS[ACTIVE_FILE]) {
                     syncEditorWithActiveFile();
                 }
             } else if (area && !ACTIVE_FILE) {
@@ -2290,7 +2295,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
          * --------------------------------------------------------------------- */
         function renderDashboardMetrics() {
             const commits = getChronologicalCommits();
-            const headHash = window.MINIGIT_LIVE?.head || (CURRENT_BRANCH ? BRANCHES[CURRENT_BRANCH] : null);
+            const headHash = window.MINIGIT_LIVE?.head || (CURRENT_BRANCH ? BRANCHES[CURRENT_BRANCH] : DEMO_HEAD_HASH) || null;
 
             // 1. Total Commits
             const cCountEl = document.getElementById('dashTotalCommits');
@@ -2909,8 +2914,9 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 for (const [fp, bHash] of Object.entries(treeObj.data)) {
                     if (OBJECTS[bHash]) VFS[fp] = getBlobText(bHash);
                 }
-                const oldHash = (CURRENT_BRANCH && BRANCHES[CURRENT_BRANCH]) ? BRANCHES[CURRENT_BRANCH] : (DEMO_REFLOG[0]?.newHash || "0000000");
+                const oldHash = (CURRENT_BRANCH && BRANCHES[CURRENT_BRANCH]) ? BRANCHES[CURRENT_BRANCH] : (DEMO_HEAD_HASH || DEMO_REFLOG[0]?.newHash || "0000000");
                 CURRENT_BRANCH = "";
+                DEMO_HEAD_HASH = c.hash;
                 recordDemoReflog("restore", oldHash, c.hash, `Checked out commit ${short} (detached HEAD)`);
                 showToast(`Checked out commit [${short}] (detached HEAD)`);
                 updateUI();
@@ -3221,7 +3227,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             const hintText = document.getElementById('localLanHintText');
 
             if (addrEl) {
-                addrEl.textContent = window.location.origin || "http://localhost:8080";
+                addrEl.textContent = (IS_LAN_MODE && LOCAL_LAN_URL) ? LOCAL_LAN_URL : (window.location.origin || "http://localhost:8080");
             }
             const urlInput = document.getElementById('lanPeerUrlInput');
             if (urlInput && !urlInput.value) {
@@ -3237,7 +3243,11 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                         const data = await res.json();
                         if (data.ok) {
                             LOCAL_PAIR_CODE = data.code || "";
-                            IS_LAN_MODE = !!data.lan;
+                            if (data.lanUrl) LOCAL_LAN_URL = data.lanUrl;
+                            updateLanMode(data.lan);
+                            if (addrEl && (data.lan || IS_LAN_MODE) && LOCAL_LAN_URL) {
+                                addrEl.textContent = LOCAL_LAN_URL;
+                            }
                             if (data.lan) {
                                 if (codeContainer) codeContainer.classList.remove('hidden');
                                 if (pairedContainer) pairedContainer.classList.remove('hidden');
@@ -3318,7 +3328,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         }
 
         function copyLocalPeerAddress() {
-            const addr = window.location.origin || "http://localhost:8080";
+            const addr = (IS_LAN_MODE && LOCAL_LAN_URL) ? LOCAL_LAN_URL : (window.location.origin || "http://localhost:8080");
             navigator.clipboard.writeText(addr);
             showToast("Copied peer address to clipboard");
         }
@@ -3367,8 +3377,9 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 if (!res.ok) {
                     if (res.status === 401 || res.status === 403) {
                         localStorage.removeItem('minigit_token_' + peerUrl);
+                        localStorage.removeItem('minigit_token_' + cleanPeerUrl(peerUrl));
                         checkPeerAuthStatus();
-                        throw new Error("Peer requires authentication: enter 6-digit code above and click Pair Device first.");
+                        throw new Error(res.status === 401 ? "Session expired: please pair again." : "Peer requires authentication: enter 6-digit code above and click Pair Device first.");
                     }
                     throw new Error("Peer returned HTTP " + res.status);
                 }
@@ -3470,8 +3481,9 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 } else {
                     if (postRes.status === 401 || postRes.status === 403) {
                         localStorage.removeItem('minigit_token_' + peerUrl);
+                        localStorage.removeItem('minigit_token_' + cleanPeerUrl(peerUrl));
                         checkPeerAuthStatus();
-                        showToast("Peer requires authentication: enter 6-digit code above and click Pair Device first.", "error");
+                        showToast(postRes.status === 401 ? "Session expired: please pair again." : "Peer requires authentication: enter 6-digit code above and click Pair Device first.", "error");
                     } else {
                         const peerRefs = resJson.peerRefs || (resJson.result && resJson.result.peerRefs);
                         if (peerRefs && peerRefs.length > 0) {
@@ -3952,7 +3964,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 return;
             }
 
-            const targetCommit = atCommit || (BRANCHES ? BRANCHES[CURRENT_BRANCH] : null) || null;
+            const targetCommit = atCommit || (CURRENT_BRANCH ? BRANCHES[CURRENT_BRANCH] : DEMO_HEAD_HASH) || null;
             BRANCHES[branchName] = targetCommit;
             recordDemoReflog("branch", BRANCHES[CURRENT_BRANCH], targetCommit, `Created branch ${branchName}`);
             showToast(`Created branch '${branchName}'`);
@@ -4175,6 +4187,9 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                     }
                     showToast(`Switched to '${targetBranch}'`);
                     await refreshRepositorySnapshot(true);
+                    loadLiveRepo();
+                    syncEditorWithActiveFile();
+                    updateUI();
                 } else {
                     // Item 33: The branch dropdown keeps the new name after a failed switch. Revert it.
                     updateBranchDropdown();
@@ -4194,6 +4209,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             }
             const oldBranch = CURRENT_BRANCH;
             CURRENT_BRANCH = targetBranch;
+            DEMO_HEAD_HASH = "";
             const targetCommitHash = BRANCHES[targetBranch];
 
             if (targetCommitHash && OBJECTS[targetCommitHash]) {
@@ -4207,6 +4223,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             STAGING_INDEX = {};
             recordDemoReflog("checkout", BRANCHES[oldBranch], targetCommitHash, `Switched to branch ${targetBranch}`);
             showToast(`Switched to '${CURRENT_BRANCH}'`);
+            syncEditorWithActiveFile();
             updateUI();
         }
 
@@ -4676,7 +4693,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 }
             } else {
                 let headTreeBlobs = {};
-                const headCommitHash = (window.MINIGIT_LIVE && window.MINIGIT_LIVE.head) || BRANCHES[CURRENT_BRANCH];
+                const headCommitHash = (window.MINIGIT_LIVE && window.MINIGIT_LIVE.head) || (CURRENT_BRANCH ? BRANCHES[CURRENT_BRANCH] : DEMO_HEAD_HASH);
                 if (headCommitHash && OBJECTS[headCommitHash]) {
                     const treeHash = OBJECTS[headCommitHash].data.tree;
                     headTreeBlobs = OBJECTS[treeHash]?.data || {};
@@ -4971,7 +4988,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         ];
 
         function getGraphHead() {
-            return (window.MINIGIT_LIVE && window.MINIGIT_LIVE.head) || (typeof BRANCHES === 'object' && BRANCHES ? BRANCHES[CURRENT_BRANCH] : null) || null;
+            return (window.MINIGIT_LIVE && window.MINIGIT_LIVE.head) || (typeof BRANCHES === 'object' && BRANCHES && CURRENT_BRANCH ? BRANCHES[CURRENT_BRANCH] : null) || DEMO_HEAD_HASH || null;
         }
 
         function isHeadDetached() {
@@ -5670,7 +5687,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                         const probeData = await probeRes.json();
                         if (probeData) {
                             window.MINIGIT_LIVE = probeData;
-                            IS_LAN_MODE = !!probeData.lan;
+                            updateLanMode(probeData.lan);
                         }
                     } else {
                         IS_SERVER_MODE = false;

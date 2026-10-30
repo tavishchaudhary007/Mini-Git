@@ -155,6 +155,29 @@ void sendAll(socket_t sock, const std::string& data) {
     }
 }
 
+static bool isIPv4Literal(const std::string& s) {
+    if (s.empty()) return false;
+    int parts = 0;
+    size_t i = 0;
+    while (i < s.size()) {
+        if (parts > 3) return false;
+        size_t nextDot = s.find('.', i);
+        std::string part = (nextDot == std::string::npos) ? s.substr(i) : s.substr(i, nextDot - i);
+        if (part.empty() || part.size() > 3) return false;
+        for (char c : part) {
+            if (!std::isdigit(static_cast<unsigned char>(c))) return false;
+        }
+        if (part.size() > 1 && part[0] == '0') return false;
+        int val = std::stoi(part);
+        if (val < 0 || val > 255) return false;
+        parts++;
+        if (nextDot == std::string::npos) break;
+        i = nextDot + 1;
+        if (i >= s.size()) return false;
+    }
+    return parts == 4;
+}
+
 void sendHttpResponse(socket_t sock, int statusCode, const std::string& statusText,
                       const std::string& contentType, const std::string& body,
                       const std::string& corsOrigin = "", const std::string& extraHeaders = "") {
@@ -334,10 +357,18 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
         // Host header validation (DNS rebinding protection)
         std::string host = getHeaderValue(request, "Host");
         std::string portStr = std::to_string(boundPort);
-        bool validHost = (host == ("127.0.0.1:" + portStr) || host == ("localhost:" + portStr) ||
-                          host == "127.0.0.1" || host == "localhost");
-        if (lan) {
-            if (host == (lanIp + ":" + portStr) || host == lanIp) {
+        std::string hostPart = host, hostPort = "";
+        size_t colon = host.rfind(':');
+        if (colon != std::string::npos) {
+            hostPart = host.substr(0, colon);
+            hostPort = host.substr(colon + 1);
+        }
+        bool validPort = (hostPort.empty() || hostPort == portStr);
+        bool validHost = false;
+        if (validPort) {
+            if (hostPart == "127.0.0.1" || hostPart == "localhost") {
+                validHost = true;
+            } else if (lan && isIPv4Literal(hostPart)) {
                 validHost = true;
             }
         }
@@ -372,9 +403,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
             if (origin == ("http://127.0.0.1:" + std::to_string(boundPort)) ||
                 origin == ("http://localhost:" + std::to_string(boundPort))) {
                 corsOrigin = origin;
-            } else if (isPairEndpoint) {
-                corsOrigin = origin;
-            } else if (isSyncEndpoint && hasValidToken) {
+            } else if (isSyncOrPairEndpoint) {
                 corsOrigin = origin;
             }
         }
@@ -433,6 +462,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
             try {
                 Snapshot s = repo->snapshot();
                 s.lan = lan;
+                s.lanUrl = lanUrl;
                 return HtmlExporter::toJson(s, repoName);
             } catch (...) {
                 return std::string("{}");
@@ -444,6 +474,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
             if (method == "GET" && (path == "/" || path == "/index.html")) {
                 Snapshot snap = repo->snapshot();
                 snap.lan = lan;
+                snap.lanUrl = lanUrl;
                 std::string html = HtmlExporter::render(snap, repoName);
                 sendHttpResponse(clientSock, 200, "OK", "text/html; charset=utf-8", html, corsOrigin);
             } else if (method == "GET" && path == "/api/token") {
@@ -501,6 +532,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                     }
                     std::string code = getOptionalString(bodyJson, "code");
                     std::string peerName = getOptionalString(bodyJson, "peerName");
+                    if (peerName.empty()) peerName = getOptionalString(bodyJson, "clientName");
                     auto res = pairingMgr.submitCode(code, clientIpStr, peerName);
                     if (res.success) {
                         sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
@@ -545,8 +577,10 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                     oss << "{\"ok\":true,\"pending\":[";
                     for (size_t i = 0; i < pending.size(); ++i) {
                         if (i > 0) oss << ",";
-                        oss << "{\"id\":\"" << pending[i].requestId << "\",\"ip\":\"" << pending[i].clientIp
-                            << "\",\"peerName\":\"" << pending[i].peerName << "\",\"code\":\"" << pending[i].code << "\"}";
+                        oss << "{\"id\":" << jsonString(pending[i].requestId)
+                            << ",\"ip\":" << jsonString(pending[i].clientIp)
+                            << ",\"peerName\":" << jsonString(pending[i].peerName)
+                            << ",\"code\":" << jsonString(pending[i].code) << "}";
                     }
                     oss << "]}";
                     sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8", oss.str(), corsOrigin);
@@ -583,8 +617,10 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                     oss << "{\"ok\":true,\"peers\":[";
                     for (size_t i = 0; i < peers.size(); ++i) {
                         if (i > 0) oss << ",";
-                        oss << "{\"id\":\"" << peers[i].id << "\",\"ip\":\"" << peers[i].clientIp
-                            << "\",\"peerName\":\"" << peers[i].peerName << "\",\"pairedAt\":\"" << peers[i].pairedAt << "\"}";
+                        oss << "{\"id\":" << jsonString(peers[i].id)
+                            << ",\"ip\":" << jsonString(peers[i].clientIp)
+                            << ",\"peerName\":" << jsonString(peers[i].peerName)
+                            << ",\"pairedAt\":" << jsonString(peers[i].pairedAt) << "}";
                     }
                     oss << "]}";
                     sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8", oss.str(), corsOrigin);
@@ -667,10 +703,14 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                     try {
                         std::string rel = repo->resolveRepoPath(p, true);
                         fs::path full = repo->root() / rel;
-                        if (fs::exists(full)) {
-                            std::error_code ec;
-                            fs::remove(full, ec);
+                        if (!fs::exists(full)) {
+                            sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
+                                             "{\"ok\":false,\"error\":\"File does not exist\",\"snapshot\":" + getSnapJson() + "}", corsOrigin);
+                            CLOSESOCKET(clientSock);
+                            continue;
                         }
+                        std::error_code ec;
+                        fs::remove(full, ec);
                         std::string snap = getSnapJson();
                         sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
                                          "{\"ok\":true,\"message\":\"deleted\",\"snapshot\":" + snap + "}", corsOrigin);
@@ -708,6 +748,20 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                 } else {
                     try {
                         p = getOptionalString(bodyJson, "path");
+                        if (!p.empty() && p != ".") {
+                            std::string rel = repo->resolveRepoPath(p, true);
+                            fs::path full = repo->root() / rel;
+                            Snapshot s = repo->snapshot();
+                            bool existsInStaged = (s.staged.find(rel) != s.staged.end());
+                            bool existsInStagedDeleted = (std::find(s.stagedDeleted.begin(), s.stagedDeleted.end(), rel) != s.stagedDeleted.end());
+                            bool existsOnDisk = fs::exists(full);
+                            if (!existsOnDisk && !existsInStaged && !existsInStagedDeleted) {
+                                sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
+                                                 "{\"ok\":false,\"error\":\"Path does not exist\",\"snapshot\":" + getSnapJson() + "}", corsOrigin);
+                                CLOSESOCKET(clientSock);
+                                continue;
+                            }
+                        }
                         repo->unstage(p, true);
                         std::string snap = getSnapJson();
                         sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",

@@ -37,6 +37,10 @@ std::string currentTimestamp() {
     return std::string(buf);
 }
 
+bool isLoopbackIp(const std::string& ip) {
+    return ip == "127.0.0.1" || ip == "localhost" || ip == "::1";
+}
+
 } // namespace
 
 PairingManager::PairingManager() {
@@ -64,6 +68,7 @@ std::string PairingManager::generateNewCode() {
     currentCode_ = generate6DigitCode();
     codeCreatedAt_ = std::chrono::steady_clock::now();
     failedAttempts_ = 0;
+    failedAttemptsByClient_.clear();
     isLocked_ = false;
     isUsed_ = false;
     return currentCode_;
@@ -86,15 +91,33 @@ bool PairingManager::isExpired() const {
 }
 
 bool PairingManager::isLocked() const {
-    return isLocked_;
+    if (isLocked_) return true;
+    for (const auto& [ip, fails] : failedAttemptsByClient_) {
+        if (fails >= 5) return true;
+    }
+    return false;
+}
+
+bool PairingManager::isClientLocked(const std::string& clientIp) const {
+    if (clientIp.empty() || isLoopbackIp(clientIp)) return false;
+    auto it = failedAttemptsByClient_.find(clientIp);
+    return (it != failedAttemptsByClient_.end() && it->second >= 5);
 }
 
 bool PairingManager::isUsed() const {
     return isUsed_;
 }
 
-int PairingManager::failedAttempts() const {
-    return failedAttempts_;
+int PairingManager::failedAttempts(const std::string& clientIp) const {
+    if (!clientIp.empty()) {
+        auto it = failedAttemptsByClient_.find(clientIp);
+        return (it != failedAttemptsByClient_.end()) ? it->second : 0;
+    }
+    int maxFails = failedAttempts_;
+    for (const auto& [ip, fails] : failedAttemptsByClient_) {
+        if (fails > maxFails) maxFails = fails;
+    }
+    return maxFails;
 }
 
 PairingManager::PairSubmitResult PairingManager::submitCode(const std::string& code,
@@ -102,10 +125,16 @@ PairingManager::PairSubmitResult PairingManager::submitCode(const std::string& c
                                                            const std::string& peerName) {
     PairSubmitResult res{};
     res.success = false;
-    res.locked = isLocked_;
-    res.remainingAttempts = std::max(0, 5 - failedAttempts_);
+    bool clientLocked = isClientLocked(clientIp);
+    res.locked = clientLocked;
+    int fails = 0;
+    if (!clientIp.empty() && !isLoopbackIp(clientIp)) {
+        auto it = failedAttemptsByClient_.find(clientIp);
+        if (it != failedAttemptsByClient_.end()) fails = it->second;
+    }
+    res.remainingAttempts = std::max(0, 5 - fails);
 
-    if (isLocked_) {
+    if (clientLocked) {
         res.error = "Pairing locked after 5 failed attempts. Please generate a new code on the host.";
         return res;
     }
@@ -121,24 +150,30 @@ PairingManager::PairSubmitResult PairingManager::submitCode(const std::string& c
     }
 
     if (code.size() != 6 || code != currentCode_) {
-        failedAttempts_++;
-        if (failedAttempts_ >= 5) {
-            isLocked_ = true;
-            res.locked = true;
-            res.remainingAttempts = 0;
-            res.error = "Pairing locked after 5 failed attempts. Please generate a new code on the host.";
+        if (!clientIp.empty() && !isLoopbackIp(clientIp)) {
+            int newFails = ++failedAttemptsByClient_[clientIp];
+            if (newFails >= 5) {
+                res.locked = true;
+                res.remainingAttempts = 0;
+                res.error = "Pairing locked after 5 failed attempts. Please generate a new code on the host.";
+            } else {
+                res.remainingAttempts = 5 - newFails;
+                res.error = "Invalid pair code (" + std::to_string(res.remainingAttempts) + " attempt" +
+                            (res.remainingAttempts == 1 ? "" : "s") + " remaining).";
+            }
         } else {
-            res.remainingAttempts = 5 - failedAttempts_;
-            res.error = "Invalid pair code (" + std::to_string(res.remainingAttempts) + " attempt" +
-                        (res.remainingAttempts == 1 ? "" : "s") + " remaining).";
+            // Loopback / website requests never increment lockout counter and cannot lock pairing
+            res.locked = false;
+            res.remainingAttempts = 5;
+            res.error = "Invalid pair code.";
         }
         return res;
     }
 
-    // Code matches and is valid!
+    // Code matches and is valid! Real code is never locked out for non-locked clients.
     res.success = true;
     res.locked = false;
-    res.remainingAttempts = 5 - failedAttempts_;
+    res.remainingAttempts = std::max(0, 5 - fails);
     res.requestId = "req_" + generateRandomHex(16);
 
     PendingPairRequest req{};

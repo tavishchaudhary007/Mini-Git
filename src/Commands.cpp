@@ -115,6 +115,21 @@ void LogCmd::execute(Repository* repo, const Args& args) {
     }
 }
 
+static std::string escapePath(const std::string& name) {
+    std::string out;
+    out.reserve(name.size());
+    for (char c : name) {
+        switch (c) {
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            case '\0': out += "\\0"; break;
+            default:   out += c; break;
+        }
+    }
+    return out;
+}
+
 void StatusCmd::execute(Repository* repo, const Args& args) {
     if (!args.empty()) usageError(*this);
     Status s = repo->status();
@@ -130,22 +145,22 @@ void StatusCmd::execute(Repository* repo, const Args& args) {
         auto conflicts = repo->conflictedPaths();
         if (!conflicts.empty()) {
             cout << "\nUnmerged paths:\n";
-            for (const auto& f : conflicts) cout << "  " << f << "\n";
+            for (const auto& f : conflicts) cout << "  " << escapePath(f) << "\n";
         }
     }
     if (s.clean() && !repo->isMerging()) { cout << "nothing to commit, working tree clean\n"; return; }
     if (!s.staged.empty()) {
         cout << "\nChanges to be committed:\n";
-        for (const auto& f : s.staged) cout << "  staged:    " << f << "\n";
+        for (const auto& f : s.staged) cout << "  staged:    " << escapePath(f) << "\n";
     }
     if (!s.modified.empty() || !s.deleted.empty()) {
         cout << "\nChanges not staged for commit:\n";
-        for (const auto& f : s.modified) cout << "  modified:  " << f << "\n";
-        for (const auto& f : s.deleted)  cout << "  deleted:   " << f << "\n";
+        for (const auto& f : s.modified) cout << "  modified:  " << escapePath(f) << "\n";
+        for (const auto& f : s.deleted)  cout << "  deleted:   " << escapePath(f) << "\n";
     }
     if (!s.untracked.empty()) {
         cout << "\nUntracked files:\n";
-        for (const auto& f : s.untracked) cout << "  " << f << "\n";
+        for (const auto& f : s.untracked) cout << "  " << escapePath(f) << "\n";
     }
 }
 

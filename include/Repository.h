@@ -59,6 +59,7 @@ struct Snapshot {
     std::vector<std::string> conflicts;
     std::map<std::string, char> stagedStatus;
     bool lan{false};
+    std::string lanUrl;
     std::vector<std::string> binaryFiles;
 };
 

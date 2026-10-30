@@ -89,6 +89,7 @@ std::string HtmlExporter::toJson(const Snapshot& snap, const std::string& repoNa
     }
     o << "},\"version\":"; jsonString(o, version);
     o << ",\"lan\":" << (snap.lan ? "true" : "false");
+    o << ",\"lanUrl\":"; jsonString(o, snap.lanUrl);
     o << ",\"binaryFiles\":[";
     bool firstBin = true;
     for (const auto& bf : snap.binaryFiles) {
