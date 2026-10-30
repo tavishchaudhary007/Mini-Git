@@ -26,7 +26,13 @@ void RefManager::updateHead(const Hash& h) const {
     else            writeFile(headFile(), h.str() + "\n");
 }
 
+bool RefManager::branchExists(const std::string& n) const {
+    if (!isValidBranchName(n)) throw BranchException("invalid branch name: '" + n + "'");
+    return fs::exists(branchFile(n));
+}
+
 Hash RefManager::branchTip(const std::string& n) const {
+    if (!isValidBranchName(n)) throw BranchException("invalid branch name: '" + n + "'");
     if (!branchExists(n)) throw BranchException("no such branch: " + n);
     return Hash(trim(readFile(branchFile(n))));
 }
@@ -52,6 +58,7 @@ void RefManager::setBranch(const std::string& n, const Hash& at) const {
 }
 
 void RefManager::deleteBranch(const std::string& n) const {
+    if (!isValidBranchName(n)) throw BranchException("invalid branch name: '" + n + "'");
     if (!branchExists(n)) throw BranchException("branch does not exist: " + n);
     if (onBranch() && currentBranch() == n) throw BranchException("cannot delete currently checked-out branch: " + n);
     fs::remove(branchFile(n));
@@ -66,5 +73,8 @@ std::vector<std::string> RefManager::listBranches() const {
     return names;
 }
 
-void RefManager::switchToBranch(const std::string& n) const { writeFile(headFile(), kPrefix + n + "\n"); }
+void RefManager::switchToBranch(const std::string& n) const {
+    if (!isValidBranchName(n)) throw BranchException("invalid branch name: '" + n + "'");
+    writeFile(headFile(), kPrefix + n + "\n");
+}
 void RefManager::detach(const Hash& h) const { writeFile(headFile(), h.str() + "\n"); }

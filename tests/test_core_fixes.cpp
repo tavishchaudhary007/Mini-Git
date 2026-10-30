@@ -1045,6 +1045,135 @@ void test_l3_escape_path_and_nonzero_exit() {
     std::cout << "PASSED\n";
 }
 
+
+// =========================================================================
+// Group 1 Regression Tests: Bug 1, Bug 4, Bug 5
+// =========================================================================
+
+void test_group1_json_nesting_limit() {
+    std::cout << "[Test Group 1.1] Json nesting depth limit & 2M bracket overflow safety... ";
+
+    // 1. 2,000,000 '[' must not crash or stack overflow
+    std::string hugeArray(2000000, '[');
+    std::string err;
+    JsonValue v = JsonValue::parse(hugeArray, &err);
+    CHECK(v.type() == JsonValue::Type::Null);
+    CHECK(!err.empty());
+    CHECK(err.find("maximum nesting depth exceeded") != std::string::npos);
+
+    // 2. 65 nested arrays must fail with max nesting depth exceeded
+    std::string nested65(65, '[');
+    nested65.append(65, ']');
+    err.clear();
+    JsonValue v65 = JsonValue::parse(nested65, &err);
+    CHECK(v65.type() == JsonValue::Type::Null);
+    CHECK(!err.empty());
+    CHECK(err.find("maximum nesting depth exceeded") != std::string::npos);
+
+    // 3. 64 nested arrays must succeed
+    std::string nested64(64, '[');
+    nested64.append(64, ']');
+    err.clear();
+    JsonValue v64 = JsonValue::parse(nested64, &err);
+    CHECK(v64.type() == JsonValue::Type::Array);
+    CHECK(err.empty());
+
+    std::cout << "PASSED\n";
+}
+
+void test_group1_refmanager_branch_name_validation() {
+    std::cout << "[Test Group 1.4] RefManager branch name validation (branch -d ../../index fails)... ";
+    fs::path dir = fs::current_path() / "test_refmgr_repo";
+    cleanDir(dir);
+    Repository::init(dir);
+    Repository repo(dir);
+
+    writeFile(dir / "f.txt", "content\n");
+    repo.add("f.txt", true);
+    repo.commit("initial");
+
+    RefManager refs(dir / ".minigit");
+    fs::path indexFile = dir / ".minigit" / "index";
+    CHECK(fs::exists(indexFile));
+
+    // Branch traversal attempts must throw BranchException
+    bool threwExists = false;
+    try {
+        refs.branchExists("../../index");
+    } catch (const BranchException&) {
+        threwExists = true;
+    }
+    CHECK(threwExists);
+
+    bool threwTip = false;
+    try {
+        refs.branchTip("../../index");
+    } catch (const BranchException&) {
+        threwTip = true;
+    }
+    CHECK(threwTip);
+
+    bool threwDel = false;
+    try {
+        refs.deleteBranch("../../index");
+    } catch (const BranchException&) {
+        threwDel = true;
+    }
+    CHECK(threwDel);
+
+    bool threwSwitch = false;
+    try {
+        refs.switchToBranch("../../index");
+    } catch (const BranchException&) {
+        threwSwitch = true;
+    }
+    CHECK(threwSwitch);
+
+    // Verify index is untouched and still exists
+    CHECK(fs::exists(indexFile));
+
+    // Also verify via BranchCmd
+    BranchCmd bCmd;
+    bool bThrew = false;
+    try {
+        bCmd.execute(&repo, {"-d", "../../index"});
+    } catch (const BranchException&) {
+        bThrew = true;
+    } catch (const MiniGitException&) {
+        bThrew = true;
+    }
+    CHECK(bThrew);
+    CHECK(fs::exists(indexFile));
+
+    removeDir(dir);
+    std::cout << "PASSED\n";
+}
+
+void test_group1_git_export_no_system() {
+    std::cout << "[Test Group 1.5] Git export uses argv array without system() interpolation... ";
+    fs::path dir = fs::current_path() / "test_exp_no_sys";
+    cleanDir(dir);
+    Repository::init(dir);
+    Repository repo(dir);
+
+    // Commit message with quotes, spaces, and special symbols
+    writeFile(dir / "hello.txt", "hello world\n");
+    repo.add("hello.txt", true);
+    repo.commit("Commit with 'single' and \"double\" quotes & spaces");
+
+    try {
+        std::string res = repo.exportToGit();
+        CHECK(res.find("Exported to standard Git") != std::string::npos || res == "already up to date");
+    } catch (const MiniGitException& e) {
+        std::string err = e.what();
+        CHECK(err.find("git is not installed") != std::string::npos ||
+              err.find("git user.name and user.email are not configured") != std::string::npos);
+    }
+
+    removeDir(dir);
+    std::cout << "PASSED\n";
+}
+
 int main() {
     std::cout << "\n============================================\n";
     std::cout << "  Mini-Git Core Fixes Automated Tests\n";
@@ -1075,6 +1204,9 @@ int main() {
     runTest("test_m1", test_m1_replace_file_with_folder);
     runTest("test_l1", test_l1_bundle_import_non_commit_tips);
     runTest("test_l3", test_l3_escape_path_and_nonzero_exit);
+    runTest("test_g1_json", test_group1_json_nesting_limit);
+    runTest("test_g1_refmgr", test_group1_refmanager_branch_name_validation);
+    runTest("test_g1_export", test_group1_git_export_no_system);
 
     std::cout << "\nALL 10 CORE FIXES TESTS PASSED SUCCESSFULLY!\n";
     return 0;

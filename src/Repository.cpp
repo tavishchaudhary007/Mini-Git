@@ -850,7 +850,14 @@ void Repository::checkout(const std::string& target) {
     if (isMerging()) throw MergeException("merge in progress; commit or abort it first");
     if (isDirty()) throw CheckoutException("you have uncommitted changes; commit them first");
     Hash oldHead = refs_.headCommit();
-    bool isBranch = refs_.branchExists(target);
+    bool isBranch = false;
+    try {
+        if (RefManager::isValidBranchName(target) && refs_.branchExists(target)) {
+            isBranch = true;
+        }
+    } catch (const BranchException&) {
+        isBranch = false;
+    }
     Hash dest = isBranch ? refs_.branchTip(target) : store_.resolvePrefix(target);
     auto c = store_.loadAs<Commit>(dest);  // validates that dest is a commit
     auto targetTree = store_.loadAs<Tree>(c->tree())->entries();
@@ -1775,21 +1782,13 @@ std::string Repository::gitStatus() const {
 }
 
 std::string Repository::exportToGit() {
-#if defined(_WIN32)
-    int retCheck = std::system("git --version >nul 2>&1");
-#else
-    int retCheck = std::system("git --version >/dev/null 2>&1");
-#endif
-    if (processExitCode(retCheck) != 0) {
+    int retCheck = runProcess({"git", "--version"});
+    if (retCheck != 0) {
         throw MiniGitException("git is not installed or not available in PATH");
     }
 
-#if defined(_WIN32)
-    int retIdent = std::system("git var GIT_AUTHOR_IDENT >nul 2>&1");
-#else
-    int retIdent = std::system("git var GIT_AUTHOR_IDENT >/dev/null 2>&1");
-#endif
-    if (processExitCode(retIdent) != 0) {
+    int retIdent = runProcess({"git", "var", "GIT_AUTHOR_IDENT"});
+    if (retIdent != 0) {
         throw MiniGitException("git user.name and user.email are not configured");
     }
 
@@ -1803,32 +1802,34 @@ std::string Repository::exportToGit() {
     std::error_code ec;
     fs::path tempDir = fs::temp_directory_path(ec);
     if (ec) tempDir = root_;
-    fs::path tmpMsgFile = tempDir / ("mg_exp_" + std::to_string(std::time(nullptr)) + "_" + std::to_string(std::rand()) + ".txt");
+    fs::path tmpMsgFile;
+#ifndef _WIN32
+    std::string tmpl = (tempDir / "mg_exp_XXXXXX").string();
+    std::vector<char> tBuf(tmpl.begin(), tmpl.end());
+    tBuf.push_back('\0');
+    int fd = mkstemp(tBuf.data());
+    if (fd >= 0) {
+        tmpMsgFile = tBuf.data();
+        close(fd);
+    } else {
+        tmpMsgFile = tempDir / ("mg_exp_" + std::to_string(std::time(nullptr)) + "_" + std::to_string(std::rand()) + ".txt");
+    }
+#else
+    char tBuf[MAX_PATH];
+    char fBuf[MAX_PATH];
+    if (GetTempPathA(MAX_PATH, tBuf) && GetTempFileNameA(tBuf, "mg_", 0, fBuf)) {
+        tmpMsgFile = fBuf;
+    } else {
+        tmpMsgFile = tempDir / ("mg_exp_" + std::to_string(std::time(nullptr)) + "_" + std::to_string(std::rand()) + ".txt");
+    }
+#endif
     writeFile(tmpMsgFile, headMsg);
 
-
-
-    auto quotePath = [](const fs::path& p) {
-        std::string s = p.string();
-        std::string out = "\"";
-        for (char c : s) {
-            if (c == '"') out += "\\\"";
-            else out += c;
-        }
-        out += "\"";
-        return out;
-    };
-
-    std::string rootArg = quotePath(root_);
-    std::string msgFileArg = quotePath(tmpMsgFile);
-
     if (!fs::exists(root_ / ".git")) {
-        std::string cmdInit = "git -C " + rootArg + " init";
-        int retInit = std::system(cmdInit.c_str());
-        int exitInit = processExitCode(retInit);
-        if (exitInit != 0) {
+        int retInit = runProcess({"git", "-C", root_.string(), "init"});
+        if (retInit != 0) {
             fs::remove(tmpMsgFile, ec);
-            throw MiniGitException("git init failed with exit code " + std::to_string(exitInit));
+            throw MiniGitException("git init failed with exit code " + std::to_string(retInit));
         }
     }
 
@@ -1849,25 +1850,14 @@ std::string Repository::exportToGit() {
         }
     }
 
-    std::string cmdAdd = "git -C " + rootArg + " add -A";
-    int retAdd = std::system(cmdAdd.c_str());
-    int exitAdd = processExitCode(retAdd);
-    if (exitAdd != 0) {
+    int retAdd = runProcess({"git", "-C", root_.string(), "add", "-A"});
+    if (retAdd != 0) {
         fs::remove(tmpMsgFile, ec);
-        throw MiniGitException("git add failed with exit code " + std::to_string(exitAdd));
+        throw MiniGitException("git add failed with exit code " + std::to_string(retAdd));
     }
-
-    fs::path tmpOutFile = tempDir / ("mg_git_out_" + std::to_string(std::time(nullptr)) + "_" + std::to_string(std::rand()) + ".txt");
-    std::string outRedirect = " >" + quotePath(tmpOutFile) + " 2>&1";
-    std::string cmdCommit = "git -C " + rootArg + " commit -F " + msgFileArg + outRedirect;
-    int retCommit = std::system(cmdCommit.c_str());
-    int commitExitCode = processExitCode(retCommit);
 
     std::string commitOutput;
-    if (fs::exists(tmpOutFile)) {
-        try { commitOutput = readFile(tmpOutFile); } catch (...) {}
-        fs::remove(tmpOutFile, ec);
-    }
+    int commitExitCode = runProcess({"git", "-C", root_.string(), "commit", "-F", tmpMsgFile.string()}, &commitOutput);
     fs::remove(tmpMsgFile, ec);
 
     if (commitExitCode != 0) {

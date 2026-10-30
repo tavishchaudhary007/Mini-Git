@@ -1839,8 +1839,8 @@ void test_m2_server_idle_timeout_and_oversized_headers() {
 
         CHECK(snapResp.find("200 OK") != std::string::npos);
         CHECK(snapResp.find("repoName") != std::string::npos);
-        // Completed within about 6 s (idle timeout is ~5000 ms)
-        CHECK(tElapsed >= 4000 && tElapsed <= 7500);
+        // With thread pool, snapReq succeeds without being blocked by idleSock
+        CHECK(tElapsed <= 3500);
 
         CLOSESOCK(idleSock);
     }
@@ -1867,6 +1867,87 @@ void test_m2_server_idle_timeout_and_oversized_headers() {
     std::cout << "PASSED" << std::endl;
 }
 
+
+// =========================================================================
+// Group 1 Regression Tests: Bug 2 & Bug 3
+// =========================================================================
+void test_group1_http_unauth_body_limit_and_slowloris() {
+    std::cout << "[Test Group 1.2 & 1.3] Unauth 4KB body cap & Slowloris protection... " << std::flush;
+    fs::path dir = fs::current_path() / "test_repo_g1_srv";
+    cleanDir(dir);
+    Repository::init(dir.string());
+    Repository repo(dir.string());
+    writeFile(dir / "hello.txt", "world\n");
+    repo.add("hello.txt", true);
+    repo.commit("initial");
+
+    int testPort = 19945;
+    std::thread srvThread([&]() {
+        try {
+            HttpServer::run(&repo, testPort, false, true); // lan = true
+        } catch (...) {}
+    });
+    srvThread.detach();
+
+    for (int retry = 0; retry < 50; ++retry) {
+        std::string ping = httpExchange("127.0.0.1", testPort,
+            "GET /api/snapshot HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) + "\r\nConnection: close\r\n\r\n");
+        if (ping.find("200 OK") != std::string::npos) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
+    // Bug 2: POST /api/pair with body > 4KB returns 413 Payload Too Large
+    {
+        std::string largeBody(5000, 'x');
+        std::string req = "POST /api/pair HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
+            "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(largeBody.size()) +
+            "\r\nConnection: close\r\n\r\n" + largeBody;
+        std::string resp = httpExchange("127.0.0.1", testPort, req);
+        CHECK(resp.find("413") != std::string::npos);
+        CHECK(resp.find("Payload Too Large (max 4KB)") != std::string::npos);
+    }
+
+    // Bug 2: GET /api/pair/status with body > 4KB returns 413 Payload Too Large
+    {
+        std::string largeBody(5000, 'y');
+        std::string req = "GET /api/pair/status HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
+            "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(largeBody.size()) +
+            "\r\nConnection: close\r\n\r\n" + largeBody;
+        std::string resp = httpExchange("127.0.0.1", testPort, req);
+        CHECK(resp.find("413") != std::string::npos);
+    }
+
+    // Bug 3: Slowloris per-request 10s deadline & thread pool concurrency
+    {
+        socket_t slowSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        CHECK(slowSock != (socket_t)-1);
+        sockaddr_in saddr{};
+        saddr.sin_family = AF_INET;
+        saddr.sin_port = htons(static_cast<uint16_t>(testPort));
+        saddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+        int cRes = connect(slowSock, (struct sockaddr*)&saddr, sizeof(saddr));
+        CHECK(cRes == 0);
+
+        // Send partial header
+        std::string partial = "POST /api/snapshot HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Slow: ";
+        send(slowSock, partial.data(), static_cast<int>(partial.size()), 0);
+
+        // While slow connection is open, another request MUST succeed immediately via thread pool
+        std::string quickReq = "GET /api/snapshot HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
+            "\r\nConnection: close\r\n\r\n";
+        auto t0 = std::chrono::steady_clock::now();
+        std::string quickResp = httpExchange("127.0.0.1", testPort, quickReq, 3);
+        auto dur = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+        CHECK(quickResp.find("200 OK") != std::string::npos);
+        CHECK(dur < 2000);
+
+        CLOSESOCK(slowSock);
+    }
+
+    removeDir(dir);
+    std::cout << "PASSED\n";
+}
+
 int main() {
 #ifdef _WIN32
     WSADATA wsaData;
@@ -1891,6 +1972,7 @@ int main() {
     test_l2_branch_name_validation();
     test_l4_pairing_status_unknown_vs_denied();
     test_m2_server_idle_timeout_and_oversized_headers();
+    test_group1_http_unauth_body_limit_and_slowloris();
 
     std::cout << "\nALL CLI & SERVER TESTS PASSED SUCCESSFULLY!\n";
     return 0;

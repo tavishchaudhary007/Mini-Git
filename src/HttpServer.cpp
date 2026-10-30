@@ -11,6 +11,17 @@
 #include "Exceptions.h"
 #include "Json.h"
 #include "PairingManager.h"
+#include "FileUtil.h"
+#include <thread>
+#include <mutex>
+#include <queue>
+#include <condition_variable>
+#include <atomic>
+#include <chrono>
+#include <functional>
+#ifndef _WIN32
+#include <poll.h>
+#endif
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -42,14 +53,7 @@ using socket_t = int;
 namespace {
 
 bool openBrowserUrl(const std::string& url) {
-#if defined(_WIN32)
-    std::string cmd = "start \"\" \"" + url + "\"";
-#elif defined(__APPLE__)
-    std::string cmd = "open \"" + url + "\"";
-#else
-    std::string cmd = "xdg-open \"" + url + "\" >/dev/null 2>&1";
-#endif
-    return std::system(cmd.c_str()) == 0;
+    return openInBrowser(url);
 }
 
 std::string getLocalLanIp() {
@@ -201,92 +205,60 @@ void sendHttpResponse(socket_t sock, int statusCode, const std::string& statusTe
 
 } // namespace
 
-void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool lan) {
-#ifdef _WIN32
-    WSADATA wsaData;
-    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-        throw MiniGitException("failed to initialize Windows sockets");
-    }
-#endif
 
-    PairingManager pairingMgr;
-
-    socket_t serverSock = INVALID_SOCKET;
-    int boundPort = -1;
-
-    for (int port = preferredPort; port < preferredPort + 30; ++port) {
-        socket_t s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if (!ISVALIDSOCKET(s)) continue;
-
-        int opt = 1;
-#ifdef _WIN32
-        setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
-#else
-        setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-#endif
-
-        sockaddr_in addr{};
-        addr.sin_family = AF_INET;
-        if (lan) {
-            addr.sin_addr.s_addr = htonl(INADDR_ANY);
-        } else {
-            addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+class HttpServerThreadPool {
+public:
+    explicit HttpServerThreadPool(size_t threads) : stop_(false) {
+        for (size_t i = 0; i < threads; ++i) {
+            workers_.emplace_back([this]() {
+                while (true) {
+                    std::function<void()> task;
+                    {
+                        std::unique_lock<std::mutex> lock(queueMutex_);
+                        cv_.wait(lock, [this]() { return stop_ || !tasks_.empty(); });
+                        if (stop_ && tasks_.empty()) return;
+                        task = std::move(tasks_.front());
+                        tasks_.pop();
+                    }
+                    task();
+                }
+            });
         }
-        addr.sin_port = htons(static_cast<uint16_t>(port));
+    }
 
-        if (bind(s, (struct sockaddr*)&addr, sizeof(addr)) == 0 && listen(s, 10) == 0) {
-            serverSock = s;
-            boundPort = port;
-            break;
+    bool enqueue(std::function<void()> task) {
+        {
+            std::unique_lock<std::mutex> lock(queueMutex_);
+            if (stop_) return false;
+            tasks_.push(std::move(task));
         }
-        CLOSESOCKET(s);
+        cv_.notify_one();
+        return true;
     }
 
-    if (!ISVALIDSOCKET(serverSock)) {
-#ifdef _WIN32
-        WSACleanup();
-#endif
-        throw MiniGitException("failed to bind server to a local port in range " +
-                               std::to_string(preferredPort) + "-" + std::to_string(preferredPort + 30));
+    ~HttpServerThreadPool() {
+        {
+            std::unique_lock<std::mutex> lock(queueMutex_);
+            stop_ = true;
+        }
+        cv_.notify_all();
+        for (std::thread& worker : workers_) {
+            if (worker.joinable()) worker.join();
+        }
     }
 
-    std::string repoName = repo->root().filename().string();
-    std::string serverUrl = "http://127.0.0.1:" + std::to_string(boundPort) + "/";
-    std::string lanIp = lan ? getLocalLanIp() : "127.0.0.1";
-    std::string lanUrl = "http://" + lanIp + ":" + std::to_string(boundPort) + "/";
+private:
+    std::vector<std::thread> workers_;
+    std::queue<std::function<void()>> tasks_;
+    std::mutex queueMutex_;
+    std::condition_variable cv_;
+    bool stop_;
+};
 
-    std::cout << "\n============================================================\n"
-              << "  Mini-Git Web Studio & Interactive Local Server\n"
-              << "============================================================\n"
-              << "  * Repository: " << repoName << "\n"
-              << "  * Studio URL: " << serverUrl << "\n";
-    if (lan) {
-        std::cout << "  * P2P / LAN:  Enabled (0.0.0.0:" << boundPort << ")\n"
-                  << "  * LAN URL:    " << lanUrl << "\n"
-                  << "  * Pair Code:  " << pairingMgr.currentCode() << " (expires in 5 min)\n";
-    } else {
-        std::cout << "  * P2P / LAN:  Disabled (local only). Pass --lan to enable.\n";
-    }
-    std::cout << "  * Mode:       Point-and-click (Zero CLI commands required)\n"
-              << "------------------------------------------------------------\n"
-              << "  Ready! You can stage, commit, branch, diff and merge\n"
-              << "  directly from your browser.\n"
-              << "  Press Ctrl+C in terminal to stop server.\n"
-              << "============================================================\n\n";
-
-    if (openBrowser) {
-        openBrowserUrl(serverUrl);
-    }
-
-    while (true) {
-        sockaddr_in clientAddr{};
-#ifdef _WIN32
-        int clientLen = sizeof(clientAddr);
-#else
-        socklen_t clientLen = sizeof(clientAddr);
-#endif
-        socket_t clientSock = accept(serverSock, (struct sockaddr*)&clientAddr, &clientLen);
-        if (!ISVALIDSOCKET(clientSock)) break;
+static void handleClientConnection(socket_t clientSock, sockaddr_in clientAddr, int boundPort, bool lan,
+                                   PairingManager& pairingMgr, Repository* repo,
+                                   std::recursive_mutex& repoMutex, std::recursive_mutex& pairingMutex,
+                                   const std::string& repoName, const std::string& lanUrl) {
 
 #ifdef _WIN32
         DWORD sockTimeout = 5000;
@@ -313,7 +285,35 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
         bool headersTooLarge = false;
         bool requestComplete = false;
 
-        while ((bytesRead = recv(clientSock, buf, sizeof(buf) - 1, 0)) > 0) {
+        auto reqStart = std::chrono::steady_clock::now();
+        const auto reqDeadline = reqStart + std::chrono::seconds(10);
+
+        while (true) {
+            auto now = std::chrono::steady_clock::now();
+            if (now >= reqDeadline) {
+                break;
+            }
+            int remainingMs = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(reqDeadline - now).count());
+            if (remainingMs <= 0) break;
+            if (remainingMs > 5000) remainingMs = 5000;
+
+#ifdef _WIN32
+            WSAPOLLFD pfd{};
+            pfd.fd = clientSock;
+            pfd.events = POLLIN;
+            int pRes = WSAPoll(&pfd, 1, remainingMs);
+#else
+            struct pollfd pfd{};
+            pfd.fd = clientSock;
+            pfd.events = POLLIN;
+            int pRes = poll(&pfd, 1, remainingMs);
+#endif
+            if (pRes <= 0) break;
+            if (!(pfd.revents & POLLIN)) break;
+
+            bytesRead = recv(clientSock, buf, sizeof(buf) - 1, 0);
+            if (bytesRead <= 0) break;
+
             buf[bytesRead] = '\0';
             request.append(buf, bytesRead);
 
@@ -354,19 +354,24 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
             sendHttpResponse(clientSock, 431, "Request Header Fields Too Large", "application/json",
                              "{\"ok\":false,\"error\":\"Request Header Fields Too Large (max 64KB)\"}");
             CLOSESOCKET(clientSock);
-            continue;
+            return;
         }
 
         if (payloadTooLarge) {
             sendHttpResponse(clientSock, 413, "Payload Too Large", "application/json",
                              "{\"ok\":false,\"error\":\"Payload Too Large (max 50MB)\"}");
             CLOSESOCKET(clientSock);
-            continue;
+            return;
         }
 
         if (!requestComplete) {
+            auto now = std::chrono::steady_clock::now();
+            if (now >= reqDeadline) {
+                sendHttpResponse(clientSock, 408, "Request Timeout", "application/json",
+                                 "{\"ok\":false,\"error\":\"Request Timeout (Slowloris protection)\"}");
+            }
             CLOSESOCKET(clientSock);
-            continue;
+            return;
         }
 
         // Parse Method and URI
@@ -411,7 +416,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
             sendHttpResponse(clientSock, 403, "Forbidden", "application/json",
                              "{\"ok\":false,\"error\":\"Forbidden: invalid Host header\"}");
             CLOSESOCKET(clientSock);
-            continue;
+            return;
         }
 
         std::string origin = getHeaderValue(request, "Origin");
@@ -427,11 +432,15 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
             }
             sendHttpResponse(clientSock, 204, "No Content", "text/plain", "", optCorsOrigin);
             CLOSESOCKET(clientSock);
-            continue;
+            return;
         }
 
         std::string clientToken = getHeaderValue(request, "X-MiniGit-Token");
-        bool hasValidToken = !clientToken.empty() && pairingMgr.isValidSessionToken(clientToken);
+        bool hasValidToken = false;
+        {
+            std::lock_guard<std::recursive_mutex> pLock(pairingMutex);
+            hasValidToken = !clientToken.empty() && pairingMgr.isValidSessionToken(clientToken);
+        }
 
         std::string corsOrigin = "";
         if (!origin.empty() && origin != "null") {
@@ -449,14 +458,14 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                                  "{\"ok\":false,\"error\":\"Forbidden: non-loopback access restricted to sync/pair endpoints\"}",
                                  corsOrigin);
                 CLOSESOCKET(clientSock);
-                continue;
+                return;
             }
             if (isSyncEndpoint && !hasValidToken) {
                 sendHttpResponse(clientSock, 401, "Unauthorized", "application/json",
                                  "{\"ok\":false,\"error\":\"Unauthorized: invalid or revoked session token. Please pair with host.\"}",
                                  corsOrigin);
                 CLOSESOCKET(clientSock);
-                continue;
+                return;
             }
         }
 
@@ -469,7 +478,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                     sendHttpResponse(clientSock, 403, "Forbidden", "application/json",
                                      "{\"ok\":false,\"error\":\"Forbidden: invalid origin\"}", corsOrigin);
                     CLOSESOCKET(clientSock);
-                    continue;
+                    return;
                 }
             }
             std::string ct = getHeaderValue(request, "Content-Type");
@@ -477,7 +486,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                 sendHttpResponse(clientSock, 400, "Bad Request", "application/json",
                                  "{\"ok\":false,\"error\":\"Content-Type must be application/json\"}", corsOrigin);
                 CLOSESOCKET(clientSock);
-                continue;
+                return;
             }
         }
 
@@ -489,12 +498,13 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                 sendHttpResponse(clientSock, 403, "Forbidden", "application/json",
                                  "{\"ok\":false,\"error\":\"Forbidden: cross-origin bundle access refused\"}", corsOrigin);
                 CLOSESOCKET(clientSock);
-                continue;
+                return;
             }
         }
 
         auto getSnapJson = [&]() {
             try {
+                std::lock_guard<std::recursive_mutex> rLock(repoMutex);
                 Snapshot s = repo->snapshot();
                 s.lan = lan;
                 s.lanUrl = lanUrl;
@@ -505,6 +515,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
         };
 
         try {
+            std::lock_guard<std::recursive_mutex> rLock(repoMutex);
             repo->reload();
             if (method == "GET" && (path == "/" || path == "/index.html")) {
                 Snapshot snap = repo->snapshot();
@@ -529,6 +540,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                     sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8", tokenJson, corsOrigin);
                 }
             } else if (method == "GET" && path == "/api/pair/code") {
+                std::lock_guard<std::recursive_mutex> pLock(pairingMutex);
                 if (!isLoopback) {
                     sendHttpResponse(clientSock, 403, "Forbidden", "application/json",
                                      "{\"ok\":false,\"error\":\"Forbidden\"}", corsOrigin);
@@ -557,11 +569,17 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                     sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8", codeJson, corsOrigin);
                 }
             } else if (method == "POST" && path == "/api/pair") {
+                if (body.size() > 4096) {
+                    sendHttpResponse(clientSock, 413, "Payload Too Large", "application/json; charset=utf-8",
+                                     "{\"ok\":false,\"error\":\"Payload Too Large (max 4KB)\"}", corsOrigin);
+                    CLOSESOCKET(clientSock);
+                    return;
+                }
                 if (!lan) {
                     sendHttpResponse(clientSock, 403, "Forbidden", "application/json; charset=utf-8",
                                      "{\"ok\":false,\"error\":\"LAN mode is not enabled on host\"}", corsOrigin);
                     CLOSESOCKET(clientSock);
-                    continue;
+                    return;
                 }
                 if (isLoopback) {
                     bool isLocalOrigin = origin.empty() || origin == "null" ||
@@ -571,7 +589,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                         sendHttpResponse(clientSock, 403, "Forbidden", "application/json; charset=utf-8",
                                          "{\"ok\":false,\"error\":\"Forbidden: cross-origin pairing over loopback refused\"}", corsOrigin);
                         CLOSESOCKET(clientSock);
-                        continue;
+                        return;
                     }
                 }
                 JsonValue bodyJson;
@@ -580,7 +598,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
                                      "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + "}", corsOrigin);
                     CLOSESOCKET(clientSock);
-                    continue;
+                    return;
                 }
                 std::string code = getOptionalString(bodyJson, "code");
                 std::string peerName = getOptionalString(bodyJson, "peerName");
@@ -588,7 +606,11 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                 bool isCrossLoopback = isLoopback && !origin.empty() && origin != "null" &&
                                        origin != ("http://127.0.0.1:" + std::to_string(boundPort)) &&
                                        origin != ("http://localhost:" + std::to_string(boundPort));
-                auto res = pairingMgr.submitCode(code, clientIpStr, peerName, origin, isCrossLoopback);
+                PairingManager::PairSubmitResult res;
+                {
+                    std::lock_guard<std::recursive_mutex> pLock(pairingMutex);
+                    res = pairingMgr.submitCode(code, clientIpStr, peerName, origin, isCrossLoopback);
+                }
                 if (res.rateLimited) {
                     sendHttpResponse(clientSock, 429, "Too Many Requests", "application/json; charset=utf-8",
                                      "{\"ok\":false,\"error\":" + jsonString(res.error) + ",\"rateLimited\":true}",
@@ -609,7 +631,13 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                                      ",\"remainingAttempts\":" + std::to_string(res.remainingAttempts) + "}",
                                      corsOrigin);
                 }
-            } else if (method == "GET" && path == "/api/pair/status") {
+            } else if ((method == "GET" || method == "POST") && path == "/api/pair/status") {
+                if (body.size() > 4096) {
+                    sendHttpResponse(clientSock, 413, "Payload Too Large", "application/json; charset=utf-8",
+                                     "{\"ok\":false,\"error\":\"Payload Too Large (max 4KB)\"}", corsOrigin);
+                    CLOSESOCKET(clientSock);
+                    return;
+                }
                 if (!lan) {
                     sendHttpResponse(clientSock, 403, "Forbidden", "application/json; charset=utf-8",
                                      "{\"ok\":false,\"error\":\"LAN mode is not enabled on host\"}", corsOrigin);
@@ -620,7 +648,11 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                         std::string pe;
                         if (parseRequestBody(body, bj, pe)) reqId = getOptionalString(bj, "requestId");
                     }
-                    auto statusReq = pairingMgr.getRequestStatus(reqId);
+                    PendingPairRequest statusReq;
+                    {
+                        std::lock_guard<std::recursive_mutex> pLock(pairingMutex);
+                        statusReq = pairingMgr.getRequestStatus(reqId);
+                    }
                     if (reqId.empty() || statusReq.requestId.empty()) {
                         sendHttpResponse(clientSock, 404, "Not Found", "application/json; charset=utf-8",
                                          "{\"ok\":false,\"status\":\"unknown\",\"error\":\"Unknown or expired pairing request\"}",
@@ -668,7 +700,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                         sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
                                          "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + "}", corsOrigin);
                         CLOSESOCKET(clientSock);
-                        continue;
+                        return;
                     }
                     std::string reqId = getOptionalString(bodyJson, "requestId");
                     std::string action = getOptionalString(bodyJson, "action");
@@ -680,9 +712,13 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                                          "{\"ok\":false,\"error\":\"Missing or unknown action. Must be 'allow' or 'deny'\"}",
                                          corsOrigin);
                         CLOSESOCKET(clientSock);
-                        continue;
+                        return;
                     }
-                    bool ok = pairingMgr.decideRequest(reqId, isAllow, label);
+                    bool ok = false;
+                    {
+                        std::lock_guard<std::recursive_mutex> pLock(pairingMutex);
+                        ok = pairingMgr.decideRequest(reqId, isAllow, label);
+                    }
                     sendHttpResponse(clientSock, ok ? 200 : 400, ok ? "OK" : "Bad Request", "application/json; charset=utf-8",
                                      "{\"ok\":" + std::string(ok ? "true" : "false") + ",\"action\":\"" + action + "\"}",
                                      corsOrigin);
@@ -692,7 +728,11 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                     sendHttpResponse(clientSock, 403, "Forbidden", "application/json",
                                      "{\"ok\":false,\"error\":\"Forbidden\"}", corsOrigin);
                 } else {
-                    auto peers = pairingMgr.listPeers();
+                    std::vector<PairedPeer> peers;
+                    {
+                        std::lock_guard<std::recursive_mutex> pLock(pairingMutex);
+                        peers = pairingMgr.listPeers();
+                    }
                     std::ostringstream oss;
                     oss << "{\"ok\":true,\"peers\":[";
                     for (size_t i = 0; i < peers.size(); ++i) {
@@ -716,11 +756,15 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                         sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
                                          "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + "}", corsOrigin);
                         CLOSESOCKET(clientSock);
-                        continue;
+                        return;
                     }
                     std::string id = getOptionalString(bodyJson, "id");
                     std::string tok = getOptionalString(bodyJson, "token");
-                    bool ok = pairingMgr.revokePeer(!id.empty() ? id : tok);
+                    bool ok = false;
+                    {
+                        std::lock_guard<std::recursive_mutex> pLock(pairingMutex);
+                        ok = pairingMgr.revokePeer(!id.empty() ? id : tok);
+                    }
                     sendHttpResponse(clientSock, ok ? 200 : 404, ok ? "OK" : "Not Found", "application/json; charset=utf-8",
                                      "{\"ok\":" + std::string(ok ? "true" : "false") + ",\"message\":\"" +
                                      (ok ? "Peer access revoked" : "Peer not found") + "\"}",
@@ -787,13 +831,13 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                             sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
                                              "{\"ok\":false,\"error\":\"File does not exist\",\"snapshot\":" + getSnapJson() + "}", corsOrigin);
                             CLOSESOCKET(clientSock);
-                            continue;
+                            return;
                         }
                         if (fs::is_directory(full)) {
                             sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
                                              "{\"ok\":false,\"error\":\"Cannot delete directory with file delete\",\"snapshot\":" + getSnapJson() + "}", corsOrigin);
                             CLOSESOCKET(clientSock);
-                            continue;
+                            return;
                         }
                         std::error_code ec;
                         fs::remove(full, ec);
@@ -801,7 +845,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                             sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
                                              "{\"ok\":false,\"error\":" + jsonString(ec.message()) + ",\"snapshot\":" + getSnapJson() + "}", corsOrigin);
                             CLOSESOCKET(clientSock);
-                            continue;
+                            return;
                         }
                         std::string snap = getSnapJson();
                         sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
@@ -851,7 +895,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                                 sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
                                                  "{\"ok\":false,\"error\":\"Path does not exist\",\"snapshot\":" + getSnapJson() + "}", corsOrigin);
                                 CLOSESOCKET(clientSock);
-                                continue;
+                                return;
                             }
                         }
                         repo->unstage(p, true);
@@ -1181,6 +1225,114 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
         }
 
         CLOSESOCKET(clientSock);
+}
+
+void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool lan) {
+#ifdef _WIN32
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        throw MiniGitException("failed to initialize Windows sockets");
+    }
+#endif
+
+    PairingManager pairingMgr;
+
+    socket_t serverSock = INVALID_SOCKET;
+    int boundPort = -1;
+
+    for (int port = preferredPort; port < preferredPort + 30; ++port) {
+        socket_t s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (!ISVALIDSOCKET(s)) continue;
+
+        int opt = 1;
+#ifdef _WIN32
+        setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
+#else
+        setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+#endif
+
+        sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        if (lan) {
+            addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        } else {
+            addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+        }
+        addr.sin_port = htons(static_cast<uint16_t>(port));
+
+        if (bind(s, (struct sockaddr*)&addr, sizeof(addr)) == 0 && listen(s, 10) == 0) {
+            serverSock = s;
+            boundPort = port;
+            break;
+        }
+        CLOSESOCKET(s);
+    }
+
+    if (!ISVALIDSOCKET(serverSock)) {
+#ifdef _WIN32
+        WSACleanup();
+#endif
+        throw MiniGitException("failed to bind server to a local port in range " +
+                               std::to_string(preferredPort) + "-" + std::to_string(preferredPort + 30));
+    }
+
+    std::string repoName = repo->root().filename().string();
+    std::string serverUrl = "http://127.0.0.1:" + std::to_string(boundPort) + "/";
+    std::string lanIp = lan ? getLocalLanIp() : "127.0.0.1";
+    std::string lanUrl = "http://" + lanIp + ":" + std::to_string(boundPort) + "/";
+
+    std::cout << "\n============================================================\n"
+              << "  Mini-Git Web Studio & Interactive Local Server\n"
+              << "============================================================\n"
+              << "  * Repository: " << repoName << "\n"
+              << "  * Studio URL: " << serverUrl << "\n";
+    if (lan) {
+        std::cout << "  * P2P / LAN:  Enabled (0.0.0.0:" << boundPort << ")\n"
+                  << "  * LAN URL:    " << lanUrl << "\n"
+                  << "  * Pair Code:  " << pairingMgr.currentCode() << " (expires in 5 min)\n";
+    } else {
+        std::cout << "  * P2P / LAN:  Disabled (local only). Pass --lan to enable.\n";
+    }
+    std::cout << "  * Mode:       Point-and-click (Zero CLI commands required)\n"
+              << "------------------------------------------------------------\n"
+              << "  Ready! You can stage, commit, branch, diff and merge\n"
+              << "  directly from your browser.\n"
+              << "  Press Ctrl+C in terminal to stop server.\n"
+              << "============================================================\n\n";
+
+    if (openBrowser) {
+        openBrowserUrl(serverUrl);
+    }
+
+    std::recursive_mutex repoMutex;
+    std::recursive_mutex pairingMutex;
+    std::atomic<int> activeConns{0};
+    static constexpr int MAX_CONCURRENT_CONNS = 32;
+
+    HttpServerThreadPool pool(8);
+
+    while (true) {
+        sockaddr_in clientAddr{};
+#ifdef _WIN32
+        int clientLen = sizeof(clientAddr);
+#else
+        socklen_t clientLen = sizeof(clientAddr);
+#endif
+        socket_t clientSock = accept(serverSock, (struct sockaddr*)&clientAddr, &clientLen);
+        if (!ISVALIDSOCKET(clientSock)) break;
+
+        if (activeConns.load() >= MAX_CONCURRENT_CONNS) {
+            sendHttpResponse(clientSock, 503, "Service Unavailable", "application/json",
+                             "{\"ok\":false,\"error\":\"Server busy, maximum connections reached\"}");
+            CLOSESOCKET(clientSock);
+            continue;
+        }
+
+        activeConns++;
+        pool.enqueue([clientSock, clientAddr, boundPort, lan, &pairingMgr, repo, &repoMutex, &pairingMutex, repoName, lanUrl, &activeConns]() {
+            handleClientConnection(clientSock, clientAddr, boundPort, lan, pairingMgr, repo, repoMutex, pairingMutex, repoName, lanUrl);
+            activeConns--;
+        });
     }
 
     CLOSESOCKET(serverSock);

@@ -289,15 +289,8 @@ void ReflogCmd::execute(Repository* repo, const Args& args) {
     }
 }
 
-static bool openInBrowser(const fs::path& file) {
-#if defined(_WIN32)
-    std::string cmd = "start \"\" \"" + file.string() + "\"";
-#elif defined(__APPLE__)
-    std::string cmd = "open \"" + file.string() + "\"";
-#else
-    std::string cmd = "xdg-open \"" + file.string() + "\" >/dev/null 2>&1";
-#endif
-    return std::system(cmd.c_str()) == 0;
+static bool openReportInBrowser(const fs::path& file) {
+    return openInBrowser(file.string());
 }
 
 void HtmlCmd::execute(Repository* repo, const Args& args) {
@@ -311,7 +304,7 @@ void HtmlCmd::execute(Repository* repo, const Args& args) {
     writeFile(out, HtmlExporter::render(repo->snapshot(), repo->root().filename().string(), true));
     cout << "Report written to " << out.generic_string() << "\n";
     if (open) {
-        if (openInBrowser(out)) cout << "Opened in your default browser.\n";
+        if (openReportInBrowser(out)) cout << "Opened in your default browser.\n";
         else cout << "Could not launch a browser; open the file above manually.\n";
     }
 }

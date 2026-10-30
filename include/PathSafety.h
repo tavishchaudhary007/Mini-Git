@@ -37,6 +37,16 @@ inline bool isLinkOrSymlink(const std::filesystem::path& p) {
     return false;
 }
 
+inline void ensureNoSymlinkComponents(const std::filesystem::path& root, const std::filesystem::path& relPath) {
+    std::filesystem::path curr = root;
+    for (const auto& part : relPath) {
+        curr /= part;
+        if (isLinkOrSymlink(curr)) {
+            throw MiniGitException("path component is a symlink: " + relPath.generic_string());
+        }
+    }
+}
+
 inline bool isSafeRepoPath(const std::string& path) {
     // Rejects empty paths
     if (path.empty()) return false;

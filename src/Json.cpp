@@ -105,6 +105,14 @@ class JsonParser {
     const std::string& src_;
     size_t pos_{0};
     std::string err_;
+    int depth_{0};
+    static constexpr int MAX_DEPTH = 64;
+
+    struct DepthGuard {
+        int& d;
+        explicit DepthGuard(int& depth) : d(depth) { ++d; }
+        ~DepthGuard() { --d; }
+    };
 
     void setError(const std::string& msg) {
         if (err_.empty()) {
@@ -288,6 +296,11 @@ class JsonParser {
     }
 
     bool parseArray(JsonValue& out) {
+        if (depth_ >= MAX_DEPTH) {
+            setError("maximum nesting depth exceeded (max 64)");
+            return false;
+        }
+        DepthGuard guard(depth_);
         pos_++; // skip '['
         std::vector<JsonValue> arr;
         skipWhitespace();
@@ -322,6 +335,11 @@ class JsonParser {
     }
 
     bool parseObject(JsonValue& out) {
+        if (depth_ >= MAX_DEPTH) {
+            setError("maximum nesting depth exceeded (max 64)");
+            return false;
+        }
+        DepthGuard guard(depth_);
         pos_++; // skip '{'
         std::map<std::string, JsonValue> obj;
         skipWhitespace();

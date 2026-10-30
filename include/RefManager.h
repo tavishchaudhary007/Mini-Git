@@ -18,7 +18,7 @@ public:
     Hash headCommit() const;            // empty Hash if no commits yet
     void updateHead(const Hash& h) const;
 
-    bool branchExists(const std::string& n) const { return fs::exists(branchFile(n)); }
+    bool branchExists(const std::string& n) const;
     static bool isValidBranchName(const std::string& n);
     Hash branchTip(const std::string& n) const;
     void createBranch(const std::string& n, const Hash& at) const;
