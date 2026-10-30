@@ -72,19 +72,19 @@ public:
     std::string str() const { return buffer.str(); }
 };
 
-static std::string httpExchange(const std::string& host, int port, const std::string& rawReq) {
+static std::string httpExchange(const std::string& host, int port, const std::string& rawReq, int timeoutSec = 3) {
     socket_t s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (s == (socket_t)-1) {
         return "";
     }
 
 #ifdef _WIN32
-    DWORD timeout = 3000;
+    DWORD timeout = static_cast<DWORD>(timeoutSec * 1000);
     setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
     setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
 #else
-    struct timeval tv;
-    tv.tv_sec = 3;
+    struct timeval tv{};
+    tv.tv_sec = timeoutSec;
     tv.tv_usec = 0;
     setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
     setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tv, sizeof(tv));
@@ -100,7 +100,12 @@ static std::string httpExchange(const std::string& host, int port, const std::st
         return "";
     }
 
-    send(s, rawReq.data(), static_cast<int>(rawReq.size()), 0);
+    size_t totalSent = 0;
+    while (totalSent < rawReq.size()) {
+        int sent = send(s, rawReq.data() + totalSent, static_cast<int>(rawReq.size() - totalSent), 0);
+        if (sent <= 0) break;
+        totalSent += static_cast<size_t>(sent);
+    }
 
     std::string response;
     char buf[4096];
@@ -1592,6 +1597,272 @@ void test_r4_security_and_fixes() {
     std::cout << "PASSED" << std::endl;
 }
 
+// =========================================================================
+// Test L2: Branch names "HEAD", starting with "-", and ending in ".lock" rejected
+// =========================================================================
+void test_l2_branch_name_validation() {
+    std::cout << "[Test L2] Branch name validation (HEAD, -x, .lock)... " << std::flush;
+
+    // 1. Check isValidBranchName directly
+    CHECK(!RefManager::isValidBranchName("HEAD"));
+    CHECK(!RefManager::isValidBranchName("-x"));
+    CHECK(!RefManager::isValidBranchName("-feature"));
+    CHECK(!RefManager::isValidBranchName("-"));
+    CHECK(!RefManager::isValidBranchName("branch.lock"));
+    CHECK(!RefManager::isValidBranchName("test.lock"));
+    CHECK(!RefManager::isValidBranchName(".lock"));
+    CHECK(!RefManager::isValidBranchName(""));
+    CHECK(!RefManager::isValidBranchName(".hidden"));
+
+    CHECK(RefManager::isValidBranchName("main"));
+    CHECK(RefManager::isValidBranchName("feature-1"));
+    CHECK(RefManager::isValidBranchName("dev_test"));
+    CHECK(RefManager::isValidBranchName("v1.0"));
+    CHECK(RefManager::isValidBranchName("lock")); // does not end with .lock
+
+    // 2. Check via /api/branch/create
+    fs::path dir = fs::current_path() / "test_repo_l2";
+    cleanDir(dir);
+    Repository::init(dir.string());
+    Repository repo(dir.string());
+    writeFile(dir / "hello.txt", "world\n");
+    repo.add("hello.txt", true);
+    repo.commit("initial");
+
+    int testPort = 19940;
+    std::thread srvThread([&]() {
+        try {
+            HttpServer::run(&repo, testPort, false, false);
+        } catch (...) {}
+    });
+    srvThread.detach();
+
+    for (int retry = 0; retry < 50; ++retry) {
+        std::string ping = httpExchange("127.0.0.1", testPort,
+            "GET /api/snapshot HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) + "\r\nConnection: close\r\n\r\n");
+        if (ping.find("200 OK") != std::string::npos) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
+    // Creating "HEAD" branch must fail with 400 Bad Request
+    {
+        std::string body = "{\"name\":\"HEAD\"}";
+        std::string req = "POST /api/branch/create HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
+            "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(body.size()) + "\r\nConnection: close\r\n\r\n" + body;
+        std::string resp = httpExchange("127.0.0.1", testPort, req);
+        CHECK(resp.find("400 Bad Request") != std::string::npos);
+        CHECK(resp.find("\"ok\":false") != std::string::npos);
+    }
+
+    // Creating "-x" branch must fail with 400 Bad Request
+    {
+        std::string body = "{\"name\":\"-x\"}";
+        std::string req = "POST /api/branch/create HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
+            "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(body.size()) + "\r\nConnection: close\r\n\r\n" + body;
+        std::string resp = httpExchange("127.0.0.1", testPort, req);
+        CHECK(resp.find("400 Bad Request") != std::string::npos);
+        CHECK(resp.find("\"ok\":false") != std::string::npos);
+    }
+
+    // Creating "branch.lock" must fail with 400 Bad Request
+    {
+        std::string body = "{\"name\":\"branch.lock\"}";
+        std::string req = "POST /api/branch/create HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
+            "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(body.size()) + "\r\nConnection: close\r\n\r\n" + body;
+        std::string resp = httpExchange("127.0.0.1", testPort, req);
+        CHECK(resp.find("400 Bad Request") != std::string::npos);
+        CHECK(resp.find("\"ok\":false") != std::string::npos);
+    }
+
+    // Creating valid branch succeeds
+    {
+        std::string body = "{\"name\":\"feature-valid\"}";
+        std::string req = "POST /api/branch/create HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
+            "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(body.size()) + "\r\nConnection: close\r\n\r\n" + body;
+        std::string resp = httpExchange("127.0.0.1", testPort, req);
+        CHECK(resp.find("200 OK") != std::string::npos);
+        CHECK(resp.find("\"ok\":true") != std::string::npos);
+    }
+
+    removeDir(dir);
+    std::cout << "PASSED" << std::endl;
+}
+
+// =========================================================================
+// Test L4: /api/pair/status returns 404 on unknown requestId, 200 on denial
+// =========================================================================
+void test_l4_pairing_status_unknown_vs_denied() {
+    std::cout << "[Test L4] Pairing status: 404 unknown vs 200 real denial... " << std::flush;
+
+    fs::path dir = fs::current_path() / "test_repo_l4";
+    cleanDir(dir);
+    Repository::init(dir.string());
+    Repository repo(dir.string());
+    writeFile(dir / "hello.txt", "world\n");
+    repo.add("hello.txt", true);
+    repo.commit("initial");
+
+    int testPort = 19941;
+    std::thread srvThread([&]() {
+        try {
+            HttpServer::run(&repo, testPort, false, true); // lan = true
+        } catch (...) {}
+    });
+    srvThread.detach();
+
+    for (int retry = 0; retry < 50; ++retry) {
+        std::string ping = httpExchange("127.0.0.1", testPort,
+            "GET /api/snapshot HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) + "\r\nConnection: close\r\n\r\n");
+        if (ping.find("200 OK") != std::string::npos) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
+    // 1. Unknown requestId: GET /api/pair/status?requestId=req_unknown_xyz -> 404 Not Found
+    {
+        std::string req = "GET /api/pair/status?requestId=req_unknown_xyz HTTP/1.1\r\nHost: 127.0.0.1:" +
+            std::to_string(testPort) + "\r\nConnection: close\r\n\r\n";
+        std::string resp = httpExchange("127.0.0.1", testPort, req);
+        CHECK(resp.find("404 Not Found") != std::string::npos);
+        size_t bpos = resp.find("\r\n\r\n");
+        CHECK(bpos != std::string::npos);
+        JsonValue j = JsonValue::parse(resp.substr(bpos + 4));
+        CHECK(j["ok"].as_bool() == false);
+        CHECK(j["status"].as_string() == "unknown");
+        CHECK(j["error"].as_string() == "Unknown or expired pairing request");
+    }
+
+    // 2. Real denial: valid code submitted, host denies, status is "denied" with 200 OK
+    {
+        std::string codeReq = "GET /api/pair/code HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) + "\r\nConnection: close\r\n\r\n";
+        std::string codeResp = httpExchange("127.0.0.1", testPort, codeReq);
+        size_t cp = codeResp.find("\r\n\r\n");
+        CHECK(cp != std::string::npos);
+        std::string code = JsonValue::parse(codeResp.substr(cp + 4))["code"].as_string();
+        CHECK(!code.empty());
+
+        std::string subBody = "{\"code\":\"" + code + "\",\"peerName\":\"Bob\"}";
+        std::string subReq = "POST /api/pair HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
+            "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(subBody.size()) + "\r\nConnection: close\r\n\r\n" + subBody;
+        std::string subResp = httpExchange("127.0.0.1", testPort, subReq);
+        size_t sp = subResp.find("\r\n\r\n");
+        CHECK(sp != std::string::npos);
+        JsonValue sj = JsonValue::parse(subResp.substr(sp + 4));
+        CHECK(sj["ok"].as_bool() == true);
+        std::string reqId = sj["requestId"].as_string();
+        CHECK(!reqId.empty());
+
+        // Host denies
+        std::string denyBody = "{\"requestId\":\"" + reqId + "\",\"action\":\"deny\"}";
+        std::string denyReq = "POST /api/pair/decide HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
+            "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(denyBody.size()) + "\r\nConnection: close\r\n\r\n" + denyBody;
+        std::string denyResp = httpExchange("127.0.0.1", testPort, denyReq);
+        CHECK(denyResp.find("200 OK") != std::string::npos);
+
+        // Peer checks status -> 200 OK with status: "denied"
+        std::string statReq = "GET /api/pair/status?requestId=" + reqId + " HTTP/1.1\r\nHost: 127.0.0.1:" +
+            std::to_string(testPort) + "\r\nConnection: close\r\n\r\n";
+        std::string statResp = httpExchange("127.0.0.1", testPort, statReq);
+        CHECK(statResp.find("200 OK") != std::string::npos);
+        size_t stp = statResp.find("\r\n\r\n");
+        CHECK(stp != std::string::npos);
+        JsonValue statJson = JsonValue::parse(statResp.substr(stp + 4));
+        CHECK(statJson["ok"].as_bool() == false);
+        CHECK(statJson["status"].as_string() == "denied");
+        CHECK(statJson["error"].as_string() == "Host denied the pairing request.");
+    }
+
+    removeDir(dir);
+    std::cout << "PASSED" << std::endl;
+}
+
+// =========================================================================
+// Test M2: Idle socket timeout (~5s) & 431 Request Header Fields Too Large
+// =========================================================================
+void test_m2_server_idle_timeout_and_oversized_headers() {
+    std::cout << "[Test M2] Idle socket timeout & oversized header 431... " << std::flush;
+
+    fs::path dir = fs::current_path() / "test_repo_m2";
+    cleanDir(dir);
+    Repository::init(dir.string());
+    Repository repo(dir.string());
+    writeFile(dir / "hello.txt", "world\n");
+    repo.add("hello.txt", true);
+    repo.commit("initial");
+
+    int testPort = 19942;
+    std::thread srvThread([&]() {
+        try {
+            HttpServer::run(&repo, testPort, false, true); // lan = true
+        } catch (...) {}
+    });
+    srvThread.detach();
+
+    for (int retry = 0; retry < 50; ++retry) {
+        std::string ping = httpExchange("127.0.0.1", testPort,
+            "GET /api/snapshot HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) + "\r\nConnection: close\r\n\r\n");
+        if (ping.find("200 OK") != std::string::npos) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
+    // 1. Oversized header (> 64 KB) returns 431
+    {
+        std::string bigHeader(70000, 'A');
+        std::string overReq = "GET /api/snapshot HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
+            "\r\nX-Big-Header: " + bigHeader + "\r\nConnection: close\r\n\r\n";
+        std::string overResp = httpExchange("127.0.0.1", testPort, overReq, 5);
+        CHECK(overResp.find("431") != std::string::npos);
+    }
+
+    // 2. Open a raw socket, send NOTHING, verify normal GET succeeds within ~6 s
+    {
+        socket_t idleSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        CHECK(idleSock != (socket_t)-1);
+
+        sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(static_cast<uint16_t>(testPort));
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+        int connectRes = connect(idleSock, (struct sockaddr*)&addr, sizeof(addr));
+        CHECK(connectRes == 0);
+        // Do not send anything on idleSock!
+
+        auto tStart = std::chrono::steady_clock::now();
+        std::string snapReq = "GET /api/snapshot HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
+            "\r\nConnection: close\r\n\r\n";
+        std::string snapResp = httpExchange("127.0.0.1", testPort, snapReq, 10);
+        auto tElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - tStart).count();
+
+        CHECK(snapResp.find("200 OK") != std::string::npos);
+        CHECK(snapResp.find("repoName") != std::string::npos);
+        // Completed within about 6 s (idle timeout is ~5000 ms)
+        CHECK(tElapsed >= 4000 && tElapsed <= 7500);
+
+        CLOSESOCK(idleSock);
+    }
+
+    // 3. Partial request dropped: server doesn\'t hang, subsequent request succeeds
+    {
+        socket_t partialSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        sockaddr_in paddr{};
+        paddr.sin_family = AF_INET;
+        paddr.sin_port = htons(static_cast<uint16_t>(testPort));
+        paddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+        if (connect(partialSock, (struct sockaddr*)&paddr, sizeof(paddr)) == 0) {
+            std::string partialReq = "POST /api/branch/create HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
+                "\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n{\"name\":";
+            send(partialSock, partialReq.data(), static_cast<int>(partialReq.size()), 0);
+            CLOSESOCK(partialSock);
+        }
+        std::string ping = httpExchange("127.0.0.1", testPort,
+            "GET /api/snapshot HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) + "\r\nConnection: close\r\n\r\n");
+        CHECK(ping.find("200 OK") != std::string::npos);
+    }
+
+    removeDir(dir);
+    std::cout << "PASSED" << std::endl;
+}
+
 int main() {
 #ifdef _WIN32
     WSADATA wsaData;
@@ -1613,6 +1884,9 @@ int main() {
     test_git_export_identity_and_up_to_date();
     test_http_server_endpoints();
     test_r4_security_and_fixes();
+    test_l2_branch_name_validation();
+    test_l4_pairing_status_unknown_vs_denied();
+    test_m2_server_idle_timeout_and_oversized_headers();
 
     std::cout << "\nALL CLI & SERVER TESTS PASSED SUCCESSFULLY!\n";
     return 0;

@@ -288,6 +288,18 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
         socket_t clientSock = accept(serverSock, (struct sockaddr*)&clientAddr, &clientLen);
         if (!ISVALIDSOCKET(clientSock)) break;
 
+#ifdef _WIN32
+        DWORD sockTimeout = 5000;
+        setsockopt(clientSock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&sockTimeout, sizeof(sockTimeout));
+        setsockopt(clientSock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&sockTimeout, sizeof(sockTimeout));
+#else
+        struct timeval sockTv{};
+        sockTv.tv_sec = 5;
+        sockTv.tv_usec = 0;
+        setsockopt(clientSock, SOL_SOCKET, SO_RCVTIMEO, &sockTv, sizeof(sockTv));
+        setsockopt(clientSock, SOL_SOCKET, SO_SNDTIMEO, &sockTv, sizeof(sockTv));
+#endif
+
         char clientIpStr[INET_ADDRSTRLEN] = "127.0.0.1";
         inet_ntop(AF_INET, &clientAddr.sin_addr, clientIpStr, sizeof(clientIpStr));
 
@@ -298,28 +310,51 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
         char buf[8192];
         int bytesRead = 0;
         bool payloadTooLarge = false;
+        bool headersTooLarge = false;
+        bool requestComplete = false;
 
         while ((bytesRead = recv(clientSock, buf, sizeof(buf) - 1, 0)) > 0) {
             buf[bytesRead] = '\0';
             request.append(buf, bytesRead);
-            if (request.find("\r\n\r\n") != std::string::npos) {
+
+            size_t headerEnd = request.find("\r\n\r\n");
+            if (headerEnd == std::string::npos) {
+                if (request.size() > 64 * 1024) {
+                    headersTooLarge = true;
+                    break;
+                }
+            } else {
+                if (headerEnd > 64 * 1024) {
+                    headersTooLarge = true;
+                    break;
+                }
                 // Header complete. Check Content-Length case-insensitively
                 std::string clStr = getHeaderValue(request, "Content-Length");
+                size_t cl = 0;
                 if (!clStr.empty()) {
                     try {
-                        size_t cl = std::stoull(clStr);
-                        if (cl > 50 * 1024 * 1024) { // 50 MB limit
-                            payloadTooLarge = true;
-                            break;
-                        }
-                        size_t bodyStart = request.find("\r\n\r\n") + 4;
-                        if (request.size() - bodyStart < cl) {
-                            continue; // read more bytes
-                        }
-                    } catch (...) {}
+                        cl = std::stoull(clStr);
+                    } catch (...) {
+                        cl = 0;
+                    }
+                    if (cl > 50 * 1024 * 1024) { // 50 MB limit
+                        payloadTooLarge = true;
+                        break;
+                    }
                 }
-                break;
+                size_t bodyStart = headerEnd + 4;
+                if (request.size() - bodyStart >= cl) {
+                    requestComplete = true;
+                    break;
+                }
             }
+        }
+
+        if (headersTooLarge) {
+            sendHttpResponse(clientSock, 431, "Request Header Fields Too Large", "application/json",
+                             "{\"ok\":false,\"error\":\"Request Header Fields Too Large (max 64KB)\"}");
+            CLOSESOCKET(clientSock);
+            continue;
         }
 
         if (payloadTooLarge) {
@@ -329,7 +364,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
             continue;
         }
 
-        if (request.empty()) {
+        if (!requestComplete) {
             CLOSESOCKET(clientSock);
             continue;
         }
@@ -586,7 +621,11 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                         if (parseRequestBody(body, bj, pe)) reqId = getOptionalString(bj, "requestId");
                     }
                     auto statusReq = pairingMgr.getRequestStatus(reqId);
-                    if (statusReq.status == PendingPairRequest::PENDING) {
+                    if (reqId.empty() || statusReq.requestId.empty()) {
+                        sendHttpResponse(clientSock, 404, "Not Found", "application/json; charset=utf-8",
+                                         "{\"ok\":false,\"status\":\"unknown\",\"error\":\"Unknown or expired pairing request\"}",
+                                         corsOrigin);
+                    } else if (statusReq.status == PendingPairRequest::PENDING) {
                         sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
                                          "{\"ok\":true,\"status\":\"pending\"}", corsOrigin);
                     } else if (statusReq.status == PendingPairRequest::APPROVED) {
