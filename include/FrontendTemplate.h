@@ -1070,6 +1070,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         let IS_SERVER_MODE = window.location.protocol.startsWith('http');
         let IS_STATIC_EXPORT = (window.location.protocol === 'file:') || (window.MINIGIT_LIVE && window.MINIGIT_LIVE.__staticExport) || (!!window.__staticExport);
         let LATEST_SNAPSHOT_ETAG = null;
+        let STATE_SEQ = 0;
         let IS_LAN_MODE = false;
         let _lanPollTimer = null;
         function updateLanMode(lan) {
@@ -1201,6 +1202,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
 
         async function apiPost(endpoint, payload) {
             if (!IS_SERVER_MODE) return null;
+            STATE_SEQ++;
             try {
                 const res = await fetch('/api/' + endpoint, {
                     method: 'POST',
@@ -1208,17 +1210,15 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                     body: JSON.stringify(payload || {})
                 });
                 const data = await res.json();
+                const etag = res.headers.get('ETag') || (data && (data.etag || (data.snapshot && data.snapshot.version ? `"${data.snapshot.version}"` : null)));
+                if (etag) LATEST_SNAPSHOT_ETAG = etag;
                 const peerRefs = data.peerRefs || (data.result && data.result.peerRefs);
                 if (peerRefs && peerRefs.length > 0) {
                     const peerBranch = peerRefs[0];
                     showToast(data.message || data.error || `Peer tip saved as ${peerBranch}`, 'info', {
                         label: `Merge ${peerBranch}`,
                         onClick: async () => {
-                            showToast(`Merging ${peerBranch}...`);
-                            const mRes = await apiPost('merge', { branch: peerBranch });
-                            if (mRes && mRes.ok) {
-                                showToast(mRes.result || `Merged ${peerBranch} successfully!`);
-                            }
+                            await mergeBranchUI(peerBranch);
                         }
                     });
                 } else if (!data.ok) {
@@ -1250,22 +1250,33 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             return JSON.stringify(p) !== JSON.stringify(n);
         }
 
+        let IS_SNAPSHOT_REFRESHING = false;
+
         async function refreshRepositorySnapshot(silent = false) {
             if (!IS_SERVER_MODE) return;
+            if (IS_SNAPSHOT_REFRESHING) return;
+            IS_SNAPSHOT_REFRESHING = true;
+            const seq = STATE_SEQ;
             try {
                 const headers = {};
                 if (LATEST_SNAPSHOT_ETAG) {
                     headers['If-None-Match'] = LATEST_SNAPSHOT_ETAG;
                 }
                 const res = await fetch('/api/snapshot', { headers });
+                if (seq !== STATE_SEQ) {
+                    return;
+                }
                 if (res.status === 304) {
                     if (!silent) showToast("Repository synchronized (no changes)");
                     return;
                 }
                 if (res.ok) {
                     const etag = res.headers.get('ETag');
-                    if (etag) LATEST_SNAPSHOT_ETAG = etag;
                     const snap = await res.json();
+                    if (seq !== STATE_SEQ) {
+                        return;
+                    }
+                    if (etag) LATEST_SNAPSHOT_ETAG = etag;
                     const isInitial = (!VFS || Object.keys(VFS).length === 0);
                     const changed = hasRepositorySnapshotChanged(window.MINIGIT_LIVE, snap);
                     window.MINIGIT_LIVE = snap;
@@ -1275,8 +1286,10 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                     if (!silent) showToast("Repository synchronized");
                     try {
                         const rRes = await fetch('/api/reflog');
+                        if (seq !== STATE_SEQ) return;
                         if (rRes.ok) {
                             const rData = await rRes.json();
+                            if (seq !== STATE_SEQ) return;
                             if (rData && Array.isArray(rData.reflog)) {
                                 SERVER_REFLOG_COUNT = rData.reflog.length;
                                 const rCountEl = document.getElementById('dashReflogCount');
@@ -1289,6 +1302,8 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 }
             } catch (err) {
                 if (!silent) showToast("Failed to connect to local server: " + err.message, "error");
+            } finally {
+                IS_SNAPSHOT_REFRESHING = false;
             }
         }
 
@@ -2084,6 +2099,70 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 if (ACTIVE_FILE === filepath) syncEditorWithActiveFile();
                 return true;
             }
+        }
+
+        function promptDirtySwitchChoice(actionLabel = "switching branches") {
+            return new Promise((resolve) => {
+                let modal = document.getElementById('dirtySwitchModal');
+                if (!modal) {
+                    modal = document.createElement('div');
+                    modal.id = 'dirtySwitchModal';
+                    modal.className = 'fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center';
+                    modal.innerHTML = `
+                        <div class="bg-theme-card border border-theme-border rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+                            <h3 class="text-sm font-semibold text-theme-text">Unsaved Changes</h3>
+                            <p id="dirtySwitchModalText" class="text-xs text-theme-muted">You have unsaved changes in open files. Would you like to save them before switching branches, discard them, or cancel?</p>
+                            <div class="flex justify-end space-x-2 pt-2">
+                                <button id="btnDirtyCancel" class="px-4 py-1.5 rounded-full border border-theme-border text-xs text-theme-text hover:bg-zinc-100 dark:hover:bg-zinc-800 transition">Cancel</button>
+                                <button id="btnDirtyDiscard" class="px-4 py-1.5 rounded-full bg-rose-600 hover:bg-rose-700 text-xs text-white transition">Discard</button>
+                                <button id="btnDirtySave" class="px-4 py-1.5 rounded-full bg-black dark:bg-white text-white dark:text-black text-xs font-semibold hover:opacity-90 transition">Save</button>
+                            </div>
+                        </div>
+                    `;
+                    document.body.appendChild(modal);
+                }
+                const textEl = document.getElementById('dirtySwitchModalText');
+                if (textEl) {
+                    textEl.textContent = `You have unsaved changes in open files. Would you like to save them before ${actionLabel || 'proceeding'}, discard them, or cancel?`;
+                }
+                modal.classList.remove('hidden');
+
+                const cleanup = (choice) => {
+                    modal.classList.add('hidden');
+                    resolve(choice);
+                };
+
+                document.getElementById('btnDirtyCancel').onclick = () => cleanup('cancel');
+                document.getElementById('btnDirtyDiscard').onclick = () => cleanup('discard');
+                document.getElementById('btnDirtySave').onclick = () => cleanup('save');
+            });
+        }
+
+        async function confirmDirtyBuffersBefore(actionLabel = "action") {
+            if (!hasUnsavedEdits()) return true;
+            const choice = await promptDirtySwitchChoice(actionLabel);
+            if (choice === 'cancel') {
+                return false;
+            }
+            if (choice === 'save') {
+                for (const fp of Object.keys(DIRTY_BUFFERS)) {
+                    const ok = await saveFileBuffer(fp);
+                    if (!ok) {
+                        showToast(`Failed to save '${fp}'. ${actionLabel || 'Action'} aborted.`, "error");
+                        return false;
+                    }
+                }
+                return true;
+            }
+            if (choice === 'discard') {
+                for (const fp of Object.keys(DIRTY_BUFFERS)) {
+                    delete DIRTY_BUFFERS[fp];
+                }
+                syncEditorWithActiveFile();
+                updateUI();
+                return true;
+            }
+            return false;
         }
 
         async function stageFile(filepath) {
@@ -2910,6 +2989,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         }
 
         async function actionTimeTravelRestore() {
+            if (!await confirmDirtyBuffersBefore("restore")) return;
             const c = TIME_TRAVEL_COMMITS[TIME_TRAVEL_INDEX];
             if (!c) return;
             const short = c.hash.substring(0, 7);
@@ -3102,19 +3182,32 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 const res = await fetch('/api/pair/pending');
                 if (res.ok) {
                     const data = await res.json();
-                    if (data.ok && Array.isArray(data.pending) && data.pending.length > 0) {
-                        const req = data.pending[0];
-                        ACTIVE_PENDING_REQUEST_ID = req.id;
-                        const ipEl = document.getElementById('approvalPeerIp');
-                        const originEl = document.getElementById('approvalPeerOrigin');
-                        const nameEl = document.getElementById('approvalPeerName');
-                        const codeEl = document.getElementById('approvalPeerCode');
-                        if (ipEl) ipEl.textContent = req.ip || 'unknown';
-                        if (originEl) originEl.textContent = req.origin || 'local';
-                        if (nameEl) nameEl.textContent = req.peerName ? `${req.peerName} (self-reported)` : 'Teammate (self-reported)';
-                        if (codeEl) codeEl.textContent = req.code || '';
+                    if (data.ok && Array.isArray(data.pending)) {
                         const modal = document.getElementById('hostPairApprovalModal');
-                        if (modal) modal.classList.remove('hidden');
+                        if (ACTIVE_PENDING_REQUEST_ID) {
+                            const stillPending = data.pending.some(r => r.id === ACTIVE_PENDING_REQUEST_ID);
+                            if (!stillPending) {
+                                if (modal) modal.classList.add('hidden');
+                                showToast("Pairing request timed out", "info");
+                                ACTIVE_PENDING_REQUEST_ID = null;
+                                return;
+                            }
+                            return;
+                        }
+
+                        if (!ACTIVE_PENDING_REQUEST_ID && data.pending.length > 0) {
+                            const req = data.pending[0];
+                            ACTIVE_PENDING_REQUEST_ID = req.id;
+                            const ipEl = document.getElementById('approvalPeerIp');
+                            const originEl = document.getElementById('approvalPeerOrigin');
+                            const nameEl = document.getElementById('approvalPeerName');
+                            const codeEl = document.getElementById('approvalPeerCode');
+                            if (ipEl) ipEl.textContent = req.ip || 'unknown';
+                            if (originEl) originEl.textContent = req.origin || 'local';
+                            if (nameEl) nameEl.textContent = req.peerName ? `${req.peerName} (self-reported)` : 'Teammate (self-reported)';
+                            if (codeEl) codeEl.textContent = req.code || '';
+                            if (modal) modal.classList.remove('hidden');
+                        }
                     }
                 }
             } catch (e) {}
@@ -3150,6 +3243,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 showToast("Failed to respond to pairing: " + e.message, "error");
             }
             ACTIVE_PENDING_REQUEST_ID = null;
+            await pollPendingPairRequests();
         }
 
         async function submitPairCodeToPeer() {
@@ -3278,19 +3372,25 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
 
                                 if (LOCAL_PAIR_TIMER) clearInterval(LOCAL_PAIR_TIMER);
 
-                                if (data.isLocked || (data.lockedClientsCount && data.lockedClientsCount > 0)) {
+                                if (data.isInvalidated) {
+                                    if (codeBadge) {
+                                        codeBadge.textContent = "Invalidated";
+                                        codeBadge.className = "text-[10px] font-mono px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950 text-rose-600 dark:text-rose-400 font-bold";
+                                    }
+                                    if (codeStatus) codeStatus.textContent = "Code invalidated (10 failed tries). Click New Code.";
+                                } else if (data.isExpired) {
+                                    if (codeBadge) {
+                                        codeBadge.textContent = "Expired";
+                                        codeBadge.className = "text-[10px] font-mono px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950 text-rose-600 dark:text-rose-400 font-bold";
+                                    }
+                                    if (codeStatus) codeStatus.textContent = "Code expired. Click New Code.";
+                                } else if (data.isLocked || (data.lockedClientsCount && data.lockedClientsCount > 0)) {
                                     const count = data.lockedClientsCount || 1;
                                     if (codeBadge) {
                                         codeBadge.textContent = `${count} client${count > 1 ? 's' : ''} locked`;
                                         codeBadge.className = "text-[10px] font-mono px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950 text-rose-600 dark:text-rose-400 font-bold";
                                     }
                                     if (codeStatus) codeStatus.textContent = `${count} client${count > 1 ? 's' : ''} locked after 5 failed tries. Other devices can still pair.`;
-                                } else if (data.isInvalidated || data.isExpired) {
-                                    if (codeBadge) {
-                                        codeBadge.textContent = data.isInvalidated ? "Invalidated" : "Expired";
-                                        codeBadge.className = "text-[10px] font-mono px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950 text-rose-600 dark:text-rose-400 font-bold";
-                                    }
-                                    if (codeStatus) codeStatus.textContent = data.isInvalidated ? "Code invalidated (10 failed tries). Click New Code." : "Code expired. Click New Code.";
                                 } else if (data.isUsed) {
                                     if (codeBadge) {
                                         codeBadge.textContent = "Used";
@@ -3584,8 +3684,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                                 showToast(res.error || res.message || `Diverged: peer tip saved as ${peerBranch}`, 'warning', {
                                     label: `Merge ${peerBranch}`,
                                     onClick: async () => {
-                                        const mRes = await apiPost('merge', { branch: peerBranch });
-                                        if (mRes && mRes.ok) showToast(mRes.result || `Merged ${peerBranch} successfully!`);
+                                        await mergeBranchUI(peerBranch);
                                     }
                                 });
                                 closeLanSyncModal();
@@ -3754,6 +3853,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         }
 
         async function executePopStash() {
+            if (!await confirmDirtyBuffersBefore("stash pop")) return;
             if (IS_SERVER_MODE) {
                 const res = await apiPost('stash/pop');
                 if (res && res.ok) {
@@ -3850,6 +3950,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         }
 
         async function restoreSafetyNetCommit(hash) {
+            if (!await confirmDirtyBuffersBefore("restore")) return;
             const short = hash.substring(0, 7);
             if (!confirm(`Checkout checkpoint [${short}] (detached HEAD)?\n\nTip: You can create a branch at this checkpoint afterwards.`)) return;
             closeSafetyNetModal();
@@ -4119,6 +4220,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         }
 
         async function mergeBranchUI(targetBranch) {
+            if (!await confirmDirtyBuffersBefore("merge")) return;
             if (!IS_SERVER_MODE) {
                 showToast("Merge is only available in server mode", "warning");
                 return;
@@ -4136,72 +4238,17 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             updateUI();
         }
 
-        function promptDirtySwitchChoice() {
-            return new Promise((resolve) => {
-                let modal = document.getElementById('dirtySwitchModal');
-                if (!modal) {
-                    modal = document.createElement('div');
-                    modal.id = 'dirtySwitchModal';
-                    modal.className = 'fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center';
-                    modal.innerHTML = `
-                        <div class="bg-theme-card border border-theme-border rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
-                            <h3 class="text-sm font-semibold text-theme-text">Unsaved Changes</h3>
-                            <p class="text-xs text-theme-muted">You have unsaved changes in open files. Would you like to save them before switching branches, discard them, or cancel?</p>
-                            <div class="flex justify-end space-x-2 pt-2">
-                                <button id="btnDirtyCancel" class="px-4 py-1.5 rounded-full border border-theme-border text-xs text-theme-text hover:bg-zinc-100 dark:hover:bg-zinc-800 transition">Cancel</button>
-                                <button id="btnDirtyDiscard" class="px-4 py-1.5 rounded-full bg-rose-600 hover:bg-rose-700 text-xs text-white transition">Discard</button>
-                                <button id="btnDirtySave" class="px-4 py-1.5 rounded-full bg-black dark:bg-white text-white dark:text-black text-xs font-semibold hover:opacity-90 transition">Save</button>
-                            </div>
-                        </div>
-                    `;
-                    document.body.appendChild(modal);
-                }
-                modal.classList.remove('hidden');
-
-                const cleanup = (choice) => {
-                    modal.classList.add('hidden');
-                    resolve(choice);
-                };
-
-                document.getElementById('btnDirtyCancel').onclick = () => cleanup('cancel');
-                document.getElementById('btnDirtyDiscard').onclick = () => cleanup('discard');
-                document.getElementById('btnDirtySave').onclick = () => cleanup('save');
-            });
-        }
-
         async function switchBranchUI(targetBranch) {
             if (!targetBranch || targetBranch === CURRENT_BRANCH) return;
 
-            // R2-2: Branch switch with dirty buffers: Save / Discard / Cancel. Cancel aborts the switch. Discard only after checkout succeeds.
-            let discardAfterSuccess = false;
-            if (hasUnsavedEdits()) {
-                const choice = await promptDirtySwitchChoice();
-                if (choice === 'cancel') {
-                    updateBranchDropdown();
-                    return;
-                }
-                if (choice === 'save') {
-                    for (const fp of Object.keys(DIRTY_BUFFERS)) {
-                        const ok = await saveFileBuffer(fp);
-                        if (!ok) {
-                            showToast(`Failed to save '${fp}'. Branch switch aborted.`, "error");
-                            updateBranchDropdown();
-                            return;
-                        }
-                    }
-                } else if (choice === 'discard') {
-                    discardAfterSuccess = true;
-                }
+            if (!await confirmDirtyBuffersBefore("branch switch")) {
+                updateBranchDropdown();
+                return;
             }
 
             if (IS_SERVER_MODE) {
                 const res = await apiPost('checkout', { target: targetBranch });
                 if (res && res.ok) {
-                    if (discardAfterSuccess) {
-                        for (const fp of Object.keys(DIRTY_BUFFERS)) {
-                            delete DIRTY_BUFFERS[fp];
-                        }
-                    }
                     showToast(`Switched to '${targetBranch}'`);
                     await refreshRepositorySnapshot(true);
                     loadLiveRepo();
@@ -4218,11 +4265,6 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             if (!BRANCHES[targetBranch] && BRANCHES[targetBranch] !== null) {
                 updateBranchDropdown();
                 return;
-            }
-            if (discardAfterSuccess) {
-                for (const fp of Object.keys(DIRTY_BUFFERS)) {
-                    delete DIRTY_BUFFERS[fp];
-                }
             }
             const oldBranch = CURRENT_BRANCH;
             CURRENT_BRANCH = targetBranch;
@@ -4352,6 +4394,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
 
         async function actionCheckoutSelectedCommit() {
             if (!SELECTED_COMMIT_HASH) return;
+            if (!await confirmDirtyBuffersBefore("checkout")) return;
             const hashToCheckout = SELECTED_COMMIT_HASH;
             closeCommitActionModal();
 
@@ -4405,6 +4448,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
 
         async function actionRevertSelectedCommit() {
             if (!SELECTED_COMMIT_HASH) return;
+            if (!await confirmDirtyBuffersBefore("revert")) return;
             const hashToRevert = SELECTED_COMMIT_HASH;
             closeCommitActionModal();
             if (!confirm(`Revert commit '${hashToRevert.substring(0, 7)}'?`)) return;
