@@ -29,7 +29,22 @@ void InitCmd::execute(Repository*, const Args&) {
 
 void AddCmd::execute(Repository* repo, const Args& args) {
     if (args.empty()) usageError(*this);
-    for (const auto& a : args) repo->add(a);
+    for (const auto& a : args) {
+        if (hasIllegalPathChars(a)) {
+            std::cerr << "warning: skipping file with illegal characters in path: " << a << "\n";
+            continue;
+        }
+        try {
+            repo->add(a);
+        } catch (const MiniGitException& e) {
+            std::string msg = e.what();
+            if (msg.find("illegal character") != std::string::npos) {
+                std::cerr << "warning: skipping file with illegal characters in path: " << a << "\n";
+            } else {
+                throw;
+            }
+        }
+    }
 }
 
 void CommitCmd::execute(Repository* repo, const Args& args) {

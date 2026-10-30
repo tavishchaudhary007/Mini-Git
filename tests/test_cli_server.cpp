@@ -521,6 +521,33 @@ void test_path_validation_and_index_intact() {
         CHECK(threw);
     }
 
+    // Requirement 3: CLI `add` and Index skip illegal paths with warning instead of staging
+    for (const auto& p : invalidCharPaths) {
+        AddCmd addCmd;
+        addCmd.execute(&repo, {p});
+        Index idxCheck(dir / ".minigit" / "index");
+        CHECK(!idxCheck.has(p));
+    }
+    for (const auto& p : invalidControlPaths) {
+        AddCmd addCmd;
+        addCmd.execute(&repo, {p});
+        Index idxCheck(dir / ".minigit" / "index");
+        CHECK(!idxCheck.has(p));
+    }
+
+    // Direct Index::set skips illegal paths
+    Index idx(dir / ".minigit" / "index");
+    idx.set("illegal:path.txt", Hash());
+    CHECK(!idx.has("illegal:path.txt"));
+
+    // Index::load skips corrupt / illegal path lines
+    {
+        std::ofstream ofs(dir / ".minigit" / "index", std::ios::app);
+        ofs << "0123456789abcdef0123456789abcdef01234567 corrupt*path.txt\n";
+    }
+    idx.reload();
+    CHECK(!idx.has("corrupt*path.txt"));
+
     // Crucially verify that index and snapshot stay intact after all rejected attempts
     Snapshot snapAfter = repo.snapshot();
     CHECK(snapAfter.files.count("valid.txt") == 1);
@@ -613,6 +640,10 @@ void test_git_export_identity_and_up_to_date() {
         (void)res1;
         std::string res2 = repo.exportToGit();
         CHECK(res2 == "already up to date");
+
+        // Requirement 4: export then import returns "already up to date" without committing dirty .gitignore
+        std::string resImp = repo.importFromGit();
+        CHECK(resImp == "already up to date");
     } catch (const MiniGitException& e) {
         std::string err = e.what();
         CHECK(err.find("git is not installed") != std::string::npos ||
@@ -845,14 +876,19 @@ void test_http_server_endpoints() {
     // 10. Failure replies include "snapshot" (Backend item 5)
     {
         auto postCheckFailureSnapshot = [&](const std::string& path, const std::string& body) {
+            std::cout << "[FailureSnapshot] Checking " << path << " ... " << std::flush;
             std::string req = "POST " + path + " HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: " +
                 std::to_string(body.size()) + "\r\nConnection: close\r\n\r\n" + body;
             std::string resp = httpExchange("127.0.0.1", testPort, req);
             size_t bPos = resp.find("\r\n\r\n");
             CHECK(bPos != std::string::npos);
             JsonValue j = JsonValue::parse(resp.substr(bPos + 4));
+            if (j["ok"].as_bool() != false) {
+                std::cerr << "FAILED! Body was: " << resp.substr(bPos + 4) << std::endl;
+            }
             CHECK(j["ok"].as_bool() == false);
             CHECK(j.contains("snapshot") && j["snapshot"].is_object());
+            std::cout << "OK\n";
         };
 
         // commit failure (nothing staged)
@@ -869,6 +905,135 @@ void test_http_server_endpoints() {
         postCheckFailureSnapshot("/api/branch/delete", "{\"name\":\"main\"}");
         // reflog/restore failure (invalid hash)
         postCheckFailureSnapshot("/api/reflog/restore", "{\"hash\":\"deadbeef00\"}");
+
+        // Additional failure snapshot checks (Requirement 5)
+        postCheckFailureSnapshot("/api/file/save", "{}");
+        postCheckFailureSnapshot("/api/file/delete", "{}");
+        postCheckFailureSnapshot("/api/stage", "{}");
+        postCheckFailureSnapshot("/api/unstage", "{\"path\":\"bad:name.txt\"}");
+        postCheckFailureSnapshot("/api/discard", "{}");
+        postCheckFailureSnapshot("/api/checkout", "{\"target\":\"\"}");
+        postCheckFailureSnapshot("/api/merge", "{\"abort\":true}");
+        postCheckFailureSnapshot("/api/merge", "{\"branch\":\"\"}");
+        postCheckFailureSnapshot("/api/git/import", "{}");
+    }
+
+    // 11. Host header DNS rebinding check (Requirement 2)
+    {
+        // evil.com Host header -> 403 Forbidden
+        std::string evilHostReq = "GET /api/snapshot HTTP/1.1\r\nHost: evil.com\r\nConnection: close\r\n\r\n";
+        std::string evilHostResp = httpExchange("127.0.0.1", testPort, evilHostReq);
+        CHECK(evilHostResp.find("403 Forbidden") != std::string::npos);
+        CHECK(evilHostResp.find("invalid Host header") != std::string::npos);
+
+        std::string evilHostPortReq = "GET /api/snapshot HTTP/1.1\r\nHost: evil.com:" + std::to_string(testPort) + "\r\nConnection: close\r\n\r\n";
+        std::string evilHostPortResp = httpExchange("127.0.0.1", testPort, evilHostPortReq);
+        CHECK(evilHostPortResp.find("403 Forbidden") != std::string::npos);
+        CHECK(evilHostPortResp.find("invalid Host header") != std::string::npos);
+
+        // Valid host: 127.0.0.1:<port> -> 200 OK
+        std::string goodHostReq = "GET /api/snapshot HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) + "\r\nConnection: close\r\n\r\n";
+        std::string goodHostResp = httpExchange("127.0.0.1", testPort, goodHostReq);
+        CHECK(goodHostResp.find("200 OK") != std::string::npos);
+
+        // Valid host: localhost:<port> -> 200 OK
+        std::string goodHostReq2 = "GET /api/snapshot HTTP/1.1\r\nHost: localhost:" + std::to_string(testPort) + "\r\nConnection: close\r\n\r\n";
+        std::string goodHostResp2 = httpExchange("127.0.0.1", testPort, goodHostReq2);
+        CHECK(goodHostResp2.find("200 OK") != std::string::npos);
+    }
+
+    // 12. Cross-origin peer pairing and sync with token (Requirement 1)
+    {
+        std::string peerOrigin = "http://peer-laptop:8080";
+
+        // 12a. OPTIONS on pair and sync endpoints returns 204 + CORS headers (no token required)
+        for (const std::string ep : {"/api/pair", "/api/pair/status", "/api/sync/bundle", "/api/sync/import-bundle"}) {
+            std::string optReq = "OPTIONS " + ep + " HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
+                "\r\nOrigin: " + peerOrigin + "\r\nAccess-Control-Request-Method: POST\r\nConnection: close\r\n\r\n";
+            std::string optResp = httpExchange("127.0.0.1", testPort, optReq);
+            CHECK(optResp.find("204 No Content") != std::string::npos);
+            CHECK(optResp.find("Access-Control-Allow-Origin: " + peerOrigin) != std::string::npos);
+            CHECK(optResp.find("Access-Control-Allow-Methods:") != std::string::npos);
+            CHECK(optResp.find("Access-Control-Allow-Headers: Content-Type, X-MiniGit-Token") != std::string::npos);
+        }
+
+        // 12b. Evil origin with no token gets 403 on file/write and bundle
+        std::string evilWriteBody = "{\"path\":\"hacked.txt\",\"content\":\"evil\"}";
+        std::string evilWriteReq = "POST /api/file/write HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
+            "\r\nOrigin: http://evil.com\r\nContent-Type: application/json\r\nContent-Length: " +
+            std::to_string(evilWriteBody.size()) + "\r\nConnection: close\r\n\r\n" + evilWriteBody;
+        std::string evilWriteResp = httpExchange("127.0.0.1", testPort, evilWriteReq);
+        CHECK(evilWriteResp.find("403 Forbidden") != std::string::npos);
+
+        std::string evilBundleReq = "GET /api/sync/bundle HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
+            "\r\nOrigin: http://evil.com\r\nConnection: close\r\n\r\n";
+        std::string evilBundleResp = httpExchange("127.0.0.1", testPort, evilBundleReq);
+        CHECK(evilBundleResp.find("403 Forbidden") != std::string::npos);
+
+        // 12c. Get pair code from host loopback
+        std::string getCodeReq = "GET /api/pair/code HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) + "\r\nConnection: close\r\n\r\n";
+        std::string getCodeResp = httpExchange("127.0.0.1", testPort, getCodeReq);
+        CHECK(getCodeResp.find("200 OK") != std::string::npos);
+        size_t gcBodyPos = getCodeResp.find("\r\n\r\n");
+        CHECK(gcBodyPos != std::string::npos);
+        JsonValue gcJson = JsonValue::parse(getCodeResp.substr(gcBodyPos + 4));
+        std::string currentCode = gcJson["code"].as_string();
+        CHECK(currentCode.size() == 6);
+
+        // 12d. Cross-origin peer page pairs: POST /api/pair with peerOrigin
+        std::string pairBody = "{\"code\":\"" + currentCode + "\",\"clientName\":\"Peer Laptop\"}";
+        std::string pairReq = "POST /api/pair HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
+            "\r\nOrigin: " + peerOrigin + "\r\nContent-Type: application/json\r\nContent-Length: " +
+            std::to_string(pairBody.size()) + "\r\nConnection: close\r\n\r\n" + pairBody;
+        std::string pairResp = httpExchange("127.0.0.1", testPort, pairReq);
+        CHECK(pairResp.find("200 OK") != std::string::npos);
+        CHECK(pairResp.find("Access-Control-Allow-Origin: " + peerOrigin) != std::string::npos);
+        size_t pBodyPos = pairResp.find("\r\n\r\n");
+        CHECK(pBodyPos != std::string::npos);
+        JsonValue pairJson = JsonValue::parse(pairResp.substr(pBodyPos + 4));
+        CHECK(pairJson["ok"].as_bool() == true);
+        std::string reqId = pairJson["requestId"].as_string();
+
+        // 12e. Host approves pair request
+        std::string approveBody = "{\"requestId\":\"" + reqId + "\",\"action\":\"approve\"}";
+        std::string approveReq = "POST /api/pair/decide HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
+            "\r\nContent-Type: application/json\r\nContent-Length: " +
+            std::to_string(approveBody.size()) + "\r\nConnection: close\r\n\r\n" + approveBody;
+        std::string approveResp = httpExchange("127.0.0.1", testPort, approveReq);
+        CHECK(approveResp.find("200 OK") != std::string::npos);
+
+        // 12f. Cross-origin peer checks status: GET /api/pair/status?requestId=... with peerOrigin
+        std::string statusReq = "GET /api/pair/status?requestId=" + reqId + " HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
+            "\r\nOrigin: " + peerOrigin + "\r\nConnection: close\r\n\r\n";
+        std::string statusResp = httpExchange("127.0.0.1", testPort, statusReq);
+        CHECK(statusResp.find("200 OK") != std::string::npos);
+        CHECK(statusResp.find("Access-Control-Allow-Origin: " + peerOrigin) != std::string::npos);
+        size_t stBodyPos = statusResp.find("\r\n\r\n");
+        CHECK(stBodyPos != std::string::npos);
+        JsonValue statusJson = JsonValue::parse(statusResp.substr(stBodyPos + 4));
+        CHECK(statusJson["status"].as_string() == "approved");
+        std::string sessionToken = statusJson["token"].as_string();
+        CHECK(!sessionToken.empty());
+
+        // 12g. Peer pulls bundle with token from different origin: GET /api/sync/bundle
+        std::string bundleReq = "GET /api/sync/bundle HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
+            "\r\nOrigin: " + peerOrigin + "\r\nX-MiniGit-Token: " + sessionToken + "\r\nConnection: close\r\n\r\n";
+        std::string bundleResp = httpExchange("127.0.0.1", testPort, bundleReq);
+        CHECK(bundleResp.find("200 OK") != std::string::npos);
+        CHECK(bundleResp.find("Access-Control-Allow-Origin: " + peerOrigin) != std::string::npos);
+        size_t bResBodyPos = bundleResp.find("\r\n\r\n");
+        CHECK(bResBodyPos != std::string::npos);
+        JsonValue pulledBundle = JsonValue::parse(bundleResp.substr(bResBodyPos + 4));
+        CHECK(pulledBundle.contains("objects"));
+
+        // 12h. Peer pushes import-bundle with token from different origin: POST /api/sync/import-bundle
+        std::string impBody = bundleResp.substr(bResBodyPos + 4);
+        std::string impReq = "POST /api/sync/import-bundle HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
+            "\r\nOrigin: " + peerOrigin + "\r\nX-MiniGit-Token: " + sessionToken + "\r\nContent-Type: application/json\r\nContent-Length: " +
+            std::to_string(impBody.size()) + "\r\nConnection: close\r\n\r\n" + impBody;
+        std::string impResp = httpExchange("127.0.0.1", testPort, impReq);
+        CHECK(impResp.find("200 OK") != std::string::npos);
+        CHECK(impResp.find("Access-Control-Allow-Origin: " + peerOrigin) != std::string::npos);
     }
 
     removeDir(dir);

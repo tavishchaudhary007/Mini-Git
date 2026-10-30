@@ -1082,6 +1082,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         let STAGING_INDEX = {};
         let BRANCHES = { "main": null };
         let CURRENT_BRANCH = "main";
+        let DEMO_HEAD_HASH = "";
         let OBJECTS = {};
         let ACTIVE_FILE = "index.html";
         let SELECTED_COMMIT_HASH = null;
@@ -1339,7 +1340,9 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         }
 
         function copyHeadCommitHash() {
-            const headHash = BRANCHES[CURRENT_BRANCH];
+            const headHash = (window.MINIGIT_LIVE && window.MINIGIT_LIVE.head)
+                ? window.MINIGIT_LIVE.head
+                : (CURRENT_BRANCH ? BRANCHES[CURRENT_BRANCH] : (DEMO_HEAD_HASH || ''));
             if (!headHash) {
                 showToast("No HEAD commit to copy");
                 return;
@@ -1869,6 +1872,12 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                     btnLanPull.title = "LAN pull is only available in server mode";
                     btnLanPull.classList.add('opacity-50', 'cursor-not-allowed');
                 }
+                const btnLanPush = document.getElementById('btnLanPush');
+                if (btnLanPush) {
+                    btnLanPush.disabled = true;
+                    btnLanPush.title = "LAN push is only available in server mode";
+                    btnLanPush.classList.add('opacity-50', 'cursor-not-allowed');
+                }
                 const btnAbort = document.querySelector('#mergeConflictBanner button');
                 if (btnAbort) {
                     btnAbort.disabled = true;
@@ -1963,8 +1972,15 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 }
             }
 
+            // Check if file deletion is staged (recreate is allowed)
+            const isStagedDel = (window.MINIGIT_LIVE?.stagedStatus && window.MINIGIT_LIVE.stagedStatus[cleanPath] === 'D') ||
+                                (window.MINIGIT_LIVE?.stagedDeleted && window.MINIGIT_LIVE.stagedDeleted.includes(cleanPath)) ||
+                                (window.MINIGIT_LIVE?.status?.staged && window.MINIGIT_LIVE.status.staged.some(x => x === `${cleanPath} (deleted)` || x.startsWith(`${cleanPath} `))) ||
+                                (window.DEMO_STAGED_STATUS && window.DEMO_STAGED_STATUS[cleanPath] === 'D') ||
+                                (STAGING_INDEX[cleanPath] === null);
+
             // Check VFS, live files, live binaryFiles, status deleted, and other status entries
-            if (isFileDeleted(cleanPath)) {
+            if (!isStagedDel && isFileDeleted(cleanPath)) {
                 showToast(`File '${cleanPath}' is deleted; restore it instead`, 'error');
                 return;
             }
@@ -1975,7 +1991,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             if (VFS[cleanPath] !== undefined ||
                 (window.MINIGIT_LIVE?.files && window.MINIGIT_LIVE.files[cleanPath] !== undefined) ||
                 (window.MINIGIT_LIVE?.status?.modified && window.MINIGIT_LIVE.status.modified.includes(cleanPath)) ||
-                (window.MINIGIT_LIVE?.status?.staged && window.MINIGIT_LIVE.status.staged.some(x => x.replace(' (deleted)', '') === cleanPath)) ||
+                (window.MINIGIT_LIVE?.status?.staged && !isStagedDel && window.MINIGIT_LIVE.status.staged.some(x => x.replace(' (deleted)', '') === cleanPath)) ||
                 (window.MINIGIT_LIVE?.status?.untracked && window.MINIGIT_LIVE.status.untracked.includes(cleanPath))) {
                 showToast(`File '${cleanPath}' already exists`, 'error');
                 return;
@@ -2113,7 +2129,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
 
             delete DIRTY_BUFFERS[filepath];
             let headTreeBlobs = {};
-            const headCommitHash = BRANCHES[CURRENT_BRANCH];
+            const headCommitHash = (CURRENT_BRANCH && BRANCHES[CURRENT_BRANCH]) ? BRANCHES[CURRENT_BRANCH] : (DEMO_HEAD_HASH || DEMO_REFLOG[0]?.newHash);
             if (headCommitHash && OBJECTS[headCommitHash]) {
                 const treeHash = OBJECTS[headCommitHash].data.tree;
                 headTreeBlobs = OBJECTS[treeHash]?.data || {};
@@ -2144,7 +2160,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 return;
             }
             let headTreeBlobs = {};
-            const headCommitHash = BRANCHES[CURRENT_BRANCH];
+            const headCommitHash = (CURRENT_BRANCH && BRANCHES[CURRENT_BRANCH]) ? BRANCHES[CURRENT_BRANCH] : (DEMO_HEAD_HASH || DEMO_REFLOG[0]?.newHash);
             if (headCommitHash && OBJECTS[headCommitHash]) {
                 const treeHash = OBJECTS[headCommitHash].data.tree;
                 headTreeBlobs = OBJECTS[treeHash]?.data || {};
@@ -2217,7 +2233,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 return;
             }
 
-            const parentHash = BRANCHES[CURRENT_BRANCH];
+            const parentHash = (CURRENT_BRANCH && BRANCHES[CURRENT_BRANCH]) ? BRANCHES[CURRENT_BRANCH] : (DEMO_HEAD_HASH || null);
             let combinedTree = {};
 
             if (parentHash && OBJECTS[parentHash]) {
@@ -2256,7 +2272,11 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             const commitHash = await sha256(JSON.stringify(commitObj));
             OBJECTS[commitHash] = { type: 'commit', data: commitObj };
 
-            BRANCHES[CURRENT_BRANCH] = commitHash;
+            if (CURRENT_BRANCH) {
+                BRANCHES[CURRENT_BRANCH] = commitHash;
+            } else {
+                DEMO_HEAD_HASH = commitHash;
+            }
             STAGING_INDEX = {};
             if (msgInput) msgInput.value = '';
 
@@ -3357,7 +3377,10 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 if (IS_SERVER_MODE) {
                     const postRes = await apiPost('sync/import-bundle', bundle);
                     if (postRes && postRes.ok) {
-                        showToast(postRes.message || "Synchronized with LAN peer successfully!");
+                        const peerRefs = postRes.peerRefs || (postRes.result && postRes.result.peerRefs);
+                        if (!peerRefs || peerRefs.length === 0) {
+                            showToast(postRes.message || "Synchronized with LAN peer successfully!");
+                        }
                         closeLanSyncModal();
                     } else if (postRes) {
                         const peerRefs = postRes.peerRefs || (postRes.result && postRes.result.peerRefs);
@@ -3388,6 +3411,10 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         }
 
         async function executeLanPush() {
+            if (!IS_SERVER_MODE) {
+                showToast("LAN push is only available in server mode", "warning");
+                return;
+            }
             if (IS_SYNCING_LAN) return;
             const input = document.getElementById('lanPeerUrlInput');
             let peerUrl = cleanPeerUrl(input ? input.value : '');
@@ -3488,7 +3515,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 bundleObj = {
                     minigit_bundle: 1,
                     repoName: "minigit",
-                    generated: new Date().toISOString(),
+                    generated: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
                     currentBranch: CURRENT_BRANCH,
                     branches: BRANCHES,
                     objects: OBJECTS
@@ -3516,7 +3543,10 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                     if (IS_SERVER_MODE) {
                         const res = await apiPost('sync/import-bundle', bundle);
                         if (res && res.ok) {
-                            showToast(res.message || "Bundle imported successfully");
+                            const peerRefs = res.peerRefs || (res.result && res.result.peerRefs);
+                            if (!peerRefs || peerRefs.length === 0) {
+                                showToast(res.message || "Bundle imported successfully");
+                            }
                             closeLanSyncModal();
                         } else if (res) {
                             const peerRefs = res.peerRefs || (res.result && res.result.peerRefs);
@@ -3572,7 +3602,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 return;
             }
 
-            const curHash = BRANCHES[CURRENT_BRANCH];
+            const curHash = (CURRENT_BRANCH && BRANCHES[CURRENT_BRANCH]) ? BRANCHES[CURRENT_BRANCH] : (DEMO_HEAD_HASH || DEMO_REFLOG[0]?.newHash);
             if (!curHash || !OBJECTS[curHash]) {
                 showToast("Nothing to undo", "error");
                 return;
@@ -3582,7 +3612,11 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 showToast("Cannot undo the initial commit", "error");
                 return;
             }
-            BRANCHES[CURRENT_BRANCH] = parent;
+            if (CURRENT_BRANCH) {
+                BRANCHES[CURRENT_BRANCH] = parent;
+            } else {
+                DEMO_HEAD_HASH = parent;
+            }
             recordDemoReflog("undo", curHash, parent, `Undid commit ${curHash.substring(0, 7)}`);
             showToast(`Undid commit [${curHash.substring(0, 7)}]. Changes preserved.`);
             updateUI();
@@ -3652,7 +3686,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 return;
             }
 
-            const headHash = BRANCHES[CURRENT_BRANCH];
+            const headHash = (CURRENT_BRANCH && BRANCHES[CURRENT_BRANCH]) ? BRANCHES[CURRENT_BRANCH] : (DEMO_HEAD_HASH || DEMO_REFLOG[0]?.newHash);
             let headTreeBlobs = {};
             if (headHash && OBJECTS[headHash]) {
                 const treeHash = OBJECTS[headHash].data.tree;
@@ -4073,13 +4107,51 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             updateUI();
         }
 
+        function promptDirtySwitchChoice() {
+            return new Promise((resolve) => {
+                let modal = document.getElementById('dirtySwitchModal');
+                if (!modal) {
+                    modal = document.createElement('div');
+                    modal.id = 'dirtySwitchModal';
+                    modal.className = 'fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center';
+                    modal.innerHTML = `
+                        <div class="bg-theme-card border border-theme-border rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+                            <h3 class="text-sm font-semibold text-theme-text">Unsaved Changes</h3>
+                            <p class="text-xs text-theme-muted">You have unsaved changes in open files. Would you like to save them before switching branches, discard them, or cancel?</p>
+                            <div class="flex justify-end space-x-2 pt-2">
+                                <button id="btnDirtyCancel" class="px-4 py-1.5 rounded-full border border-theme-border text-xs text-theme-text hover:bg-zinc-100 dark:hover:bg-zinc-800 transition">Cancel</button>
+                                <button id="btnDirtyDiscard" class="px-4 py-1.5 rounded-full bg-rose-600 hover:bg-rose-700 text-xs text-white transition">Discard</button>
+                                <button id="btnDirtySave" class="px-4 py-1.5 rounded-full bg-black dark:bg-white text-white dark:text-black text-xs font-semibold hover:opacity-90 transition">Save</button>
+                            </div>
+                        </div>
+                    `;
+                    document.body.appendChild(modal);
+                }
+                modal.classList.remove('hidden');
+
+                const cleanup = (choice) => {
+                    modal.classList.add('hidden');
+                    resolve(choice);
+                };
+
+                document.getElementById('btnDirtyCancel').onclick = () => cleanup('cancel');
+                document.getElementById('btnDirtyDiscard').onclick = () => cleanup('discard');
+                document.getElementById('btnDirtySave').onclick = () => cleanup('save');
+            });
+        }
+
         async function switchBranchUI(targetBranch) {
             if (!targetBranch || targetBranch === CURRENT_BRANCH) return;
 
-            // Item N9: On branch switch, ask to save or discard dirty buffers. Never carry them over.
+            // R2-2: Branch switch with dirty buffers: Save / Discard / Cancel. Cancel aborts the switch. Discard only after checkout succeeds.
+            let discardAfterSuccess = false;
             if (hasUnsavedEdits()) {
-                const doSave = confirm("You have unsaved changes. Click OK to save them before switching, or Cancel to discard them.");
-                if (doSave) {
+                const choice = await promptDirtySwitchChoice();
+                if (choice === 'cancel') {
+                    updateBranchDropdown();
+                    return;
+                }
+                if (choice === 'save') {
                     for (const fp of Object.keys(DIRTY_BUFFERS)) {
                         const ok = await saveFileBuffer(fp);
                         if (!ok) {
@@ -4088,21 +4160,25 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                             return;
                         }
                     }
-                } else {
-                    for (const fp of Object.keys(DIRTY_BUFFERS)) {
-                        delete DIRTY_BUFFERS[fp];
-                    }
+                } else if (choice === 'discard') {
+                    discardAfterSuccess = true;
                 }
             }
 
             if (IS_SERVER_MODE) {
                 const res = await apiPost('checkout', { target: targetBranch });
                 if (res && res.ok) {
+                    if (discardAfterSuccess) {
+                        for (const fp of Object.keys(DIRTY_BUFFERS)) {
+                            delete DIRTY_BUFFERS[fp];
+                        }
+                    }
                     showToast(`Switched to '${targetBranch}'`);
                     await refreshRepositorySnapshot(true);
                 } else {
                     // Item 33: The branch dropdown keeps the new name after a failed switch. Revert it.
                     updateBranchDropdown();
+                    // Keep the edits if checkout fails
                 }
                 return;
             }
@@ -4110,6 +4186,11 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             if (!BRANCHES[targetBranch] && BRANCHES[targetBranch] !== null) {
                 updateBranchDropdown();
                 return;
+            }
+            if (discardAfterSuccess) {
+                for (const fp of Object.keys(DIRTY_BUFFERS)) {
+                    delete DIRTY_BUFFERS[fp];
+                }
             }
             const oldBranch = CURRENT_BRANCH;
             CURRENT_BRANCH = targetBranch;
@@ -4263,8 +4344,18 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                     await refreshRepositorySnapshot(true);
                 }
             } else {
-                const oldHash = (CURRENT_BRANCH && BRANCHES[CURRENT_BRANCH]) ? BRANCHES[CURRENT_BRANCH] : (DEMO_REFLOG[0]?.newHash || "0000000");
+                const oldHash = (CURRENT_BRANCH && BRANCHES[CURRENT_BRANCH]) ? BRANCHES[CURRENT_BRANCH] : (DEMO_HEAD_HASH || DEMO_REFLOG[0]?.newHash || "0000000");
                 CURRENT_BRANCH = "";
+                DEMO_HEAD_HASH = hashToCheckout;
+                const commitObj = OBJECTS[hashToCheckout];
+                if (commitObj && commitObj.data && commitObj.data.tree) {
+                    const tree = OBJECTS[commitObj.data.tree]?.data || {};
+                    VFS = {};
+                    for (const [filepath, blobHash] of Object.entries(tree)) {
+                        if (OBJECTS[blobHash]) VFS[filepath] = OBJECTS[blobHash].content;
+                    }
+                }
+                STAGING_INDEX = {};
                 recordDemoReflog("checkout", oldHash, hashToCheckout, `Detached HEAD at ${hashToCheckout.substring(0, 7)}`);
                 showToast(`Checked out [${hashToCheckout.substring(0, 7)}] (detached HEAD)`);
                 updateUI();
@@ -5604,10 +5695,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                     loadLiveRepo();
                 }
 
-                // Item 54: The pairing poll runs only when LAN mode is active
-                if (IS_LAN_MODE) {
-                    setInterval(pollPendingPairRequests, 2000);
-                }
+
 
                 document.addEventListener('visibilitychange', () => {
                     if (!document.hidden && IS_SERVER_MODE) {

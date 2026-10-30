@@ -214,6 +214,10 @@ void Repository::add(const std::string& pathArg, bool isRepoRelative) {
     if (pathArg == "." || pathArg.empty()) {
         std::vector<std::string> added;
         for (const auto& f : workingFiles()) {
+            if (hasIllegalPathChars(f)) {
+                std::cerr << "warning: skipping file with illegal characters in path: " << f << "\n";
+                continue;
+            }
             addFile(f);
             added.push_back(f);
         }
@@ -233,6 +237,10 @@ void Repository::add(const std::string& pathArg, bool isRepoRelative) {
         std::vector<std::string> added;
         for (const auto& f : workingFiles()) {
             if (f.rfind(prefix, 0) == 0) {
+                if (hasIllegalPathChars(f)) {
+                    std::cerr << "warning: skipping file with illegal characters in path: " << f << "\n";
+                    continue;
+                }
                 addFile(f);
                 added.push_back(f);
             }
@@ -1717,16 +1725,7 @@ std::string Repository::exportToGit() {
     fs::path tmpMsgFile = tempDir / ("mg_exp_" + std::to_string(std::time(nullptr)) + "_" + std::to_string(std::rand()) + ".txt");
     writeFile(tmpMsgFile, headMsg);
 
-    fs::path gitIgnore = root_ / ".gitignore";
-    std::string giContent;
-    if (fs::exists(gitIgnore)) {
-        try { giContent = readFile(gitIgnore); } catch (...) {}
-    }
-    if (giContent.find(".minigit") == std::string::npos) {
-        if (!giContent.empty() && giContent.back() != '\n') giContent += "\n";
-        giContent += ".minigit/\n";
-        writeFile(gitIgnore, giContent);
-    }
+
 
     auto quotePath = [](const fs::path& p) {
         std::string s = p.string();
@@ -1749,6 +1748,23 @@ std::string Repository::exportToGit() {
         if (exitInit != 0) {
             fs::remove(tmpMsgFile, ec);
             throw MiniGitException("git init failed with exit code " + std::to_string(exitInit));
+        }
+    }
+
+    // Exclude .minigit via .git/info/exclude so no .gitignore is created or tracked
+    if (fs::exists(root_ / ".git")) {
+        std::error_code ecExc;
+        fs::path gitInfo = root_ / ".git" / "info";
+        fs::create_directories(gitInfo, ecExc);
+        fs::path gitExclude = gitInfo / "exclude";
+        std::string excContent;
+        if (fs::exists(gitExclude)) {
+            try { excContent = readFile(gitExclude); } catch (...) {}
+        }
+        if (excContent.find(".minigit") == std::string::npos) {
+            if (!excContent.empty() && excContent.back() != '\n') excContent += "\n";
+            excContent += ".minigit/\n";
+            writeFile(gitExclude, excContent);
         }
     }
 

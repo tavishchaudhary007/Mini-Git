@@ -1,4 +1,5 @@
 #pragma once
+#include <iostream>
 #include <map>
 #include "FileUtil.h"
 #include "Hash.h"
@@ -14,7 +15,13 @@ public:
     explicit Index(fs::path file) : file_(std::move(file)) { load(); }
     void save() const;
 
-    void set(const std::string& path, const Hash& h) { entries_[path] = h; }
+    void set(const std::string& path, const Hash& h) {
+        if (hasIllegalPathChars(path)) {
+            std::cerr << "warning: skipping file with illegal characters in path: " << path << "\n";
+            return;
+        }
+        entries_[path] = h;
+    }
     void remove(const std::string& path) { entries_.erase(path); }
     bool has(const std::string& path) const { return entries_.count(path) > 0; }
     const Hash& get(const std::string& path) const { return entries_.at(path); }

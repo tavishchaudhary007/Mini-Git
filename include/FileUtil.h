@@ -59,3 +59,14 @@ inline std::string trim(std::string s) {
     while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' ')) s.pop_back();
     return s;
 }
+
+inline bool hasIllegalPathChars(const std::string& path) {
+    for (char c : path) {
+        if (static_cast<unsigned char>(c) < 32 || c == 127 ||
+            c == '\\' || c == ':' || c == '*' || c == '?' ||
+            c == '"' || c == '<' || c == '>' || c == '|') {
+            return true;
+        }
+    }
+    return false;
+}

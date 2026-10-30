@@ -331,25 +331,52 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
             body = request.substr(bodyPos + 4);
         }
 
+        // Host header validation (DNS rebinding protection)
+        std::string host = getHeaderValue(request, "Host");
+        std::string portStr = std::to_string(boundPort);
+        bool validHost = (host == ("127.0.0.1:" + portStr) || host == ("localhost:" + portStr) ||
+                          host == "127.0.0.1" || host == "localhost");
+        if (lan) {
+            if (host == (lanIp + ":" + portStr) || host == lanIp) {
+                validHost = true;
+            }
+        }
+        if (!validHost) {
+            sendHttpResponse(clientSock, 403, "Forbidden", "application/json",
+                             "{\"ok\":false,\"error\":\"Forbidden: invalid Host header\"}");
+            CLOSESOCKET(clientSock);
+            continue;
+        }
+
         std::string origin = getHeaderValue(request, "Origin");
         bool isSyncEndpoint = (path == "/api/sync/bundle" || path == "/api/sync/import-bundle");
         bool isPairEndpoint = (path == "/api/pair" || path == "/api/pair/status");
         bool isSyncOrPairEndpoint = (isSyncEndpoint || isPairEndpoint);
 
+        // OPTIONS handling (no token required)
+        if (method == "OPTIONS") {
+            std::string optCorsOrigin = "";
+            if (isSyncOrPairEndpoint && !origin.empty() && origin != "null") {
+                optCorsOrigin = origin;
+            }
+            sendHttpResponse(clientSock, 204, "No Content", "text/plain", "", optCorsOrigin);
+            CLOSESOCKET(clientSock);
+            continue;
+        }
+
+        std::string clientToken = getHeaderValue(request, "X-MiniGit-Token");
+        bool hasValidToken = !clientToken.empty() && pairingMgr.isValidSessionToken(clientToken);
+
         std::string corsOrigin = "";
-        if (isSyncOrPairEndpoint && !origin.empty() && origin != "null") {
+        if (!origin.empty() && origin != "null") {
             if (origin == ("http://127.0.0.1:" + std::to_string(boundPort)) ||
                 origin == ("http://localhost:" + std::to_string(boundPort))) {
                 corsOrigin = origin;
-            } else if (!isLoopback && pairingMgr.isValidSessionToken(getHeaderValue(request, "X-MiniGit-Token"))) {
+            } else if (isPairEndpoint) {
+                corsOrigin = origin;
+            } else if (isSyncEndpoint && hasValidToken) {
                 corsOrigin = origin;
             }
-        }
-
-        if (method == "OPTIONS") {
-            sendHttpResponse(clientSock, 204, "No Content", "text/plain", "", corsOrigin);
-            CLOSESOCKET(clientSock);
-            continue;
         }
 
         if (!isLoopback) {
@@ -360,26 +387,26 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                 CLOSESOCKET(clientSock);
                 continue;
             }
-            if (isSyncEndpoint) {
-                std::string clientToken = getHeaderValue(request, "X-MiniGit-Token");
-                if (!pairingMgr.isValidSessionToken(clientToken)) {
-                    sendHttpResponse(clientSock, 401, "Unauthorized", "application/json",
-                                     "{\"ok\":false,\"error\":\"Unauthorized: invalid or revoked session token. Please pair with host.\"}",
-                                     corsOrigin);
-                    CLOSESOCKET(clientSock);
-                    continue;
-                }
+            if (isSyncEndpoint && !hasValidToken) {
+                sendHttpResponse(clientSock, 401, "Unauthorized", "application/json",
+                                 "{\"ok\":false,\"error\":\"Unauthorized: invalid or revoked session token. Please pair with host.\"}",
+                                 corsOrigin);
+                CLOSESOCKET(clientSock);
+                continue;
             }
         }
 
         if (isLoopback && method != "GET" && method != "OPTIONS") {
-            if (!origin.empty() &&
-                origin != ("http://127.0.0.1:" + std::to_string(boundPort)) &&
-                origin != ("http://localhost:" + std::to_string(boundPort))) {
-                sendHttpResponse(clientSock, 403, "Forbidden", "application/json",
-                                 "{\"ok\":false,\"error\":\"Forbidden: invalid origin\"}", corsOrigin);
-                CLOSESOCKET(clientSock);
-                continue;
+            bool isExempt = (path == "/api/pair") || (isSyncEndpoint && hasValidToken);
+            if (!isExempt) {
+                if (!origin.empty() &&
+                    origin != ("http://127.0.0.1:" + std::to_string(boundPort)) &&
+                    origin != ("http://localhost:" + std::to_string(boundPort))) {
+                    sendHttpResponse(clientSock, 403, "Forbidden", "application/json",
+                                     "{\"ok\":false,\"error\":\"Forbidden: invalid origin\"}", corsOrigin);
+                    CLOSESOCKET(clientSock);
+                    continue;
+                }
             }
             std::string ct = getHeaderValue(request, "Content-Type");
             if (ct.find("application/json") == std::string::npos) {
@@ -391,9 +418,10 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
         }
 
         if (path == "/api/sync/bundle") {
-            if (!origin.empty() &&
-                origin != ("http://127.0.0.1:" + std::to_string(boundPort)) &&
-                origin != ("http://localhost:" + std::to_string(boundPort))) {
+            bool isLocalOrigin = origin.empty() ||
+                                 origin == ("http://127.0.0.1:" + std::to_string(boundPort)) ||
+                                 origin == ("http://localhost:" + std::to_string(boundPort));
+            if (!isLocalOrigin && !hasValidToken) {
                 sendHttpResponse(clientSock, 403, "Forbidden", "application/json",
                                  "{\"ok\":false,\"error\":\"Forbidden: cross-origin bundle access refused\"}", corsOrigin);
                 CLOSESOCKET(clientSock);
@@ -401,14 +429,18 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
             }
         }
 
-        try {
-            repo->reload();
-
-            auto getSnapJson = [&]() {
+        auto getSnapJson = [&]() {
+            try {
                 Snapshot s = repo->snapshot();
                 s.lan = lan;
                 return HtmlExporter::toJson(s, repoName);
-            };
+            } catch (...) {
+                return std::string("{}");
+            }
+        };
+
+        try {
+            repo->reload();
             if (method == "GET" && (path == "/" || path == "/index.html")) {
                 Snapshot snap = repo->snapshot();
                 snap.lan = lan;
@@ -600,10 +632,10 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                 std::string parseErr, p;
                 if (!parseRequestBody(body, bodyJson, parseErr)) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                     "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + "}", corsOrigin);
+                                     "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + ",\"snapshot\":" + getSnapJson() + "}", corsOrigin);
                 } else if (!getRequiredString(bodyJson, "path", p, parseErr) || p.empty()) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                     "{\"ok\":false,\"error\":\"Path is required\"}", corsOrigin);
+                                     "{\"ok\":false,\"error\":\"Path is required\",\"snapshot\":" + getSnapJson() + "}", corsOrigin);
                 } else {
                     try {
                         std::string rel = repo->resolveRepoPath(p, true);
@@ -619,7 +651,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                                          "{\"ok\":true,\"message\":\"saved\",\"snapshot\":" + snap + "}", corsOrigin);
                     } catch (const std::exception& e) {
                         sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                         "{\"ok\":false,\"error\":" + jsonString(e.what()) + "}", corsOrigin);
+                                         "{\"ok\":false,\"error\":" + jsonString(e.what()) + ",\"snapshot\":" + getSnapJson() + "}", corsOrigin);
                     }
                 }
             } else if (method == "POST" && path == "/api/file/delete") {
@@ -627,10 +659,10 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                 std::string parseErr, p;
                 if (!parseRequestBody(body, bodyJson, parseErr)) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                     "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + "}", corsOrigin);
+                                     "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + ",\"snapshot\":" + getSnapJson() + "}", corsOrigin);
                 } else if (!getRequiredString(bodyJson, "path", p, parseErr) || p.empty()) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                     "{\"ok\":false,\"error\":\"Path is required\"}", corsOrigin);
+                                     "{\"ok\":false,\"error\":\"Path is required\",\"snapshot\":" + getSnapJson() + "}", corsOrigin);
                 } else {
                     try {
                         std::string rel = repo->resolveRepoPath(p, true);
@@ -644,7 +676,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                                          "{\"ok\":true,\"message\":\"deleted\",\"snapshot\":" + snap + "}", corsOrigin);
                     } catch (const std::exception& e) {
                         sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                         "{\"ok\":false,\"error\":" + jsonString(e.what()) + "}", corsOrigin);
+                                         "{\"ok\":false,\"error\":" + jsonString(e.what()) + ",\"snapshot\":" + getSnapJson() + "}", corsOrigin);
                     }
                 }
             } else if (method == "POST" && path == "/api/stage") {
@@ -652,10 +684,10 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                 std::string parseErr, p;
                 if (!parseRequestBody(body, bodyJson, parseErr)) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                     "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + "}", corsOrigin);
+                                     "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + ",\"snapshot\":" + getSnapJson() + "}", corsOrigin);
                 } else if (!getRequiredString(bodyJson, "path", p, parseErr) || p.empty()) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                     "{\"ok\":false,\"error\":\"Path is required\"}", corsOrigin);
+                                     "{\"ok\":false,\"error\":\"Path is required\",\"snapshot\":" + getSnapJson() + "}", corsOrigin);
                 } else {
                     try {
                         repo->add(p, true);
@@ -664,7 +696,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                                          "{\"ok\":true,\"message\":\"staged\",\"snapshot\":" + snap + "}", corsOrigin);
                     } catch (const std::exception& e) {
                         sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                         "{\"ok\":false,\"error\":" + jsonString(e.what()) + "}", corsOrigin);
+                                         "{\"ok\":false,\"error\":" + jsonString(e.what()) + ",\"snapshot\":" + getSnapJson() + "}", corsOrigin);
                     }
                 }
             } else if (method == "POST" && path == "/api/unstage") {
@@ -672,7 +704,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                 std::string parseErr, p;
                 if (!parseRequestBody(body, bodyJson, parseErr)) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                     "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + "}", corsOrigin);
+                                     "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + ",\"snapshot\":" + getSnapJson() + "}", corsOrigin);
                 } else {
                     try {
                         p = getOptionalString(bodyJson, "path");
@@ -682,7 +714,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                                          "{\"ok\":true,\"message\":\"unstaged\",\"snapshot\":" + snap + "}", corsOrigin);
                     } catch (const std::exception& e) {
                         sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                         "{\"ok\":false,\"error\":" + jsonString(e.what()) + "}", corsOrigin);
+                                         "{\"ok\":false,\"error\":" + jsonString(e.what()) + ",\"snapshot\":" + getSnapJson() + "}", corsOrigin);
                     }
                 }
             } else if (method == "POST" && path == "/api/discard") {
@@ -690,10 +722,10 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                 std::string parseErr, p;
                 if (!parseRequestBody(body, bodyJson, parseErr)) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                     "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + "}", corsOrigin);
+                                     "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + ",\"snapshot\":" + getSnapJson() + "}", corsOrigin);
                 } else if (!getRequiredString(bodyJson, "path", p, parseErr) || p.empty() || p == "." || p == ".." || fs::path(p).is_absolute()) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                     "{\"ok\":false,\"error\":\"Invalid or missing path for discard\"}", corsOrigin);
+                                     "{\"ok\":false,\"error\":\"Invalid or missing path for discard\",\"snapshot\":" + getSnapJson() + "}", corsOrigin);
                 } else {
                     try {
                         repo->discard(p, true);
@@ -702,7 +734,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                                          "{\"ok\":true,\"message\":\"discarded\",\"snapshot\":" + snap + "}", corsOrigin);
                     } catch (const std::exception& e) {
                         sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                         "{\"ok\":false,\"error\":" + jsonString(e.what()) + "}", corsOrigin);
+                                         "{\"ok\":false,\"error\":" + jsonString(e.what()) + ",\"snapshot\":" + getSnapJson() + "}", corsOrigin);
                     }
                 }
             } else if (method == "POST" && path == "/api/commit") {
@@ -778,10 +810,10 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                 std::string parseErr, target;
                 if (!parseRequestBody(body, bodyJson, parseErr)) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                     "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + "}", corsOrigin);
+                                     "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + ",\"snapshot\":" + getSnapJson() + "}", corsOrigin);
                 } else if (!getRequiredString(bodyJson, "target", target, parseErr) || target.empty()) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                     "{\"ok\":false,\"error\":" + jsonString("Target cannot be empty") + "}", corsOrigin);
+                                     "{\"ok\":false,\"error\":" + jsonString("Target cannot be empty") + ",\"snapshot\":" + getSnapJson() + "}", corsOrigin);
                 } else {
                     try {
                         repo->checkout(target);
@@ -799,7 +831,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                 std::string parseErr, branch;
                 if (!parseRequestBody(body, bodyJson, parseErr)) {
                     sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                     "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + "}", corsOrigin);
+                                     "{\"ok\":false,\"error\":" + jsonString("Invalid JSON: " + parseErr) + ",\"snapshot\":" + getSnapJson() + "}", corsOrigin);
                 } else {
                     bool isAbort = (bodyJson.contains("abort") && bodyJson["abort"].is_bool() && bodyJson["abort"].as_bool());
                     if (!isAbort && bodyJson.contains("branch") && bodyJson["branch"].is_string() && bodyJson["branch"].as_string() == "--abort") {
@@ -813,11 +845,11 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                                              "{\"ok\":true,\"result\":" + jsonString(msg) + ",\"snapshot\":" + snap + "}", corsOrigin);
                         } catch (const MiniGitException& e) {
                             sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                             "{\"ok\":false,\"error\":" + jsonString(e.what()) + "}", corsOrigin);
+                                             "{\"ok\":false,\"error\":" + jsonString(e.what()) + ",\"snapshot\":" + getSnapJson() + "}", corsOrigin);
                         }
                     } else if (!getRequiredString(bodyJson, "branch", branch, parseErr) || branch.empty()) {
                         sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                                         "{\"ok\":false,\"error\":\"Branch cannot be empty\"}", corsOrigin);
+                                         "{\"ok\":false,\"error\":\"Branch cannot be empty\",\"snapshot\":" + getSnapJson() + "}", corsOrigin);
                     } else {
                         try {
                             std::string msg = repo->merge(branch);
@@ -968,24 +1000,38 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                 std::string statusJson = repo->gitStatus();
                 sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8", statusJson, corsOrigin);
             } else if (method == "POST" && path == "/api/git/export") {
-                std::string resMsg = repo->exportToGit();
-                std::string snap = getSnapJson();
-                sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
-                                 "{\"ok\":true,\"message\":" + jsonString(resMsg) + ",\"snapshot\":" + snap + "}", corsOrigin);
+                try {
+                    std::string resMsg = repo->exportToGit();
+                    std::string snap = getSnapJson();
+                    sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
+                                     "{\"ok\":true,\"message\":" + jsonString(resMsg) + ",\"snapshot\":" + snap + "}", corsOrigin);
+                } catch (const std::exception& e) {
+                    sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
+                                     "{\"ok\":false,\"error\":" + jsonString(e.what()) + ",\"snapshot\":" + getSnapJson() + "}", corsOrigin);
+                }
             } else if (method == "POST" && path == "/api/git/import") {
-                std::string resMsg = repo->importFromGit();
-                std::string snap = getSnapJson();
-                sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
-                                 "{\"ok\":true,\"message\":" + jsonString(resMsg) + ",\"snapshot\":" + snap + "}", corsOrigin);
+                try {
+                    std::string resMsg = repo->importFromGit();
+                    std::string snap = getSnapJson();
+                    sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
+                                     "{\"ok\":true,\"message\":" + jsonString(resMsg) + ",\"snapshot\":" + snap + "}", corsOrigin);
+                } catch (const std::exception& e) {
+                    sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
+                                     "{\"ok\":false,\"error\":" + jsonString(e.what()) + ",\"snapshot\":" + getSnapJson() + "}", corsOrigin);
+                }
             } else {
                 sendHttpResponse(clientSock, 404, "Not Found", "application/json", "{\"ok\":false,\"error\":\"endpoint not found\"}", corsOrigin);
             }
         } catch (const MiniGitException& e) {
+            std::string snapField = "";
+            try { snapField = ",\"snapshot\":" + getSnapJson(); } catch (...) {}
             sendHttpResponse(clientSock, 400, "Bad Request", "application/json; charset=utf-8",
-                             "{\"ok\":false,\"error\":" + jsonString(e.what()) + "}", corsOrigin);
+                             "{\"ok\":false,\"error\":" + jsonString(e.what()) + snapField + "}", corsOrigin);
         } catch (const std::exception& e) {
+            std::string snapField = "";
+            try { snapField = ",\"snapshot\":" + getSnapJson(); } catch (...) {}
             sendHttpResponse(clientSock, 500, "Internal Server Error", "application/json; charset=utf-8",
-                             "{\"ok\":false,\"error\":" + jsonString(e.what()) + "}", corsOrigin);
+                             "{\"ok\":false,\"error\":" + jsonString(e.what()) + snapField + "}", corsOrigin);
         }
 
         CLOSESOCKET(clientSock);
