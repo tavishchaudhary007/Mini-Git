@@ -1015,18 +1015,20 @@
                     <p class="text-[11px] text-theme-muted">Incoming peer connection</p>
                 </div>
             </div>
-            <div class="p-3.5 bg-zinc-50 dark:bg-zinc-900/60 rounded-2xl border border-theme-border space-y-1.5 text-xs">
-                <div class="flex justify-between items-center">
-                    <span class="text-theme-muted">Peer Address:</span>
-                    <span id="approvalPeerIp" class="font-mono font-bold text-theme-text">192.168.1.50</span>
+            <div class="p-3.5 bg-zinc-50 dark:bg-zinc-900/60 rounded-2xl border border-theme-border space-y-2 text-xs">
+                <div class="p-2.5 bg-amber-500/10 dark:bg-amber-500/15 border border-amber-500/25 rounded-xl space-y-1.5">
+                    <div class="flex justify-between items-center">
+                        <span class="text-amber-800 dark:text-amber-300 font-bold uppercase tracking-wider text-[10px]">Requesting IP:</span>
+                        <span id="approvalPeerIp" class="font-mono font-extrabold text-theme-text text-sm">192.168.1.50</span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="text-amber-800 dark:text-amber-300 font-bold uppercase tracking-wider text-[10px]">Origin:</span>
+                        <span id="approvalPeerOrigin" class="font-mono font-bold text-theme-text truncate max-w-[190px]">local</span>
+                    </div>
                 </div>
-                <div class="flex justify-between items-center">
-                    <span class="text-theme-muted">Origin:</span>
-                    <span id="approvalPeerOrigin" class="font-mono text-theme-text truncate max-w-[180px]">local</span>
-                </div>
-                <div class="flex justify-between items-center">
-                    <span class="text-theme-muted">Device / Label:</span>
-                    <span id="approvalPeerName" class="font-medium text-theme-text">Teammate</span>
+                <div class="flex justify-between items-center pt-0.5">
+                    <span class="text-theme-muted">Claimed Name:</span>
+                    <span id="approvalPeerName" class="text-theme-muted text-[11px] truncate max-w-[180px]">Teammate</span>
                 </div>
                 <div class="flex justify-between items-center">
                     <span class="text-theme-muted">Code Verified:</span>
@@ -3106,7 +3108,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                         const codeEl = document.getElementById('approvalPeerCode');
                         if (ipEl) ipEl.textContent = req.ip || 'unknown';
                         if (originEl) originEl.textContent = req.origin || 'local';
-                        if (nameEl) nameEl.textContent = req.peerName || 'Teammate Device';
+                        if (nameEl) nameEl.textContent = req.peerName ? `${req.peerName} (self-reported)` : 'Teammate (self-reported)';
                         if (codeEl) codeEl.textContent = req.code || '';
                         const modal = document.getElementById('hostPairApprovalModal');
                         if (modal) modal.classList.remove('hidden');
@@ -3280,12 +3282,12 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                                         codeBadge.className = "text-[10px] font-mono px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950 text-rose-600 dark:text-rose-400 font-bold";
                                     }
                                     if (codeStatus) codeStatus.textContent = `${count} client${count > 1 ? 's' : ''} locked after 5 failed tries. Other devices can still pair.`;
-                                } else if (data.isExpired) {
+                                } else if (data.isInvalidated || data.isExpired) {
                                     if (codeBadge) {
-                                        codeBadge.textContent = "Expired";
-                                        codeBadge.className = "text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-600 dark:text-amber-400 font-bold";
+                                        codeBadge.textContent = data.isInvalidated ? "Invalidated" : "Expired";
+                                        codeBadge.className = "text-[10px] font-mono px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950 text-rose-600 dark:text-rose-400 font-bold";
                                     }
-                                    if (codeStatus) codeStatus.textContent = "Code expired. Click New Code.";
+                                    if (codeStatus) codeStatus.textContent = data.isInvalidated ? "Code invalidated (10 failed tries). Click New Code." : "Code expired. Click New Code.";
                                 } else if (data.isUsed) {
                                     if (codeBadge) {
                                         codeBadge.textContent = "Used";

@@ -485,6 +485,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                     std::string tokenJson = "{\"ok\":true,\"code\":\"" + pairingMgr.currentCode() +
                                             "\",\"remainingSeconds\":" + std::to_string(pairingMgr.remainingSeconds()) +
                                             ",\"isExpired\":" + (pairingMgr.isExpired() ? "true" : "false") +
+                                            ",\"isInvalidated\":" + (pairingMgr.isInvalidated() ? "true" : "false") +
                                             ",\"isLocked\":" + (pairingMgr.isLocked() ? "true" : "false") +
                                             ",\"lockedClientsCount\":" + std::to_string(pairingMgr.lockedClientsCount()) +
                                             ",\"isUsed\":" + (pairingMgr.isUsed() ? "true" : "false") +
@@ -500,6 +501,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
                     std::string codeJson = "{\"ok\":true,\"code\":\"" + pairingMgr.currentCode() +
                                            "\",\"remainingSeconds\":" + std::to_string(pairingMgr.remainingSeconds()) +
                                            ",\"isExpired\":" + (pairingMgr.isExpired() ? "true" : "false") +
+                                           ",\"isInvalidated\":" + (pairingMgr.isInvalidated() ? "true" : "false") +
                                            ",\"isLocked\":" + (pairingMgr.isLocked() ? "true" : "false") +
                                            ",\"lockedClientsCount\":" + std::to_string(pairingMgr.lockedClientsCount()) +
                                            ",\"isUsed\":" + (pairingMgr.isUsed() ? "true" : "false") +

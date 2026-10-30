@@ -32,6 +32,7 @@ public:
     std::string currentCode() const;
     int remainingSeconds() const;
     bool isExpired() const;
+    bool isInvalidated() const;
     bool isLocked() const;
     bool isClientLocked(const std::string& clientKey) const;
     int lockedClientsCount() const;
@@ -76,6 +77,8 @@ private:
     std::vector<std::chrono::steady_clock::time_point> failedAttemptTimestamps_;
     bool isLocked_ = false;
     bool isUsed_ = false;
+    bool isInvalidated_ = false;
+    int currentCodeFailures_ = 0;
     int expirationSeconds_ = 300; // 5 minutes
 
     std::map<std::string, PendingPairRequest> pendingRequests_;

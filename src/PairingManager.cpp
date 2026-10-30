@@ -64,10 +64,12 @@ std::string PairingManager::generateNewCode() {
     currentCode_ = generate6DigitCode();
     codeCreatedAt_ = std::chrono::steady_clock::now();
     failedAttempts_ = 0;
+    currentCodeFailures_ = 0;
     failedAttemptsByClient_.clear();
     failedAttemptTimestamps_.clear();
     isLocked_ = false;
     isUsed_ = false;
+    isInvalidated_ = false;
     return currentCode_;
 }
 
@@ -76,7 +78,7 @@ std::string PairingManager::currentCode() const {
 }
 
 int PairingManager::remainingSeconds() const {
-    if (isUsed_) return 0;
+    if (isUsed_ || isInvalidated_) return 0;
     auto now = std::chrono::steady_clock::now();
     int elapsed = static_cast<int>(std::chrono::duration_cast<std::chrono::seconds>(now - codeCreatedAt_).count());
     int rem = expirationSeconds_ - elapsed;
@@ -84,7 +86,11 @@ int PairingManager::remainingSeconds() const {
 }
 
 bool PairingManager::isExpired() const {
-    return remainingSeconds() <= 0;
+    return isInvalidated_ || remainingSeconds() <= 0;
+}
+
+bool PairingManager::isInvalidated() const {
+    return isInvalidated_;
 }
 
 bool PairingManager::isLocked() const {
@@ -106,7 +112,14 @@ int PairingManager::lockedClientsCount() const {
 bool PairingManager::isClientLocked(const std::string& clientKey) const {
     if (clientKey.empty()) return false;
     auto it = failedAttemptsByClient_.find(clientKey);
-    return (it != failedAttemptsByClient_.end() && it->second >= 5);
+    if (it != failedAttemptsByClient_.end() && it->second >= 5) return true;
+    size_t pipe = clientKey.find('|');
+    if (pipe != std::string::npos) {
+        std::string ipOnly = clientKey.substr(0, pipe);
+        it = failedAttemptsByClient_.find(ipOnly);
+        if (it != failedAttemptsByClient_.end() && it->second >= 5) return true;
+    }
+    return false;
 }
 
 bool PairingManager::isUsed() const {
@@ -118,7 +131,7 @@ int PairingManager::failedAttempts(const std::string& clientKey) const {
         auto it = failedAttemptsByClient_.find(clientKey);
         return (it != failedAttemptsByClient_.end()) ? it->second : 0;
     }
-    int maxFails = failedAttempts_;
+    int maxFails = currentCodeFailures_;
     for (const auto& [ip, fails] : failedAttemptsByClient_) {
         if (fails > maxFails) maxFails = fails;
     }
@@ -142,8 +155,11 @@ PairingManager::PairSubmitResult PairingManager::submitCode(const std::string& c
                        }),
         failedAttemptTimestamps_.end());
 
+    // 3. For non-loopback clients, key the per-client lockout on IP only. Origin is attacker-controlled outside a browser.
+    bool isLoopbackIp = (clientIp.empty() || clientIp == "127.0.0.1" || clientIp == "::1" || clientIp == "localhost" ||
+                         clientIp.rfind("127.", 0) == 0);
     std::string clientKey = clientIp;
-    if (!origin.empty()) {
+    if (isLoopbackIp && !origin.empty()) {
         clientKey += "|" + origin;
     }
 
@@ -165,6 +181,20 @@ PairingManager::PairSubmitResult PairingManager::submitCode(const std::string& c
         return res;
     }
 
+    // 1. Check the global bucket BEFORE comparing the code. While it is full, return 429 for every submission,
+    // including the correct code, so the response leaks nothing.
+    if (failedAttemptTimestamps_.size() >= 10) {
+        res.rateLimited = true;
+        res.error = "Too many failed pairing attempts across clients. Rate limit exceeded (10 per minute).";
+        return res;
+    }
+
+    // 2. Once 10 global failures occur for the current code, invalidate that code (mark it expired)
+    if (isInvalidated_) {
+        res.error = "Pair code has been invalidated due to 10 failed attempts. Please generate a new code on the host.";
+        return res;
+    }
+
     if (isExpired()) {
         res.error = "Pair code has expired (valid for 5 minutes). Please request a new code from the host.";
         return res;
@@ -179,14 +209,12 @@ PairingManager::PairSubmitResult PairingManager::submitCode(const std::string& c
 
     bool codeMatches = (code.size() == 6 && code == currentCode_);
     if (!codeMatches) {
-        // Global limit across all clients for failed attempts: 10 failed attempts a minute; above it, return 429
-        if (failedAttemptTimestamps_.size() >= 10) {
-            res.rateLimited = true;
-            res.error = "Too many failed pairing attempts across clients. Rate limit exceeded (10 per minute).";
-            return res;
+        failedAttemptTimestamps_.push_back(now);
+        currentCodeFailures_++;
+        if (currentCodeFailures_ >= 10) {
+            isInvalidated_ = true;
         }
 
-        failedAttemptTimestamps_.push_back(now);
         int newFails = ++failedAttemptsByClient_[clientKey];
         if (newFails >= 5) {
             res.locked = true;
@@ -200,7 +228,7 @@ PairingManager::PairSubmitResult PairingManager::submitCode(const std::string& c
         return res;
     }
 
-    // Correct code from an unlocked client succeeds (skips global failed-attempts bucket)
+    // Correct code from an unlocked client succeeds
     res.success = true;
     res.locked = false;
     res.remainingAttempts = std::max(0, 5 - fails);

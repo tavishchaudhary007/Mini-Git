@@ -1275,6 +1275,26 @@ void test_r4_security_and_fixes() {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
+    // Determine local LAN IP for peer requests
+    socket_t sTmpLan = socket(AF_INET, SOCK_DGRAM, 0);
+    sockaddr_in loopbackAddrTmp{};
+    loopbackAddrTmp.sin_family = AF_INET;
+    loopbackAddrTmp.sin_addr.s_addr = inet_addr("8.8.8.8");
+    loopbackAddrTmp.sin_port = htons(53);
+    connect(sTmpLan, (struct sockaddr*)&loopbackAddrTmp, sizeof(loopbackAddrTmp));
+    sockaddr_in nameAddrTmp{};
+#ifdef _WIN32
+    int nameLenTmp = sizeof(nameAddrTmp);
+#else
+    socklen_t nameLenTmp = sizeof(nameAddrTmp);
+#endif
+    getsockname(sTmpLan, (struct sockaddr*)&nameAddrTmp, &nameLenTmp);
+    char lanIpBufTmp[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &nameAddrTmp.sin_addr, lanIpBufTmp, sizeof(lanIpBufTmp));
+    CLOSESOCK(sTmpLan);
+    std::string lanIp = lanIpBufTmp;
+    std::string peerHost = (!lanIp.empty() && lanIp != "127.0.0.1") ? lanIp : "127.0.0.1";
+
     // 1. Non-LAN mode returns 403 on /api/pair and /api/pair/status
     {
         std::string pairBody = "{\"code\":\"123456\"}";
@@ -1306,7 +1326,7 @@ void test_r4_security_and_fixes() {
         CHECK(fs::exists(dir / "subfolder"));
     }
 
-    // 3. R5-1: 10 cross-origin bad tries over loopback (403 refused), then LAN peer with correct code -> 200
+    // 3. R5-1 & R6-1: 15 cross-origin bad tries over loopback (403 refused), then LAN peer with correct code -> 200
     {
         // Host gets current code
         std::string codeReq = "GET /api/pair/code HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(lanPort) + "\r\nConnection: close\r\n\r\n";
@@ -1316,8 +1336,8 @@ void test_r4_security_and_fixes() {
         JsonValue codeJson = JsonValue::parse(codeResp.substr(cPos + 4));
         std::string activeCode = codeJson["code"].as_string();
 
-        // 10 cross-origin bad tries over loopback from rotating origins
-        for (int i = 1; i <= 10; ++i) {
+        // 15 cross-origin bad tries over loopback from rotating origins
+        for (int i = 1; i <= 15; ++i) {
             std::string badBody = "{\"code\":\"" + std::to_string(100000 + i) + "\"}";
             std::string req = "POST /api/pair HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(lanPort) +
                 "\r\nOrigin: http://evil-" + std::to_string(i) + ".com\r\nContent-Type: application/json\r\nContent-Length: " +
@@ -1328,25 +1348,6 @@ void test_r4_security_and_fixes() {
         }
 
         // LAN peer submits the correct code -> 200 OK (not blocked by 429!)
-        socket_t sTmp = socket(AF_INET, SOCK_DGRAM, 0);
-        sockaddr_in loopbackAddr{};
-        loopbackAddr.sin_family = AF_INET;
-        loopbackAddr.sin_addr.s_addr = inet_addr("8.8.8.8");
-        loopbackAddr.sin_port = htons(53);
-        connect(sTmp, (struct sockaddr*)&loopbackAddr, sizeof(loopbackAddr));
-        sockaddr_in nameAddr{};
-#ifdef _WIN32
-        int nameLen = sizeof(nameAddr);
-#else
-        socklen_t nameLen = sizeof(nameAddr);
-#endif
-        getsockname(sTmp, (struct sockaddr*)&nameAddr, &nameLen);
-        char lanIpBuf[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, &nameAddr.sin_addr, lanIpBuf, sizeof(lanIpBuf));
-        CLOSESOCK(sTmp);
-        std::string lanIp = lanIpBuf;
-        std::string peerHost = (!lanIp.empty() && lanIp != "127.0.0.1") ? lanIp : "127.0.0.1";
-
         std::string goodBody = "{\"code\":\"" + activeCode + "\",\"peerName\":\"Legit LAN Peer\"}";
         std::string goodReq = "POST /api/pair HTTP/1.1\r\nHost: " + peerHost + ":" + std::to_string(lanPort) +
             "\r\nOrigin: http://peer-laptop.local\r\nContent-Type: application/json\r\nContent-Length: " +
@@ -1389,25 +1390,6 @@ void test_r4_security_and_fixes() {
         CHECK(codeCheckJson["lockedClientsCount"].as_int64() >= 1);
 
         // Real LAN peer connecting from LAN IP (or non-locked client) submits the correct code
-        socket_t sTmp = socket(AF_INET, SOCK_DGRAM, 0);
-        sockaddr_in loopbackAddr{};
-        loopbackAddr.sin_family = AF_INET;
-        loopbackAddr.sin_addr.s_addr = inet_addr("8.8.8.8");
-        loopbackAddr.sin_port = htons(53);
-        connect(sTmp, (struct sockaddr*)&loopbackAddr, sizeof(loopbackAddr));
-        sockaddr_in nameAddr{};
-#ifdef _WIN32
-        int nameLen = sizeof(nameAddr);
-#else
-        socklen_t nameLen = sizeof(nameAddr);
-#endif
-        getsockname(sTmp, (struct sockaddr*)&nameAddr, &nameLen);
-        char lanIpBuf[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, &nameAddr.sin_addr, lanIpBuf, sizeof(lanIpBuf));
-        CLOSESOCK(sTmp);
-        std::string lanIp = lanIpBuf;
-        std::string peerHost = (!lanIp.empty() && lanIp != "127.0.0.1") ? lanIp : "127.0.0.1";
-
         std::string realBody = "{\"code\":\"" + correctCode + "\",\"peerName\":\"Real Peer\"}";
         std::string realReq = "POST /api/pair HTTP/1.1\r\nHost: " + peerHost + ":" + std::to_string(lanPort) +
             "\r\nOrigin: http://real-peer.local\r\nContent-Type: application/json\r\nContent-Length: " +
@@ -1461,6 +1443,149 @@ void test_r4_security_and_fixes() {
             "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(badDecide3.size()) + "\r\nConnection: close\r\n\r\n" + badDecide3;
         std::string resp3 = httpExchange("127.0.0.1", lanPort, req3);
         CHECK(resp3.find("400 Bad Request") != std::string::npos);
+    }
+
+    // 6. R6-1: Rotating Origin from one LAN IP must still lock after 5
+    {
+        // Unit level check: pm with non-loopback IP rotates Origin
+        {
+            PairingManager pm;
+            for (int i = 1; i <= 5; ++i) {
+                auto r = pm.submitCode("000000", "192.168.1.55", "Attacker", "http://rot-" + std::to_string(i) + ".com");
+                if (i < 5) {
+                    CHECK(!r.locked);
+                } else {
+                    CHECK(r.locked);
+                }
+            }
+            CHECK(pm.isClientLocked("192.168.1.55"));
+            auto rLocked = pm.submitCode(pm.currentCode(), "192.168.1.55", "Attacker", "http://rot-99.com");
+            CHECK(!rLocked.success);
+            CHECK(rLocked.locked);
+        }
+
+        // HTTP level check: rotating Origin over peerHost connects
+        std::string genReq = "POST /api/pair/generate-code HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(lanPort) +
+            "\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}";
+        std::string genResp = httpExchange("127.0.0.1", lanPort, genReq);
+        CHECK(genResp.find("200 OK") != std::string::npos);
+
+        for (int i = 1; i <= 6; ++i) {
+            std::string badBody = "{\"code\":\"000000\"}";
+            std::string atkReq = "POST /api/pair HTTP/1.1\r\nHost: " + peerHost + ":" + std::to_string(lanPort) +
+                "\r\nOrigin: http://rotating-origin-" + std::to_string(i) + ".com\r\nContent-Type: application/json\r\nContent-Length: " +
+                std::to_string(badBody.size()) + "\r\nConnection: close\r\n\r\n" + badBody;
+            std::string atkResp = httpExchange(peerHost, lanPort, atkReq);
+            if (i < 5) {
+                CHECK(atkResp.find("401 Unauthorized") != std::string::npos);
+            } else {
+                CHECK(atkResp.find("403 Forbidden") != std::string::npos);
+                CHECK(atkResp.find("locked") != std::string::npos);
+            }
+        }
+    }
+
+    // 7. R6-1: From one LAN client: 1000 wrong codes, then the correct code. It must NOT return 200.
+    {
+        // Unit level check
+        {
+            PairingManager pm;
+            std::string realCode = pm.currentCode();
+            for (int i = 0; i < 1000; ++i) {
+                pm.submitCode("000000", "192.168.1.77");
+            }
+            auto rCorrect = pm.submitCode(realCode, "192.168.1.77");
+            CHECK(!rCorrect.success);
+        }
+
+        // HTTP level check
+        std::string genReq = "POST /api/pair/generate-code HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(lanPort) +
+            "\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}";
+        std::string genResp = httpExchange("127.0.0.1", lanPort, genReq);
+        size_t gp = genResp.find("\r\n\r\n");
+        CHECK(gp != std::string::npos);
+        std::string activeCode = JsonValue::parse(genResp.substr(gp + 4))["code"].as_string();
+
+        for (int i = 1; i <= 1000; ++i) {
+            std::string badBody = "{\"code\":\"000000\"}";
+            std::string atkReq = "POST /api/pair HTTP/1.1\r\nHost: " + peerHost + ":" + std::to_string(lanPort) +
+                "\r\nOrigin: http://dos-attacker.local\r\nContent-Type: application/json\r\nContent-Length: " +
+                std::to_string(badBody.size()) + "\r\nConnection: close\r\n\r\n" + badBody;
+            std::string atkResp = httpExchange(peerHost, lanPort, atkReq);
+            CHECK(atkResp.find("200 OK") == std::string::npos);
+        }
+
+        std::string goodBody = "{\"code\":\"" + activeCode + "\"}";
+        std::string goodReq = "POST /api/pair HTTP/1.1\r\nHost: " + peerHost + ":" + std::to_string(lanPort) +
+            "\r\nOrigin: http://dos-attacker.local\r\nContent-Type: application/json\r\nContent-Length: " +
+            std::to_string(goodBody.size()) + "\r\nConnection: close\r\n\r\n" + goodBody;
+        std::string goodResp = httpExchange(peerHost, lanPort, goodReq);
+        CHECK(goodResp.find("200 OK") == std::string::npos);
+    }
+
+    // 8. R6-1: After invalidation, the old code fails even when correct, and a new code from generate-code works
+    {
+        // Unit level check
+        {
+            PairingManager pm;
+            std::string c1 = pm.currentCode();
+            CHECK(!pm.isInvalidated());
+            for (int i = 0; i < 10; ++i) {
+                pm.submitCode("000000", "192.168.1." + std::to_string(i + 10));
+            }
+            CHECK(pm.isInvalidated());
+            CHECK(pm.isExpired());
+            auto resOld = pm.submitCode(c1, "192.168.1.99");
+            CHECK(!resOld.success);
+
+            std::string c2 = pm.generateNewCode();
+            CHECK(!pm.isInvalidated());
+            auto resNew = pm.submitCode(c2, "192.168.1.99");
+            CHECK(resNew.success);
+        }
+
+        // HTTP level check
+        std::string genReq = "POST /api/pair/generate-code HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(lanPort) +
+            "\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}";
+        std::string genResp = httpExchange("127.0.0.1", lanPort, genReq);
+        size_t gp = genResp.find("\r\n\r\n");
+        CHECK(gp != std::string::npos);
+        std::string oldCode = JsonValue::parse(genResp.substr(gp + 4))["code"].as_string();
+
+        // 10 failures occur to invalidate oldCode
+        for (int i = 1; i <= 10; ++i) {
+            std::string badBody = "{\"code\":\"000000\"}";
+            std::string req = "POST /api/pair HTTP/1.1\r\nHost: " + peerHost + ":" + std::to_string(lanPort) +
+                "\r\nOrigin: http://peer-" + std::to_string(i) + ".local\r\nContent-Type: application/json\r\nContent-Length: " +
+                std::to_string(badBody.size()) + "\r\nConnection: close\r\n\r\n" + badBody;
+            std::string resp = httpExchange(peerHost, lanPort, req);
+            CHECK(resp.find("200 OK") == std::string::npos);
+        }
+
+        // Submitting old code fails even when correct
+        std::string oldTryBody = "{\"code\":\"" + oldCode + "\",\"peerName\":\"New Peer\"}";
+        std::string oldTryReq = "POST /api/pair HTTP/1.1\r\nHost: " + peerHost + ":" + std::to_string(lanPort) +
+            "\r\nOrigin: http://unlocked-peer.local\r\nContent-Type: application/json\r\nContent-Length: " +
+            std::to_string(oldTryBody.size()) + "\r\nConnection: close\r\n\r\n" + oldTryBody;
+        std::string oldTryResp = httpExchange(peerHost, lanPort, oldTryReq);
+        CHECK(oldTryResp.find("200 OK") == std::string::npos);
+
+        // Host generates new code
+        std::string genReq2 = "POST /api/pair/generate-code HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(lanPort) +
+            "\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}";
+        std::string genResp2 = httpExchange("127.0.0.1", lanPort, genReq2);
+        size_t gp2 = genResp2.find("\r\n\r\n");
+        CHECK(gp2 != std::string::npos);
+        std::string newCode = JsonValue::parse(genResp2.substr(gp2 + 4))["code"].as_string();
+        CHECK(newCode != oldCode);
+
+        // New code works
+        std::string newTryBody = "{\"code\":\"" + newCode + "\",\"peerName\":\"New Peer\"}";
+        std::string newTryReq = "POST /api/pair HTTP/1.1\r\nHost: " + peerHost + ":" + std::to_string(lanPort) +
+            "\r\nOrigin: http://unlocked-peer.local\r\nContent-Type: application/json\r\nContent-Length: " +
+            std::to_string(newTryBody.size()) + "\r\nConnection: close\r\n\r\n" + newTryBody;
+        std::string newTryResp = httpExchange(peerHost, lanPort, newTryReq);
+        CHECK(newTryResp.find("200 OK") != std::string::npos);
     }
 
     removeDir(dir);
