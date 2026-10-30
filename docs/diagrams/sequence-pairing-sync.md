@@ -12,48 +12,58 @@ sequenceDiagram
     participant TS as Teammate local server
     participant TR as Teammate Repository
 
-    Note over PM: constructor generates 6-digit code<br/>(valid 300 s)
+    Note over PM: CSPRNG generates 6-digit pair code<br/>(valid 300 s, single use)
     HO->>HS: GET /api/pair/code
     HS-->>HO: code, seconds left, LAN URL
-    Note over HO,T: host tells teammate the URL and code
+    Note over HO,T: Host shares LAN address and 6-digit code with teammate
 
-    T->>HS: POST /api/pair {code, peerName}
-    HS->>PM: submitCode(code, ip, name)
-    alt locked / used / expired / wrong (5 wrong attempts lock)
-        PM-->>HS: error
-        HS-->>T: 403 if locked, else 401
-    else correct
-        PM-->>HS: requestId (PENDING)
-        HS-->>T: requestId
+    T->>HS: POST /api/pair {code, peerName} (Origin, IP)
+    alt Host not in --lan mode or cross-origin over loopback
+        HS-->>T: 403 Forbidden
+    else Global rate limit exceeded (>= 10 fails in 60s across clients)
+        HS-->>T: 429 Too Many Requests (rate limited)
+    else Client locked (>= 5 failed attempts for this client IP)
+        HS-->>T: 403 Forbidden (pairing locked)
+    else Code invalidated (>= 10 total code failures)
+        HS-->>T: 401 Unauthorized (code invalidated, new code needed)
+    else Code expired or already used
+        HS-->>T: 401 Unauthorized (expired / used)
+    else Wrong code (< 5 attempts)
+        HS-->>T: 401 Unauthorized (remaining attempts shown)
+    else Correct code & unlocked client
+        HS->>PM: submitCode(code, ip, peerName, origin)
+        PM-->>HS: requestId (status: PENDING)
+        HS-->>T: 200 OK {status: "pending", requestId}
     end
 
     loop every 1.5 s
         HO->>HS: GET /api/pair/pending
-        HS->>PM: pendingRequests() (PENDING, under 120 s old)
+        HS->>PM: pendingRequests() (PENDING, < 120 s old)
     end
-    HO->>HS: POST /api/pair/decide {id, allow: true}
+    Note over HO: Approval modal displays requester IP,<br/>Origin, claimed name, and entered code
+    HO->>HS: POST /api/pair/decide {requestId, allow: true, customLabel}
     HS->>PM: decideRequest()
-    PM->>PM: code marked used, 64-hex token, add PairedPeer
+    PM->>PM: code marked used (single use),<br/>CSPRNG generates 32-byte session token (64 hex),<br/>records PairedPeer
 
     loop until approved or denied
         T->>HS: GET /api/pair/status?requestId=...
     end
-    HS-->>T: APPROVED + token
-    T->>T: store token in localStorage
+    HS-->>T: 200 OK {status: "approved", token: "64-hex"}
+    T->>T: Store token in localStorage
 
     Note over T,TR: Pull
-    T->>HS: GET /api/sync/bundle (X-MiniGit-Token)
-    HS->>PM: isValidSessionToken()
+    T->>HS: GET /api/sync/bundle (X-MiniGit-Token: token)
+    HS->>PM: isValidSessionToken(token)
     HS->>HR: exportBundleJson()
     HS-->>T: bundle JSON (objects, branches, base64 binaries)
     T->>TS: POST /api/sync/import-bundle
     TS->>TR: importBundleJson()
-    TR->>TR: verify every object hash (any mismatch: write nothing)
-    TR->>TR: save blobs, trees, commits in order
-    TR->>TR: per branch: create / fast-forward / up to date / peer-<branch>
+    TR->>TR: verify every object SHA-1 hash (mismatch rejects bundle, refs untouched)
+    TR->>TR: save blobs, trees, commits in dependency order
+    TR->>TR: per branch: create / fast-forward / up to date / diverged kept as peer-<branch>
     TS-->>T: result + new snapshot
 
-    Note over T,HR: Push is the reverse: teammate's bundle is POSTed to the host's /api/sync/import-bundle with the token
+    Note over T,HR: Push: Teammate exports bundle, POSTs to Host /api/sync/import-bundle with X-MiniGit-Token
 ```
 
 Image version: [png/sequence-pairing-sync.png](png/sequence-pairing-sync.png)

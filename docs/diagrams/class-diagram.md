@@ -27,6 +27,10 @@ classDiagram
     class BranchCmd
     class CheckoutCmd
     class MergeCmd
+    class UndoCmd
+    class RevertCmd
+    class StashCmd
+    class ReflogCmd
     class HtmlCmd
     class UiCmd
     class ServeCmd
@@ -50,14 +54,24 @@ classDiagram
         +diff(path) string
         +commitStats(hash) CommitStat
         +snapshot() Snapshot
-        +createBranch(name)
+        +createBranch(name, at)
+        +deleteBranch(name)
+        +branches() vector~string~
+        +currentBranch() string
+        +head() Hash
+        +branchTip(name) Hash
+        +branchExists(name) bool
         +checkout(target)
         +findMergeBase(h1, h2) Hash
         +merge(branch) string
         +mergeAbort() string
+        +isMerging() bool
+        +conflictedPaths() vector~string~
         +undo() string
         +stashSave(msg, untracked) string
         +stashPop() string
+        +hasStash() bool
+        +stashList() vector~StashEntry~
         +reflog() vector~ReflogEntry~
         +exportBundleJson() string
         +importBundleJson(json) string
@@ -147,15 +161,36 @@ classDiagram
     }
     class PairingManager {
         -string currentCode_
+        -time_point codeCreatedAt_
         -int failedAttempts_
+        -map~string, int~ failedAttemptsByClient_
+        -vector~time_point~ failedAttemptTimestamps_
         -bool isLocked_
+        -bool isUsed_
+        -bool isInvalidated_
+        -int currentCodeFailures_
+        -int expirationSeconds_
         -map~string, PendingPairRequest~ pendingRequests_
         -vector~PairedPeer~ pairedPeers_
         +generateNewCode() string
-        +submitCode(code, ip, name) PairSubmitResult
+        +currentCode() string
+        +remainingSeconds() int
+        +isExpired() bool
+        +isInvalidated() bool
+        +isLocked() bool
+        +isClientLocked(clientKey) bool
+        +lockedClientsCount() int
+        +isUsed() bool
+        +failedAttempts(clientKey) int
+        +submitCode(code, ip, name, origin, isCrossLoopback) PairSubmitResult
+        +pendingRequests() vector~PendingPairRequest~
+        +getRequestStatus(requestId) PendingPairRequest
         +decideRequest(id, allow, label) bool
         +isValidSessionToken(token) bool
+        +listPeers() vector~PairedPeer~
         +revokePeer(idOrToken) bool
+        +generate32ByteSessionToken()$ string
+        +generate6DigitCode()$ string
     }
     class JsonValue {
         -Type type_
@@ -178,7 +213,7 @@ classDiagram
         <<std>>
     }
 
-    CLI *-- "12" Command : owns
+    CLI *-- "16" Command : owns
     Command <|-- InitCmd
     Command <|-- AddCmd
     Command <|-- CommitCmd
@@ -188,6 +223,10 @@ classDiagram
     Command <|-- BranchCmd
     Command <|-- CheckoutCmd
     Command <|-- MergeCmd
+    Command <|-- UndoCmd
+    Command <|-- RevertCmd
+    Command <|-- StashCmd
+    Command <|-- ReflogCmd
     Command <|-- HtmlCmd
     Command <|-- UiCmd
     Command <|-- ServeCmd

@@ -21,6 +21,8 @@
 7. [Object Graph Evolution](#7-object-graph-evolution)
 8. [OOP & C++ Concept Map](#8-oop--c-concept-map)
 9. [Second Frontend: Web Studio (`minigit html`, `minigit ui`)](#9-second-frontend-web-studio-minigit-html-minigit-ui)
+   - [Web Security Model](#web-security-model)
+   - [Web Studio Features & Implementation](#web-studio-features--implementation)
 10. [More Diagrams](#10-more-diagrams)
 
 ---
@@ -38,7 +40,7 @@ flowchart TB
     subgraph FE["Layer 1: Front ends"]
         direction LR
         subgraph CLIF["Command line"]
-            Main["main.cpp"] --> CLI["CLI<br/>command registry"] --> Cmds["12 Command classes<br/>Commands.cpp"]
+            Main["main.cpp"] --> CLI["CLI<br/>command registry"] --> Cmds["16 Command classes<br/>Commands.cpp"]
         end
         subgraph WEB["Web Studio"]
             Server["HttpServer<br/>raw sockets, REST routes"]
@@ -123,6 +125,10 @@ classDiagram
     class BranchCmd
     class CheckoutCmd
     class MergeCmd
+    class UndoCmd
+    class RevertCmd
+    class StashCmd
+    class ReflogCmd
     class HtmlCmd
     class UiCmd
     class ServeCmd
@@ -146,14 +152,24 @@ classDiagram
         +diff(path) string
         +commitStats(hash) CommitStat
         +snapshot() Snapshot
-        +createBranch(name)
+        +createBranch(name, at)
+        +deleteBranch(name)
+        +branches() vector~string~
+        +currentBranch() string
+        +head() Hash
+        +branchTip(name) Hash
+        +branchExists(name) bool
         +checkout(target)
         +findMergeBase(h1, h2) Hash
         +merge(branch) string
         +mergeAbort() string
+        +isMerging() bool
+        +conflictedPaths() vector~string~
         +undo() string
         +stashSave(msg, untracked) string
         +stashPop() string
+        +hasStash() bool
+        +stashList() vector~StashEntry~
         +reflog() vector~ReflogEntry~
         +exportBundleJson() string
         +importBundleJson(json) string
@@ -243,15 +259,36 @@ classDiagram
     }
     class PairingManager {
         -string currentCode_
+        -time_point codeCreatedAt_
         -int failedAttempts_
+        -map~string, int~ failedAttemptsByClient_
+        -vector~time_point~ failedAttemptTimestamps_
         -bool isLocked_
+        -bool isUsed_
+        -bool isInvalidated_
+        -int currentCodeFailures_
+        -int expirationSeconds_
         -map~string, PendingPairRequest~ pendingRequests_
         -vector~PairedPeer~ pairedPeers_
         +generateNewCode() string
-        +submitCode(code, ip, name) PairSubmitResult
+        +currentCode() string
+        +remainingSeconds() int
+        +isExpired() bool
+        +isInvalidated() bool
+        +isLocked() bool
+        +isClientLocked(clientKey) bool
+        +lockedClientsCount() int
+        +isUsed() bool
+        +failedAttempts(clientKey) int
+        +submitCode(code, ip, name, origin, isCrossLoopback) PairSubmitResult
+        +pendingRequests() vector~PendingPairRequest~
+        +getRequestStatus(requestId) PendingPairRequest
         +decideRequest(id, allow, label) bool
         +isValidSessionToken(token) bool
+        +listPeers() vector~PairedPeer~
         +revokePeer(idOrToken) bool
+        +generate32ByteSessionToken()$ string
+        +generate6DigitCode()$ string
     }
     class JsonValue {
         -Type type_
@@ -274,7 +311,7 @@ classDiagram
         <<std>>
     }
 
-    CLI *-- "12" Command : owns
+    CLI *-- "16" Command : owns
     Command <|-- InitCmd
     Command <|-- AddCmd
     Command <|-- CommitCmd
@@ -284,6 +321,10 @@ classDiagram
     Command <|-- BranchCmd
     Command <|-- CheckoutCmd
     Command <|-- MergeCmd
+    Command <|-- UndoCmd
+    Command <|-- RevertCmd
+    Command <|-- StashCmd
+    Command <|-- ReflogCmd
     Command <|-- HtmlCmd
     Command <|-- UiCmd
     Command <|-- ServeCmd
@@ -351,7 +392,7 @@ The exception classes are drawn separately in [docs/diagrams/exceptions.md](docs
 
 - **Inheritance**:
   - `Blob`, `Tree`, `Commit` $\rightarrow$ `Object`
-  - Concrete commands (`InitCmd`, `AddCmd`, `CommitCmd`, `LogCmd`, `StatusCmd`, `DiffCmd`, `BranchCmd`, `CheckoutCmd`, `MergeCmd`, `HtmlCmd`, `UiCmd`, `ServeCmd`) $\rightarrow$ `Command`
+  - Concrete commands (`InitCmd`, `AddCmd`, `CommitCmd`, `LogCmd`, `StatusCmd`, `DiffCmd`, `BranchCmd`, `CheckoutCmd`, `MergeCmd`, `UndoCmd`, `RevertCmd`, `StashCmd`, `ReflogCmd`, `HtmlCmd`, `UiCmd`, `ServeCmd`) $\rightarrow$ `Command`
   - Custom exceptions (`NotARepoException`, `FileNotFoundException`, `InvalidObjectException`, `BranchException`, `NothingToCommitException`, `CheckoutException`, `MergeException`) $\rightarrow$ `MiniGitException` $\rightarrow$ `std::runtime_error`
 - **Composition**:
   - `Repository` owns `ObjectStore`, `Index`, `RefManager`
@@ -640,7 +681,7 @@ flowchart LR
 | Concept | Implementation in Mini-Git |
 |---|---|
 | **Encapsulation** | Strict private members with accessors in `Commit`, `Hash`, `Index`, `RefManager`, and `Repository`. |
-| **Inheritance** | Polymorphic hierarchies: `Object` (`Blob`, `Tree`, `Commit`), `Command` (12 concrete commands), and `MiniGitException`. |
+| **Inheritance** | Polymorphic hierarchies: `Object` (`Blob`, `Tree`, `Commit`), `Command` (16 concrete commands), and `MiniGitException`. |
 | **Polymorphism** | Dynamic dispatch via pure virtual methods (`execute()`, `serialize()`, `type()`, `category()`). |
 | **Abstract Classes** | `Object` and `Command` enforce interface contracts via pure virtual methods (`= 0`). |
 | **Templates** | Generic LCS algorithm `DiffEngine<T>` and type-safe object loading `ObjectStore::loadAs<T>()`. |
@@ -667,46 +708,122 @@ flowchart TD
     subgraph Live ["minigit ui / serve [--port N] [--no-open] [--lan]"]
         U1["UiCmd::execute()"] --> U2["HttpServer::run(repo, port, open, lan)"]
         U2 --> U3["Bind 127.0.0.1 (0.0.0.0 with --lan)<br/>try port .. port+29"]
-        U3 --> U4["Accept loop: parse request, route"]
+        U3 --> U4["Accept loop: parse request, validate Host & Origin, route"]
         U4 --> U5["GET / : rendered page"]
-        U4 --> U6["/api/* : call Repository,<br/>reply with JSON + fresh snapshot"]
-        U4 --> U7["/api/pair* : PairingManager"]
-        U4 --> U8["/api/sync/* : exportBundleJson / importBundleJson"]
-        U4 --> U9["/api/git/* : exportToGit / importFromGit"]
+        U4 --> U6["/api/snapshot : ETag conditional check<br/>(304 Not Modified or 200 OK + snapshot)"]
+        U4 --> U7["/api/* : call Repository,<br/>reply with JSON + fresh snapshot"]
+        U4 --> U8["/api/pair* : PairingManager"]
+        U4 --> U9["/api/sync/* : exportBundleJson / importBundleJson"]
+        U4 --> U10["/api/git/* : exportToGit / importFromGit"]
     end
 
-    subgraph Browser ["Browser page"]
-        B1["Files, editor, staging, commit"]
-        B2["Branches, merge, revert, undo"]
+    subgraph Browser ["Browser page (Fetch API)"]
+        B1["Files, editor, staging, commit, delete"]
+        B2["Branches, merge conflict banner, revert, undo"]
         B3["Stash, reflog, time travel"]
-        B4["Commit graph, health banner"]
+        B4["Lane-based DAG graph, dashboard mini DAG"]
         B5["Pair panel, pull / push, Git Bridge"]
     end
 
     H4 --> Browser
     U5 --> Browser
-    Browser -->|"fetch, poll /api/snapshot every 2.5 s"| U6
+    Browser -->|"fetch, poll /api/snapshot (If-None-Match: ETag)"| U6
+    U6 -->>|"304 Not Modified (empty) or 200 OK + new snapshot + ETag"| Browser
+    Browser -->|"POST /api/* (JSON body, CSRF/Origin check)"| U7
 ```
 
 **REST API (`HttpServer.cpp`)**
 
-| Area | Endpoints |
-|---|---|
-| Page and state | `GET /`, `GET /api/snapshot` |
-| Working tree | `POST /api/file/write`, `/api/stage`, `/api/unstage`, `/api/discard`, `/api/commit` |
-| Branches and history | `POST /api/branch/create`, `/api/branch/delete`, `/api/checkout`, `/api/merge`, `/api/revert`, `/api/undo` |
-| Stash and reflog | `POST /api/stash/save`, `/api/stash/pop`, `GET /api/stash/list`, `GET /api/reflog`, `POST /api/reflog/restore` |
-| Pairing | `GET /api/token`, `GET /api/pair/code`, `POST /api/pair/generate-code`, `POST /api/pair`, `GET /api/pair/status`, `GET /api/pair/pending`, `POST /api/pair/decide`, `GET /api/pair/peers`, `POST /api/pair/revoke` |
-| Sync | `GET /api/sync/bundle`, `POST /api/sync/import-bundle` |
-| Git Bridge | `GET /api/git/status`, `POST /api/git/export`, `POST /api/git/import` |
+Every API endpoint enforces strict access levels:
+- **Loopback only**: Accessible strictly from `127.0.0.1` / `localhost`. Calls from non-loopback clients return `403 Forbidden`. State-changing POST requests enforce same-origin verification and `Content-Type: application/json`.
+- **LAN (public)**: Requires server to be started with `--lan`. Reachable by LAN peers; subject to brute-force rate limits and client lockouts.
+- **LAN + Token**: Requires server `--lan` and a valid session token passed via `X-MiniGit-Token` header. Missing or invalid tokens return `401 Unauthorized`. Loopback clients from local origin are exempt on export.
 
-- **Static vs live:** `report.html` is a read-only snapshot taken when the command ran; it lives inside `.minigit/` so it is never untracked. `minigit ui` is live and every action goes through `Repository`.
-- **Refresh:** the page polls `/api/snapshot` every 2.5 s; the host's pending pair requests are polled every 1.5 s.
-- **Commit graph:** a single column of commits sorted by time, with branch labels. It does not draw parent edges or one lane per branch.
-- **Network access:** loopback clients can use every endpoint. Non-loopback clients (only possible with `--lan`) can reach only `/api/pair`, `/api/pair/status`, `/api/sync/bundle` and `/api/sync/import-bundle` (anything else returns 403); the sync endpoints also need a valid `X-MiniGit-Token` (401 otherwise).
-- **Pairing:** 6-digit code, valid 300 s, single use, locked after 5 wrong attempts; host approval issues a 64-hex session token; peers can be revoked.
-- **Hashing:** real repositories are always hashed by the C++ SHA-1 `Hasher`. Only the offline demo mode (opening `templates/frontend.html` directly) simulates a repository in the browser, using SHA-256 from the Web Crypto API.
-- **Styling** loads from CDNs (Tailwind, Font Awesome, Google Fonts).
+| Method | Endpoint | Access Level | Description |
+|---|---|---|---|
+| `GET` | `/` or `/index.html` | Loopback only | Serves the interactive Web Studio single-page application. |
+| `GET` | `/api/snapshot` | Loopback only | Returns full repository snapshot JSON with `ETag`. Supports `If-None-Match` returning `304 Not Modified`. |
+| `GET` | `/api/token` | Loopback only | Returns current pair code, remaining countdown, lockout state, and LAN URL. |
+| `GET` | `/api/pair/code` | Loopback only | Returns pair code status, remaining seconds, lockout flags, and failure counts. |
+| `POST` | `/api/pair/generate-code` | Loopback only | Generates a new 6-digit CSPRNG pair code; resets failed attempt counters. |
+| `POST` | `/api/pair` | LAN (public) | Submits 6-digit pair code for host approval (`code`, `peerName`). Returns `requestId`. Locked after 5 bad attempts (403); rate limited at 10 fails/min across clients (429); code invalidated after 10 failures. |
+| `GET` | `/api/pair/status` | LAN (public) | Polled by peer (`?requestId=...`) to retrieve approval decision and session token. |
+| `GET` | `/api/pair/pending` | Loopback only | Polled by host every 1.5 s to display pending pairing requests (< 120s old). |
+| `POST` | `/api/pair/decide` | Loopback only | Host allows or denies pairing (`requestId`, `allow`, optional custom label). Issues 32-byte session token on approval. |
+| `GET` | `/api/pair/peers` | Loopback only | Lists all currently paired peers (IDs, IPs, labels, timestamps). |
+| `POST` | `/api/pair/revoke` | Loopback only | Revokes access for a paired peer by ID or token. |
+| `POST` | `/api/file/save`, `/api/file/write` | Loopback only | Writes content to a file in the working tree (`path`, `content`). |
+| `POST` | `/api/file/delete` | Loopback only | Deletes a file from the working tree and removes it from staging if staged. |
+| `POST` | `/api/stage` | Loopback only | Stages changes for a path (`path: "."` stages all changes). |
+| `POST` | `/api/unstage` | Loopback only | Unstages changes for a path (`path: "."` unstages all). |
+| `POST` | `/api/discard` | Loopback only | Reverts working tree changes to staged/HEAD state, or deletes untracked file. |
+| `POST` | `/api/commit` | Loopback only | Creates a new commit from staged changes (`message`). |
+| `POST` | `/api/branch/create` | Loopback only | Creates a new branch (`name`, optional `at` commit hash). |
+| `POST` | `/api/branch/delete` | Loopback only | Deletes an existing branch (`name`). |
+| `POST` | `/api/checkout` | Loopback only | Switches branch or checks out a commit hash in detached HEAD mode (`target`). |
+| `POST` | `/api/merge` | Loopback only | Merges target branch (`branch`), or aborts an active merge (`abort: true`). |
+| `POST` | `/api/revert` | Loopback only | Creates an atomic revert commit undoing specified commit (`hash`). |
+| `POST` | `/api/undo` | Loopback only | Undoes the last commit via reflog, preserving working copy modifications. |
+| `POST` | `/api/stash/save` | Loopback only | Stashes uncommitted changes (`message`, optional `includeUntracked`). |
+| `POST` | `/api/stash/pop` | Loopback only | Pops most recent stash into working tree; refuses if conflicts occur. |
+| `GET` | `/api/stash/list` | Loopback only | Lists all saved stash entries with index and descriptions. |
+| `GET` | `/api/reflog` | Loopback only | Returns chronological history of HEAD movements and actions. |
+| `POST` | `/api/reflog/restore` | Loopback only | Restores HEAD to a specific historical reflog commit (`hash`). |
+| `GET` | `/api/sync/bundle` | LAN + Token | Exports full repository snapshot bundle as JSON. Local loopback origin is exempt from token. |
+| `POST` | `/api/sync/import-bundle` | LAN + Token | Verifies and imports JSON bundle objects and branches into repository. |
+| `GET` | `/api/git/status` | Loopback only | Checks standard Git repository presence and bridge readiness. |
+| `POST` | `/api/git/export` | Loopback only | Exports current repository snapshot to standard Git repository. |
+| `POST` | `/api/git/import` | Loopback only | Imports current working directory into Mini-Git commit. |
+
+### Web Security Model
+
+The Web Studio implements defense-in-depth security hardening against common web and local network attack vectors:
+
+- **Loopback binding by default**: The HTTP server binds exclusively to `127.0.0.1` unless explicitly started with `--lan` (which binds to `0.0.0.0`). Non-loopback network traffic is rejected at the socket layer when `--lan` is not active.
+- **Host-header validation (DNS rebinding defense)**: Every HTTP request validates the `Host` header against the bound port and permitted hostnames (`127.0.0.1`, `localhost`, or IPv4 literal when `--lan` is enabled). Requests with unrecognized or external host headers are rejected with `403 Forbidden`, preventing DNS rebinding exploits from executing unauthorized local actions.
+- **Origin / CSRF validation**: All state-changing HTTP requests (`POST`, `PUT`, `DELETE`) arriving over loopback verify that the `Origin` header matches `http://127.0.0.1:<port>` or `http://localhost:<port>`. Malicious cross-origin requests from external web pages are blocked with `403 Forbidden`. Cross-origin pairing over loopback is strictly prohibited.
+- **JSON Content-Type requirement**: State-changing loopback endpoints require `Content-Type: application/json` (returning `400 Bad Request` if omitted). This prevents simple cross-site HTML form submissions (`application/x-www-form-urlencoded` or `multipart/form-data`) from triggering repository mutations.
+- **Token-protected sync endpoints**: Non-loopback access to sync endpoints (`/api/sync/bundle` and `/api/sync/import-bundle`) requires a valid 32-byte cryptographic session token in the `X-MiniGit-Token` header. Missing, invalid, or revoked tokens return `401 Unauthorized`. All non-sync, non-pairing endpoints return `403 Forbidden` to external clients.
+- **Payload size limit (50 MB)**: Request bodies are capped at 50 MB via `Content-Length` enforcement (`> 50 * 1024 * 1024`). Excessive payloads are rejected immediately with `413 Payload Too Large`.
+- **Path traversal and input validation**: All repository paths are canonicalized through `Repository::resolveRepoPath`:
+  - Paths cannot be empty, `.`, or `..`.
+  - Absolute paths are strictly rejected.
+  - Paths escaping the repository boundary (via `..` lexical resolution) throw exceptions.
+  - Internal `.minigit` files and directories cannot be read or written.
+  - Filenames containing illegal filesystem characters (`\`, `:`, `*`, `?`, `"`, `<`, `>`, `|`, or control characters) are rejected.
+  - Branch names imported from sync bundles are validated via `RefManager::isValidBranchName` (rejecting `..`, control characters, or `peer-` prefixes).
+  - Every object in imported bundles (blobs, trees, commits) has its SHA-1 recomputed and verified before any object is written to disk. If any object hash fails verification, the bundle is rejected and references remain untouched.
+
+### Web Studio Features & Implementation
+
+- **Frontend communication**: The Studio uses the native **Fetch API** (`async fetch()` with JSON payloads, i.e. modern AJAX) for all client-server communication. It does not use `XMLHttpRequest` or external libraries like jQuery.
+- **Conditional ETag / 304 polling**: The browser polls `/api/snapshot` every 2.5 seconds using standard HTTP caching: requests send `If-None-Match` containing the last received snapshot version `ETag`. If no repository changes occurred, the server responds with `304 Not Modified` and zero body bytes, eliminating unnecessary data transfer and DOM re-renders. Host pending pair requests are polled every 1.5 seconds.
+- **Commit graph DAG visualizer**:
+  - **Topological ordering**: Commits are arranged in topological order (newest to oldest, respecting parent-child relationships, timestamps, and HEAD).
+  - **Lane-based branch layout**: Each active branch is assigned a distinct colored lane (`DAG_PALETTE`) with intelligent lane reuse to prevent collisions.
+  - **Merge commits**: Render curved SVG bezier edges joining two parent lanes, with inner dot indicators identifying merge points.
+  - **Unreachable commit toggle**: Commits not reachable from any current branch tip or HEAD (e.g. after undo, branch deletion, or detached reset) are tracked. An interactive SVG badge (`👁 Show N unreachable commit(s)` / `✕ Hide N unreachable commit(s)`) allows toggling their visibility, rendered with dashed borders and connections.
+  - **Dashboard mini graph**: A compact horizontal DAG graph on the main dashboard visualizes the repository's topology and recent history at a glance.
+- **Interactive merge conflict banner**: When a merge results in conflicts (`isMerging()` is true), a prominent top banner appears detailing unmerged paths. Each conflicting file includes a direct editor link and a **Mark Resolved** button (staging the file), alongside an **Abort merge** button that cleanly cancels the merge and restores previous state.
+- **Unsaved-changes protection**:
+  - Switching branches with dirty editor buffers opens an interactive modal offering **Save**, **Discard**, or **Cancel** (where Cancel aborts the switch without altering the active branch, and Discard clears dirty buffers only after checkout succeeds).
+  - Staging individual files, staging all, or committing while unsaved edits exist prompts for user confirmation.
+- **Caret preservation on refresh**: When the background polling updates active editor content, the editor captures `selectionStart` and `selectionEnd` and restores the selection range, ensuring typing is never interrupted.
+- **File deletion**: Files can be deleted directly from the Web Studio via the editor toolbar delete button or the file tree action, calling `POST /api/file/delete` and removing any dirty buffer entries.
+- **Branch at any commit**: From the commit detail view or commit graph, users can create a new branch pointing directly to any historical commit (`POST /api/branch/create` with `at` hash parameter).
+- **Detached-HEAD badge**: When HEAD is detached, the branch dropdown displays `(detached at <hash>)`, the dashboard displays a detached badge, and the commit graph labels the active commit with a distinct `HEAD` badge.
+- **Read-only binary files**: Binary files (containing NUL bytes) display `"binary file, not shown"` and lock the editor in `readOnly` mode to avoid accidental corruption.
+- **P2P button loading states**: Pull and Push buttons display spinning notch icons (`fa-circle-notch fa-spin`), show real-time labels ("Pulling...", "Pushing..."), and disable duplicate clicks while sync operations are active.
+- **Pairing security**:
+  - 6-digit pair code generated using CSPRNG (`std::random_device`), valid for **300 seconds** (5 minutes), single-use upon host approval.
+  - Host approval modal displays the requester's **IP address**, **Origin**, **claimed name**, and the **code entered**.
+  - **Per-client lockout**: 5 failed code attempts lock out that client IP (`403 Forbidden`) until a new code is generated on the host.
+  - **Global rate limit**: 10 failed attempts across all clients within 60 seconds triggers `429 Too Many Requests`.
+  - **Code invalidation**: 10 total failed attempts permanently invalidate the code, requiring the host to generate a new one.
+  - Approving a request generates a 32-byte CSPRNG session token (64 hex characters).
+  - Host can view paired peers and revoke any token at any time.
+- **Static vs live**: `minigit html` writes a standalone snapshot to `.minigit/report.html`; `minigit ui` is interactive and all operations execute through `Repository`.
+- **Hashing**: Real repositories use C++ SHA-1 `Hasher`. Offline browser-only demo mode simulates hashing via the Web Crypto API.
 
 ---
 

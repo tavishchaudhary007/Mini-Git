@@ -11,7 +11,7 @@ flowchart TB
     subgraph FE["Layer 1: Front ends"]
         direction LR
         subgraph CLIF["Command line"]
-            Main["main.cpp"] --> CLI["CLI<br/>command registry"] --> Cmds["12 Command classes<br/>Commands.cpp"]
+            Main["main.cpp"] --> CLI["CLI<br/>command registry"] --> Cmds["16 Command classes<br/>Commands.cpp"]
         end
         subgraph WEB["Web Studio"]
             Server["HttpServer<br/>raw sockets, REST routes"]
@@ -46,7 +46,7 @@ flowchart TB
 
     User --> Terminal --> Main
     User --> Browser
-    Browser <-->|"HTTP JSON API<br/>poll every 2.5 s"| Server
+    Browser <-->|"HTTP JSON API<br/>ETag / 304 polling"| Server
     Server --> Exporter --> Tmpl
     Server --> Pair
     Cmds --> Repo
