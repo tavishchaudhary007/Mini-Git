@@ -390,6 +390,33 @@ int main() {
         auto rExp = pm.submitCode(pm.currentCode(), "192.168.1.50");
         CHECK(!rExp.success);
         CHECK(rExp.error.find("expired") != std::string::npos);
+
+        // Group 4 (Bug 15): Failures do NOT invalidate code globally; per-IP lockout with exponential backoff
+        PairingManager pmG4;
+        std::string validCodeG4 = pmG4.currentCode();
+        for (int i = 0; i < 10; ++i) {
+            pmG4.submitCode("000000", "192.168.1.88");
+        }
+        CHECK(pmG4.isClientLocked("192.168.1.88"));
+        CHECK(!pmG4.isInvalidated());
+        CHECK(!pmG4.isExpired());
+        // Another client with correct code succeeds
+        auto rClientB = pmG4.submitCode(validCodeG4, "192.168.1.99");
+        CHECK(rClientB.success);
+
+        // Group 4 (Bug 16): Clear pending requests on new code or expiry; decideRequest refuses expired/used
+        PairingManager pmClear;
+        auto rPending = pmClear.submitCode(pmClear.currentCode(), "192.168.1.77");
+        CHECK(rPending.success);
+        CHECK(pmClear.pendingRequests().size() == 1);
+        pmClear.generateNewCode();
+        CHECK(pmClear.pendingRequests().empty());
+
+        auto rPending2 = pmClear.submitCode(pmClear.currentCode(), "192.168.1.77");
+        CHECK(rPending2.success);
+        CHECK(pmClear.decideRequest(rPending2.requestId, true));
+        CHECK(pmClear.isUsed());
+        CHECK(!pmClear.decideRequest(rPending2.requestId, true));
     }
     std::cout << "  -> PASSED: PairingManager 6-digit code, expiration, 5-wrong lockout, single-use, and revoke verified.\n";
 
@@ -504,6 +531,10 @@ int main() {
         CHECK(statObj["status"].as_string() == "approved");
         std::string sessionToken = statObj["token"].as_string();
         CHECK(sessionToken.size() == 64); // 32 random bytes represented as 64 hex characters
+
+        // Group 4 (Bug 16): Token handed out once, then deleted; subsequent poll returns 404
+        std::string secondStatResp = httpExchange(lanIp, testPort, statReq);
+        CHECK(secondStatResp.find("404 Not Found") != std::string::npos);
 
         // Sync bundle using valid session token
         std::string syncReq = "GET /api/sync/bundle HTTP/1.1\r\nHost: " + lanIp + "\r\nX-MiniGit-Token: " + sessionToken + "\r\nConnection: close\r\n\r\n";

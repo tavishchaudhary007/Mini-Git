@@ -651,11 +651,29 @@ static void handleClientConnection(socket_t clientSock, sockaddr_in clientAddr, 
                         if (parseRequestBody(body, bj, pe)) reqId = getOptionalString(bj, "requestId");
                     }
                     PendingPairRequest statusReq;
+                    std::string approvedToken;
+                    bool ipForbidden = false;
                     {
                         std::lock_guard<std::recursive_mutex> pLock(pairingMutex);
                         statusReq = pairingMgr.getRequestStatus(reqId);
+                        if (!statusReq.requestId.empty() && statusReq.status == PendingPairRequest::APPROVED) {
+                            std::string curIp(clientIpStr);
+                            bool isLoopReq = (curIp == "127.0.0.1" || curIp == "::1" || curIp == "localhost" || curIp.rfind("127.", 0) == 0);
+                            bool isLoopOrig = (statusReq.clientIp == "127.0.0.1" || statusReq.clientIp == "::1" || statusReq.clientIp == "localhost" || statusReq.clientIp.rfind("127.", 0) == 0);
+                            bool ipMatches = (curIp == statusReq.clientIp || (isLoopReq && isLoopOrig));
+                            if (!ipMatches && !statusReq.clientIp.empty() && statusReq.clientIp != "unknown") {
+                                ipForbidden = true;
+                            } else {
+                                approvedToken = statusReq.sessionToken;
+                                pairingMgr.deleteRequest(reqId);
+                            }
+                        }
                     }
-                    if (reqId.empty() || statusReq.requestId.empty()) {
+                    if (ipForbidden) {
+                        sendHttpResponse(clientSock, 403, "Forbidden", "application/json; charset=utf-8",
+                                         "{\"ok\":false,\"error\":\"Forbidden: session token can only be retrieved by the requesting IP\"}",
+                                         corsOrigin);
+                    } else if (reqId.empty() || statusReq.requestId.empty()) {
                         sendHttpResponse(clientSock, 404, "Not Found", "application/json; charset=utf-8",
                                          "{\"ok\":false,\"status\":\"unknown\",\"error\":\"Unknown or expired pairing request\"}",
                                          corsOrigin);
@@ -664,7 +682,7 @@ static void handleClientConnection(socket_t clientSock, sockaddr_in clientAddr, 
                                          "{\"ok\":true,\"status\":\"pending\"}", corsOrigin);
                     } else if (statusReq.status == PendingPairRequest::APPROVED) {
                         sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",
-                                         "{\"ok\":true,\"status\":\"approved\",\"token\":\"" + statusReq.sessionToken + "\"}",
+                                         "{\"ok\":true,\"status\":\"approved\",\"token\":\"" + approvedToken + "\"}",
                                          corsOrigin);
                     } else {
                         sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8",

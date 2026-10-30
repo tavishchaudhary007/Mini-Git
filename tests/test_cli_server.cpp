@@ -1541,13 +1541,16 @@ void test_r4_security_and_fixes() {
             PairingManager pm;
             std::string c1 = pm.currentCode();
             CHECK(!pm.isInvalidated());
-            for (int i = 0; i < 10; ++i) {
-                pm.submitCode("000000", "192.168.1." + std::to_string(i + 10));
+            for (int i = 0; i < 5; ++i) {
+                pm.submitCode("000000", "192.168.1.10");
             }
-            CHECK(pm.isInvalidated());
-            CHECK(pm.isExpired());
+            CHECK(!pm.isInvalidated());
+            CHECK(pm.isClientLocked("192.168.1.10"));
+            auto resLocked = pm.submitCode(c1, "192.168.1.10");
+            CHECK(!resLocked.success);
+            CHECK(resLocked.locked);
             auto resOld = pm.submitCode(c1, "192.168.1.99");
-            CHECK(!resOld.success);
+            CHECK(resOld.success);
 
             std::string c2 = pm.generateNewCode();
             CHECK(!pm.isInvalidated());

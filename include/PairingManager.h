@@ -57,6 +57,8 @@ public:
     std::vector<PendingPairRequest> pendingRequests() const;
     PendingPairRequest getRequestStatus(const std::string& requestId) const;
     bool decideRequest(const std::string& requestId, bool allow, const std::string& customLabel = "");
+    bool deleteRequest(const std::string& requestId);
+    void clearPendingRequests();
 
     // Session token validation & paired-peers list with Revoke
     bool isValidSessionToken(const std::string& token) const;
@@ -74,6 +76,7 @@ private:
     std::chrono::steady_clock::time_point codeCreatedAt_;
     int failedAttempts_ = 0;
     std::map<std::string, int> failedAttemptsByClient_;
+    std::map<std::string, std::chrono::steady_clock::time_point> clientLockoutUntil_;
     std::vector<std::chrono::steady_clock::time_point> failedAttemptTimestamps_;
     bool isLocked_ = false;
     bool isUsed_ = false;

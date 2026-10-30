@@ -60,13 +60,19 @@ std::string PairingManager::generate32ByteSessionToken() {
     return generateRandomHex(64);
 }
 
+void PairingManager::clearPendingRequests() {
+    pendingRequests_.clear();
+}
+
 std::string PairingManager::generateNewCode() {
     currentCode_ = generate6DigitCode();
     codeCreatedAt_ = std::chrono::steady_clock::now();
     failedAttempts_ = 0;
     currentCodeFailures_ = 0;
     failedAttemptsByClient_.clear();
+    clientLockoutUntil_.clear();
     failedAttemptTimestamps_.clear();
+    pendingRequests_.clear();
     isLocked_ = false;
     isUsed_ = false;
     isInvalidated_ = false;
@@ -86,7 +92,12 @@ int PairingManager::remainingSeconds() const {
 }
 
 bool PairingManager::isExpired() const {
-    return isInvalidated_ || remainingSeconds() <= 0;
+    if (isInvalidated_) return true;
+    bool expired = (remainingSeconds() <= 0);
+    if (expired) {
+        const_cast<PairingManager*>(this)->clearPendingRequests();
+    }
+    return expired;
 }
 
 bool PairingManager::isInvalidated() const {
@@ -111,13 +122,28 @@ int PairingManager::lockedClientsCount() const {
 
 bool PairingManager::isClientLocked(const std::string& clientKey) const {
     if (clientKey.empty()) return false;
+    auto now = std::chrono::steady_clock::now();
+    auto itLock = clientLockoutUntil_.find(clientKey);
+    if (itLock != clientLockoutUntil_.end() && now < itLock->second) {
+        return true;
+    }
     auto it = failedAttemptsByClient_.find(clientKey);
-    if (it != failedAttemptsByClient_.end() && it->second >= 5) return true;
+    if (it != failedAttemptsByClient_.end() && it->second >= 5) {
+        if (itLock != clientLockoutUntil_.end()) return now < itLock->second;
+        return true;
+    }
     size_t pipe = clientKey.find('|');
     if (pipe != std::string::npos) {
         std::string ipOnly = clientKey.substr(0, pipe);
+        itLock = clientLockoutUntil_.find(ipOnly);
+        if (itLock != clientLockoutUntil_.end() && now < itLock->second) {
+            return true;
+        }
         it = failedAttemptsByClient_.find(ipOnly);
-        if (it != failedAttemptsByClient_.end() && it->second >= 5) return true;
+        if (it != failedAttemptsByClient_.end() && it->second >= 5) {
+            if (itLock != clientLockoutUntil_.end()) return now < itLock->second;
+            return true;
+        }
     }
     return false;
 }
@@ -189,9 +215,8 @@ PairingManager::PairSubmitResult PairingManager::submitCode(const std::string& c
         return res;
     }
 
-    // 2. Once 10 global failures occur for the current code, invalidate that code (mark it expired)
     if (isInvalidated_) {
-        res.error = "Pair code has been invalidated due to 10 failed attempts. Please generate a new code on the host.";
+        res.error = "Pair code has been invalidated. Please generate a new code on the host.";
         return res;
     }
 
@@ -211,12 +236,12 @@ PairingManager::PairSubmitResult PairingManager::submitCode(const std::string& c
     if (!codeMatches) {
         failedAttemptTimestamps_.push_back(now);
         currentCodeFailures_++;
-        if (currentCodeFailures_ >= 10) {
-            isInvalidated_ = true;
-        }
+        // Do NOT invalidate the code globally because of failures; keep per-IP lockout with exponential backoff
 
         int newFails = ++failedAttemptsByClient_[clientKey];
         if (newFails >= 5) {
+            int backoffSec = 5 * (1 << std::min(6, newFails - 5));
+            clientLockoutUntil_[clientKey] = now + std::chrono::seconds(backoffSec);
             res.locked = true;
             res.remainingAttempts = 0;
             res.error = "Pairing locked after 5 failed attempts. Please generate a new code on the host.";
@@ -272,13 +297,33 @@ PendingPairRequest PairingManager::getRequestStatus(const std::string& requestId
     return notFound;
 }
 
+bool PairingManager::deleteRequest(const std::string& requestId) {
+    auto it = pendingRequests_.find(requestId);
+    if (it != pendingRequests_.end()) {
+        pendingRequests_.erase(it);
+        return true;
+    }
+    return false;
+}
+
 bool PairingManager::decideRequest(const std::string& requestId, bool allow, const std::string& customLabel) {
+    if (isExpired() || isUsed()) {
+        return false;
+    }
+
     auto it = pendingRequests_.find(requestId);
     if (it == pendingRequests_.end()) {
         return false;
     }
 
     if (it->second.status != PendingPairRequest::PENDING) {
+        return false;
+    }
+
+    auto now = std::chrono::steady_clock::now();
+    auto sec = std::chrono::duration_cast<std::chrono::seconds>(now - it->second.requestedAt).count();
+    if (sec > 120) {
+        it->second.status = PendingPairRequest::DENIED;
         return false;
     }
 
