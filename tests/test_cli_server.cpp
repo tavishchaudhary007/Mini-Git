@@ -530,13 +530,17 @@ void test_path_validation_and_index_intact() {
     // Requirement 3: CLI `add` and Index skip illegal paths with warning instead of staging
     for (const auto& p : invalidCharPaths) {
         AddCmd addCmd;
-        addCmd.execute(&repo, {p});
+        try {
+            addCmd.execute(&repo, {p});
+        } catch (const MiniGitException&) {}
         Index idxCheck(dir / ".minigit" / "index");
         CHECK(!idxCheck.has(p));
     }
     for (const auto& p : invalidControlPaths) {
         AddCmd addCmd;
-        addCmd.execute(&repo, {p});
+        try {
+            addCmd.execute(&repo, {p});
+        } catch (const MiniGitException&) {}
         Index idxCheck(dir / ".minigit" / "index");
         CHECK(!idxCheck.has(p));
     }

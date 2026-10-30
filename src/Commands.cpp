@@ -52,13 +52,6 @@ void AddCmd::execute(Repository* repo, const Args& args) {
         }
     }
     if (hadIllegal && stagedCount == 0) {
-#ifdef _WIN32
-        char progName[MAX_PATH];
-        DWORD len = GetModuleFileNameA(NULL, progName, MAX_PATH);
-        if (len > 0 && std::string(progName).find("test_cli_server") != std::string::npos) {
-            return;
-        }
-#endif
         throw MiniGitException("no valid files staged");
     }
 }
