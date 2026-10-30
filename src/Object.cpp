@@ -4,6 +4,8 @@
 #include "Exceptions.h"
 #include "FileUtil.h"
 #include "Hasher.h"
+#include <vector>
+#include "PathSafety.h"
 
 Hash Object::hash() const { return Hash(Hasher::sha1(raw())); }
 
@@ -17,7 +19,24 @@ std::unique_ptr<Object> Object::deserialize(const std::string& raw) {
     throw InvalidObjectException("unknown object type: " + type);
 }
 
+void Tree::dropPrefixParents() {
+    std::vector<std::string> toDrop;
+    for (const auto& [p, _] : entries_) {
+        std::string prefix = p + "/";
+        for (const auto& [other, _] : entries_) {
+            if (other.size() > prefix.size() && other.rfind(prefix, 0) == 0) {
+                toDrop.push_back(p);
+                break;
+            }
+        }
+    }
+    for (const auto& p : toDrop) {
+        entries_.erase(p);
+    }
+}
+
 std::string Tree::serialize() const {
+    const_cast<Tree*>(this)->dropPrefixParents();
     std::string out;
     for (const auto& [path, h] : entries_) out += h.str() + " " + path + "\n";
     return out;
@@ -27,7 +46,9 @@ Tree Tree::parse(const std::string& body) {
     Tree t;
     for (const auto& line : splitLines(body)) {
         if (line.size() < 42) continue;
-        t.set(line.substr(41), Hash(line.substr(0, 40)));
+        std::string p = line.substr(41);
+        if (!isSafeRepoPath(p)) throw InvalidObjectException("unsafe path in tree: " + p);
+        t.set(p, Hash(line.substr(0, 40)));
     }
     return t;
 }

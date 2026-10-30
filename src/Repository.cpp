@@ -1,4 +1,5 @@
 #include "Repository.h"
+#include "PathSafety.h"
 #include <algorithm>
 #include <cstdlib>
 #include <ctime>
@@ -67,19 +68,25 @@ std::string Repository::resolveRepoPath(const std::string& pathArg, bool isRepoR
     if (inPath.is_absolute()) {
         throw MiniGitException("invalid path: absolute paths are not allowed: " + pathArg);
     }
-    fs::path full;
-    if (isRepoRelative) {
-        full = (root_ / inPath).lexically_normal();
-    } else {
-        full = fs::weakly_canonical(fs::absolute(inPath));
-    }
+    fs::path targetPath = isRepoRelative ? (root_ / inPath) : fs::absolute(inPath);
     fs::path normRoot = fs::weakly_canonical(root_);
+
+    fs::path cur = normRoot;
+    fs::path relIn = isRepoRelative ? inPath : targetPath.lexically_relative(normRoot);
+    for (const auto& elem : relIn) {
+        cur /= elem;
+        if (isLinkOrSymlink(cur)) {
+            throw MiniGitException("path is outside the repository: " + pathArg);
+        }
+    }
+
+    fs::path full = fs::weakly_canonical(targetPath);
     fs::path rel = full.lexically_relative(normRoot);
     std::string relStr = rel.generic_string();
     if (relStr.empty() || relStr == ".") {
         throw MiniGitException("invalid path: refers to repository root");
     }
-    if (relStr.rfind("..", 0) == 0) {
+    if (relStr.rfind("..", 0) == 0 || rel.is_absolute()) {
         throw MiniGitException("path is outside the repository: " + pathArg);
     }
     if (relStr == ".minigit" || relStr.rfind(".minigit/", 0) == 0) {
@@ -215,7 +222,7 @@ void Repository::add(const std::string& pathArg, bool isRepoRelative) {
         std::vector<std::string> added;
         for (const auto& f : workingFiles()) {
             if (hasIllegalPathChars(f)) {
-                std::cerr << "warning: skipping file with illegal characters in path: " << f << "\n";
+                std::cerr << "warning: skipping file with illegal characters in path: " << escapePath(f) << "\n";
                 continue;
             }
             addFile(f);
@@ -223,7 +230,7 @@ void Repository::add(const std::string& pathArg, bool isRepoRelative) {
         }
         std::vector<std::string> gone;
         for (const auto& [path, h] : index_.entries())
-            if (!fs::exists(root_ / path)) gone.push_back(path);
+            if (!fs::exists(root_ / path) || fs::is_directory(root_ / path)) gone.push_back(path);
         for (const auto& g : gone) index_.remove(g);
         removeConflicts(gitDir_, added);
         removeConflicts(gitDir_, gone);
@@ -238,7 +245,7 @@ void Repository::add(const std::string& pathArg, bool isRepoRelative) {
         for (const auto& f : workingFiles()) {
             if (f.rfind(prefix, 0) == 0) {
                 if (hasIllegalPathChars(f)) {
-                    std::cerr << "warning: skipping file with illegal characters in path: " << f << "\n";
+                    std::cerr << "warning: skipping file with illegal characters in path: " << escapePath(f) << "\n";
                     continue;
                 }
                 addFile(f);
@@ -246,8 +253,9 @@ void Repository::add(const std::string& pathArg, bool isRepoRelative) {
             }
         }
         std::vector<std::string> gone;
+        if (index_.has(rel)) gone.push_back(rel);
         for (const auto& [path, h] : index_.entries())
-            if (path.rfind(prefix, 0) == 0 && !fs::exists(root_ / path)) gone.push_back(path);
+            if (path.rfind(prefix, 0) == 0 && (!fs::exists(root_ / path) || fs::is_directory(root_ / path))) gone.push_back(path);
         for (const auto& g : gone) index_.remove(g);
         removeConflicts(gitDir_, added);
         removeConflicts(gitDir_, gone);
@@ -466,6 +474,20 @@ Hash Repository::commit(const std::string& message) {
 
     Tree tree;
     for (const auto& [path, h] : index_.entries()) tree.set(path, h);
+    tree.dropPrefixParents();
+
+    std::vector<std::string> indexDrop;
+    for (const auto& [path, h] : index_.entries()) {
+        if (!tree.entries().count(path)) {
+            indexDrop.push_back(path);
+        }
+    }
+    for (const auto& p : indexDrop) {
+        index_.remove(p);
+    }
+    if (!indexDrop.empty()) {
+        index_.save();
+    }
 
     if (parent2.empty() && !parent.empty() && store_.loadAs<Commit>(parent)->tree() == tree.hash())
         throw NothingToCommitException("nothing to commit (no changes staged)");
@@ -527,7 +549,7 @@ Status Repository::status() const {
     for (const auto& [path, h] : index_.entries()) {
         auto it = head.find(path);
         if (it == head.end() || it->second != h) s.staged.push_back(path);
-        if (!fs::exists(root_ / path)) s.deleted.push_back(path);
+        if (!fs::exists(root_ / path) || fs::is_directory(root_ / path)) s.deleted.push_back(path);
         else if (hashWorking(path) != h) s.modified.push_back(path);
     }
     // files in HEAD but removed from the index are staged deletions
@@ -554,7 +576,7 @@ std::string Repository::diff(const std::string& pathArg, bool isRepoRelative) co
 
     for (const auto& path : targets) {
         auto oldBlob = store_.loadAs<Blob>(index_.get(path));
-        std::string now = fs::exists(root_ / path) ? readFile(root_ / path) : "";
+        std::string now = (fs::exists(root_ / path) && !fs::is_directory(root_ / path)) ? readFile(root_ / path) : "";
         if (oldBlob->content() == now) continue;
 
         filesChanged++;
@@ -777,14 +799,48 @@ void Repository::restoreCommit(const Hash& c) {
     auto tree = store_.loadAs<Tree>(store_.loadAs<Commit>(c)->tree());
     const auto& target = tree->entries();
 
+    for (const auto& [path, h] : target) {
+        if (!isSafeRepoPath(path)) {
+            throw MiniGitException("refusing to restore commit with unsafe path: " + path);
+        }
+        fs::path cur = root_;
+        std::error_code ec;
+        for (const auto& elem : fs::path(path)) {
+            cur /= elem;
+            if (isLinkOrSymlink(cur)) {
+                throw MiniGitException("refusing to write through symlink: " + path);
+            }
+        }
+    }
+
     for (const auto& [path, h] : index_.entries()) {       // remove files absent in target
         if (target.count(path)) continue;
-        fs::remove(root_ / path);
-        for (fs::path d = (root_ / path).parent_path(); d != root_ && fs::is_empty(d); d = d.parent_path())
-            fs::remove(d);
+        fs::path full = root_ / path;
+        std::error_code ec;
+        if (fs::exists(full, ec)) {
+            if (fs::is_directory(full, ec)) {
+                fs::remove_all(full, ec);
+            } else {
+                fs::remove(full, ec);
+            }
+        }
+        for (fs::path d = full.parent_path(); d != root_ && !d.empty() && fs::is_directory(d, ec) && fs::is_empty(d, ec); d = d.parent_path()) {
+            fs::remove(d, ec);
+        }
     }
-    for (const auto& [path, h] : target)                   // write files from target
-        writeFile(root_ / path, store_.loadAs<Blob>(h)->content());
+    for (const auto& [path, h] : target) {                  // write files from target
+        fs::path full = root_ / path;
+        std::error_code ec;
+        if (fs::exists(full, ec) && fs::is_directory(full, ec)) {
+            fs::remove_all(full, ec);
+        }
+        for (fs::path d = full.parent_path(); d != root_ && !d.empty(); d = d.parent_path()) {
+            if (fs::exists(d, ec) && !fs::is_directory(d, ec)) {
+                fs::remove(d, ec);
+            }
+        }
+        writeFile(full, store_.loadAs<Blob>(h)->content());
+    }
 
     index_.replace(target);
     index_.save();
@@ -1460,6 +1516,15 @@ std::string Repository::importBundleJson(const std::string& bundleJson) {
             Tree t;
             if (objVal.contains("data") && objVal["data"].is_object()) {
                 for (const auto& [p, hVal] : objVal["data"].as_object()) {
+                    if (!isSafeRepoPath(p)) {
+                        std::map<std::string, JsonValue> errRes;
+                        errRes["ok"] = JsonValue(false);
+                        errRes["error"] = JsonValue("Unsafe path in bundle tree: " + p);
+                        errRes["objectsImported"] = JsonValue(0);
+                        errRes["objectsPresent"] = JsonValue(0);
+                        errRes["objectsRejected"] = JsonValue(0);
+                        return JsonValue(errRes).serialize();
+                    }
                     t.set(p, Hash(hVal.as_string()));
                 }
             }
@@ -1538,6 +1603,7 @@ std::string Repository::importBundleJson(const std::string& bundleJson) {
     }
 
     // Process Branches
+    std::vector<std::string> warnings;
     std::vector<std::string> branchesCreated;
     std::vector<std::string> branchesFastForwarded;
     std::vector<std::string> branchesSkippedDiverged;
@@ -1558,6 +1624,20 @@ std::string Repository::importBundleJson(const std::string& bundleJson) {
             if (hStr.size() != 40) continue;
             Hash target(hStr);
             if (!store_.exists(target)) continue;
+
+            try {
+                auto cCheck = store_.loadAs<Commit>(target);
+            } catch (const InvalidObjectException& e) {
+                std::string warnMsg = "Branch '" + bName + "' tip " + target.shortStr() + " does not point to a commit (" + e.what() + "); skipped.";
+                warnings.push_back(warnMsg);
+                branchesSkippedInvalid.push_back(bName);
+                continue;
+            } catch (...) {
+                std::string warnMsg = "Branch '" + bName + "' tip " + target.shortStr() + " is invalid; skipped.";
+                warnings.push_back(warnMsg);
+                branchesSkippedInvalid.push_back(bName);
+                continue;
+            }
 
             try {
                 if (!refs_.branchExists(bName)) {
@@ -1683,6 +1763,7 @@ std::string Repository::importBundleJson(const std::string& bundleJson) {
     resObj["branchesDiverged"] = makeJsonArr(branchesSkippedDiverged);
     resObj["branchesUpToDate"] = makeJsonArr(branchesUpToDate);
     resObj["branchesSkippedInvalid"] = makeJsonArr(branchesSkippedInvalid);
+    resObj["warnings"] = makeJsonArr(warnings);
     resObj["peerRefs"] = makeJsonArr(peerRefs);
 
     return JsonValue(resObj).serialize();

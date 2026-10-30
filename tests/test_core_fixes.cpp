@@ -14,6 +14,11 @@
 #include <sstream>
 #include <vector>
 #include "Repository.h"
+#include "PathSafety.h"
+#include "Commands.h"
+#include "Json.h"
+#include <algorithm>
+#include "Hasher.h"
 #include "FileUtil.h"
 
 namespace fs = std::filesystem;
@@ -637,6 +642,409 @@ void test_fix31_create_branch_at_commit() {
     std::cout << "PASSED\n";
 }
 
+
+// H1 (HIGH) Path traversal through bundle import
+void test_h1_bundle_import_path_traversal() {
+    std::cout << "[Test H1] Bundle import path traversal rejection... " << std::flush;
+    fs::path dir = fs::current_path() / "test_core_repo_h1";
+    cleanDir(dir);
+    Repository::init(dir);
+    Repository repo(dir);
+
+    writeFile(dir / "initial.txt", "initial file content\n");
+    repo.add("initial.txt", true);
+    Hash initCommit = repo.commit("initial commit");
+    Hash headBefore = repo.head();
+    CHECK(headBefore == initCommit);
+
+    // List of crafted bad paths
+    std::vector<std::string> badPaths = {
+        "../pwned.txt",
+        "/tmp/abs.txt",
+        ".minigit/HEAD",
+        ".MINIGIT/HEAD",
+        "C:/abs.txt",
+        "C:abs.txt",
+        "foo\\pwned.txt",
+        "foo/./bar.txt",
+        "foo/../bar.txt",
+        ".minigit/config",
+        ".MINIGIT/config",
+        std::string("control\0path.txt", 16),
+        "control\x01path.txt",
+        "control\x1fpath.txt",
+        "control\npath.txt",
+        "control\rpath.txt"
+    };
+
+    fs::path outsideCanary = fs::current_path() / "pwned.txt";
+    std::error_code ec;
+    fs::remove(outsideCanary, ec);
+
+    for (size_t i = 0; i < badPaths.size(); ++i) {
+        const std::string& bp = badPaths[i];
+        std::string blobContent = "evil payload " + std::to_string(i);
+        Blob evilBlob(blobContent);
+        Hash bHash = evilBlob.hash();
+
+        // Calculate expected tree hash manually
+        std::string treeBody = bHash.str() + " " + bp + "\n";
+        Hash tHash = Hash(Hasher::sha1("tree\n" + treeBody));
+
+        // Craft commit
+        std::string cBody = "tree " + tHash.str() + "\nparent " + initCommit.str() + "\nauthor Attacker <bad@evil.com>\ntime 1700000000\n\nEvil commit\n";
+        Hash cHash = Hash(Hasher::sha1("commit\n" + cBody));
+
+        // Build bundle JSON
+        std::map<std::string, JsonValue> objs;
+        // blob obj
+        std::map<std::string, JsonValue> blobObj;
+        blobObj["type"] = JsonValue("blob");
+        blobObj["content"] = JsonValue(blobContent);
+        objs[bHash.str()] = JsonValue(blobObj);
+
+        // tree obj
+        std::map<std::string, JsonValue> treeObj;
+        treeObj["type"] = JsonValue("tree");
+        std::map<std::string, JsonValue> treeData;
+        treeData[bp] = JsonValue(bHash.str());
+        treeObj["data"] = JsonValue(treeData);
+        objs[tHash.str()] = JsonValue(treeObj);
+
+        // commit obj
+        std::map<std::string, JsonValue> commitObj;
+        commitObj["type"] = JsonValue("commit");
+        std::map<std::string, JsonValue> commitData;
+        commitData["tree"] = JsonValue(tHash.str());
+        commitData["parent"] = JsonValue(initCommit.str());
+        commitData["author"] = JsonValue("Attacker <bad@evil.com>");
+        commitData["message"] = JsonValue("Evil commit");
+        commitData["time"] = JsonValue(static_cast<int64_t>(1700000000));
+        commitObj["data"] = JsonValue(commitData);
+        objs[cHash.str()] = JsonValue(commitObj);
+
+        std::map<std::string, JsonValue> branches;
+        branches["evil_branch"] = JsonValue(cHash.str());
+
+        std::map<std::string, JsonValue> bundle;
+        bundle["objects"] = JsonValue(objs);
+        bundle["branches"] = JsonValue(branches);
+
+        std::string bundleJson = JsonValue(bundle).serialize();
+
+        std::string resStr = repo.importBundleJson(bundleJson);
+        JsonValue resJson = JsonValue::parse(resStr);
+        CHECK(resJson.contains("ok"));
+        CHECK(resJson["ok"].as_bool() == false);
+
+        // HEAD and refs must remain untouched
+        CHECK(repo.head() == initCommit);
+        CHECK(!repo.branchExists("evil_branch"));
+        CHECK(!fs::exists(outsideCanary));
+    }
+
+    // Direct Tree::parse with unsafe path must throw InvalidObjectException
+    bool parseThrew = false;
+    try {
+        Tree::parse("0123456789abcdef0123456789abcdef01234567 ../evil.txt\n");
+    } catch (const InvalidObjectException&) {
+        parseThrew = true;
+    }
+    CHECK(parseThrew);
+
+    // Direct restoreCommit with unsafe path must throw and refuse to write
+    ObjectStore store(dir / ".minigit" / "objects");
+    Blob bSafe("payload");
+    Hash bSafeHash = store.save(bSafe);
+
+    // Craft a commit with a tree containing an unsafe path
+    Tree rawEvilTree;
+    rawEvilTree.set("../pwned.txt", bSafeHash);
+    Hash evilTreeHash = store.save(rawEvilTree);
+    Commit evilCommit(evilTreeHash, initCommit, "evil", "evil", 1700000000);
+    Hash evilCommitHash = store.save(evilCommit);
+
+    bool checkoutThrew = false;
+    try {
+        repo.checkout(evilCommitHash.str());
+    } catch (const MiniGitException&) {
+        checkoutThrew = true;
+    }
+    CHECK(checkoutThrew);
+    CHECK(!fs::exists(outsideCanary));
+    CHECK(repo.head() == initCommit);
+
+    removeDir(dir);
+    std::cout << "PASSED\n";
+}
+
+// H2 (HIGH) The web file API follows symlinks
+void test_h2_web_file_api_symlinks() {
+    std::cout << "[Test H2] Web file API symlink refusal... " << std::flush;
+    fs::path dir = fs::current_path() / "test_core_repo_h2";
+    cleanDir(dir);
+    Repository::init(dir);
+    Repository repo(dir);
+
+    writeFile(dir / "f.txt", "normal file\n");
+    repo.add("f.txt", true);
+    repo.commit("initial");
+
+    // Outside temp dir
+    fs::path outsideDir = fs::temp_directory_path() / "test_h2_outside_dir";
+    cleanDir(outsideDir);
+    writeFile(outsideDir / "secret.txt", "top secret data\n");
+
+    // Create symlink/junction inside repo pointing to outsideDir
+    fs::path linkPath = dir / "outside_link";
+#ifdef _WIN32
+    std::string linkCmd = "cmd.exe /c mklink /J \"" + linkPath.string() + "\" \"" + outsideDir.string() + "\" >nul 2>&1";
+    std::system(linkCmd.c_str());
+#else
+    std::error_code ec;
+    fs::create_directory_symlink(outsideDir, linkPath, ec);
+#endif
+
+    // Save endpoint uses resolveRepoPath(p, true)
+    bool saveThrew = false;
+    try {
+        repo.resolveRepoPath("outside_link/secret.txt", true);
+    } catch (const MiniGitException&) {
+        saveThrew = true;
+    }
+    CHECK(saveThrew);
+
+    // Delete endpoint uses resolveRepoPath(p, true)
+    bool delThrew = false;
+    try {
+        repo.resolveRepoPath("outside_link/secret.txt", true);
+    } catch (const MiniGitException&) {
+        delThrew = true;
+    }
+    CHECK(delThrew);
+
+    // Stage endpoint uses repo.add(p, true)
+    bool stageThrew = false;
+    try {
+        repo.add("outside_link/secret.txt", true);
+    } catch (const MiniGitException&) {
+        stageThrew = true;
+    }
+    CHECK(stageThrew);
+
+    // Also test directly addressing the symlink itself
+    bool linkThrew = false;
+    try {
+        repo.resolveRepoPath("outside_link", true);
+    } catch (const MiniGitException&) {
+        linkThrew = true;
+    }
+    CHECK(linkThrew);
+
+    // Verify outside file is completely untouched
+    CHECK(fs::exists(outsideDir / "secret.txt"));
+    CHECK(readFile(outsideDir / "secret.txt") == "top secret data\n");
+
+    // Clean up
+#ifdef _WIN32
+    std::string rmCmd = "cmd.exe /c rmdir \"" + linkPath.string() + "\" >nul 2>&1";
+    std::system(rmCmd.c_str());
+#else
+    fs::remove(linkPath);
+#endif
+    removeDir(outsideDir);
+    removeDir(dir);
+    std::cout << "PASSED\n";
+}
+
+// M1 (MED) Replacing a file with a folder of the same name corrupts the repo
+void test_m1_replace_file_with_folder() {
+    std::cout << "[Test M1] Replacing a file with a folder of same name... " << std::flush;
+    fs::path dir = fs::current_path() / "test_core_repo_m1";
+    cleanDir(dir);
+    Repository::init(dir);
+    Repository repo(dir);
+
+    // Initial commit with file 'd'
+    writeFile(dir / "d", "file content of d\n");
+    repo.add("d", true);
+    Hash c1 = repo.commit("commit with file d");
+    repo.createBranch("br_file", c1);
+
+    // Repro steps: rm d; mkdir d; echo x > d/x; add .; commit
+    fs::remove(dir / "d");
+    fs::create_directories(dir / "d");
+    writeFile(dir / "d" / "x", "content inside d/x\n");
+
+    // Status before staging: 'd' must be listed as deleted, NOT modified!
+    Status sBefore = repo.status();
+    CHECK(std::find(sBefore.deleted.begin(), sBefore.deleted.end(), "d") != sBefore.deleted.end());
+    CHECK(std::find(sBefore.modified.begin(), sBefore.modified.end(), "d") == sBefore.modified.end());
+
+    repo.add(".");
+
+    // Commit the change
+    Hash c2 = repo.commit("replaced file d with folder d containing x");
+
+    // Status must now be completely clean
+    Status sAfter = repo.status();
+    CHECK(sAfter.clean());
+
+    // Tree of c2 must have 'd/x' and must NOT contain 'd'
+    ObjectStore store(dir / ".minigit" / "objects");
+    auto t2 = store.loadAs<Tree>(store.loadAs<Commit>(c2)->tree());
+    CHECK(t2->entries().count("d/x") == 1);
+    CHECK(t2->entries().count("d") == 0);
+
+    // Checkout back to br_file (commit c1): replaces folder with file safely
+    repo.checkout("br_file");
+    CHECK(fs::is_regular_file(dir / "d"));
+    CHECK(!fs::is_directory(dir / "d"));
+    CHECK(readFile(dir / "d") == "file content of d\n");
+    CHECK(!fs::exists(dir / "d" / "x"));
+    CHECK(repo.status().clean());
+
+    // Checkout forward to main (commit c2): replaces file with folder safely
+    repo.checkout("main");
+    CHECK(fs::is_directory(dir / "d"));
+    CHECK(fs::is_regular_file(dir / "d" / "x"));
+    CHECK(readFile(dir / "d" / "x") == "content inside d/x\n");
+    CHECK(repo.status().clean());
+
+    // Checkout back and forth once more
+    repo.checkout("br_file");
+    CHECK(fs::is_regular_file(dir / "d"));
+    CHECK(repo.status().clean());
+    repo.checkout("main");
+    CHECK(fs::is_regular_file(dir / "d" / "x"));
+    CHECK(repo.status().clean());
+
+    removeDir(dir);
+    std::cout << "PASSED\n";
+}
+
+// L1 (LOW) Bundle import accepts branch tips that point at a blob or tree
+void test_l1_bundle_import_non_commit_tips() {
+    std::cout << "[Test L1] Bundle import non-commit tip verification... " << std::flush;
+    fs::path dir = fs::current_path() / "test_core_repo_l1";
+    cleanDir(dir);
+    Repository::init(dir);
+    Repository repo(dir);
+
+    // Valid commit
+    writeFile(dir / "base.txt", "base\n");
+    repo.add("base.txt", true);
+    Hash validCommit = repo.commit("valid commit");
+
+    // Create a blob and tree to use as non-commit targets
+    Blob b("a raw blob");
+    Hash blobHash = b.hash();
+    Tree t;
+    t.set("sub.txt", blobHash);
+    Hash treeHash = t.hash();
+
+    // Craft bundle with a valid branch and two invalid branches (one pointing to blob, one to tree)
+    std::map<std::string, JsonValue> objs;
+
+    std::map<std::string, JsonValue> blobObj;
+    blobObj["type"] = JsonValue("blob");
+    blobObj["content"] = JsonValue("a raw blob");
+    objs[blobHash.str()] = JsonValue(blobObj);
+
+    std::map<std::string, JsonValue> treeObj;
+    treeObj["type"] = JsonValue("tree");
+    std::map<std::string, JsonValue> treeData;
+    treeData["sub.txt"] = JsonValue(blobHash.str());
+    treeObj["data"] = JsonValue(treeData);
+    objs[treeHash.str()] = JsonValue(treeObj);
+
+    std::map<std::string, JsonValue> branches;
+    branches["branch_blob_tip"] = JsonValue(blobHash.str());
+    branches["branch_tree_tip"] = JsonValue(treeHash.str());
+    branches["branch_valid"] = JsonValue(validCommit.str());
+
+    std::map<std::string, JsonValue> bundle;
+    bundle["objects"] = JsonValue(objs);
+    bundle["branches"] = JsonValue(branches);
+
+    std::string resStr = repo.importBundleJson(JsonValue(bundle).serialize());
+    JsonValue res = JsonValue::parse(resStr);
+
+    CHECK(res.contains("ok"));
+    CHECK(res.contains("warnings"));
+    const auto& warns = res["warnings"].as_array();
+    CHECK(!warns.empty());
+
+    CHECK(res.contains("branchesSkippedInvalid"));
+    const auto& skipped = res["branchesSkippedInvalid"].as_array();
+    bool foundBlobTip = false, foundTreeTip = false;
+    for (const auto& v : skipped) {
+        if (v.as_string() == "branch_blob_tip") foundBlobTip = true;
+        if (v.as_string() == "branch_tree_tip") foundTreeTip = true;
+    }
+    CHECK(foundBlobTip);
+    CHECK(foundTreeTip);
+
+    // Neither invalid branch was created
+    CHECK(!repo.branchExists("branch_blob_tip"));
+    CHECK(!repo.branchExists("branch_tree_tip"));
+
+    removeDir(dir);
+    std::cout << "PASSED\n";
+}
+
+// L3 (LOW) mg add prints raw control characters from filenames in warnings & non-zero exit
+void test_l3_escape_path_and_nonzero_exit() {
+    std::cout << "[Test L3] escapePath formatting & single illegal path non-zero exit... " << std::flush;
+    fs::path dir = fs::current_path() / "test_core_repo_l3";
+    cleanDir(dir);
+    Repository::init(dir);
+    Repository repo(dir);
+
+    // 1. Verify escapePath escaping rules
+    CHECK(escapePath("normal_file.txt") == "normal_file.txt");
+    CHECK(escapePath("file\nname.txt") == "file\\x0aname.txt");
+    CHECK(escapePath("file\rname.txt") == "file\\x0dname.txt");
+    CHECK(escapePath("file\tname.txt") == "file\\x09name.txt");
+    CHECK(escapePath("file\\name.txt") == "file\\\\name.txt");
+    CHECK(escapePath(std::string("null\0byte.txt", 13)) == "null\\x00byte.txt");
+
+    auto oldCwd = fs::current_path();
+    fs::current_path(dir);
+
+    // 2. AddCmd on single illegal filename throws MiniGitException (causes CLI to exit non-zero)
+    AddCmd addCmd;
+    bool singleIllegalThrew = false;
+    try {
+        addCmd.execute(&repo, {"illegal:name.txt"});
+    } catch (const MiniGitException&) {
+        singleIllegalThrew = true;
+    }
+    CHECK(singleIllegalThrew);
+
+    // Verify nothing staged
+    Index idx1(dir / ".minigit" / "index");
+    CHECK(idx1.empty());
+
+    // 3. AddCmd with a mix of valid and illegal file stages the valid file and does not throw
+    writeFile(dir / "valid.txt", "valid content\n");
+    bool mixThrew = false;
+    try {
+        addCmd.execute(&repo, {"valid.txt", "illegal:name.txt"});
+    } catch (const MiniGitException&) {
+        mixThrew = true;
+    }
+    CHECK(!mixThrew);
+
+    Index idx2(dir / ".minigit" / "index");
+    CHECK(idx2.has("valid.txt"));
+    CHECK(!idx2.has("illegal:name.txt"));
+
+    fs::current_path(oldCwd);
+    removeDir(dir);
+    std::cout << "PASSED\n";
+}
+
 int main() {
     std::cout << "\n============================================\n";
     std::cout << "  Mini-Git Core Fixes Automated Tests\n";
@@ -661,7 +1069,12 @@ int main() {
     runTest("test_fix13_14", test_fix13_14_minigit_ignore_and_caching);
     runTest("test_fix15", test_fix15_export_to_git_no_nul_file);
     runTest("test_fix16", test_fix16_import_from_git_already_up_to_date);
-    runTest("test_fix31", test_fix31_create_branch_at_commit);
+        runTest("test_fix31", test_fix31_create_branch_at_commit);
+    runTest("test_h1", test_h1_bundle_import_path_traversal);
+    runTest("test_h2", test_h2_web_file_api_symlinks);
+    runTest("test_m1", test_m1_replace_file_with_folder);
+    runTest("test_l1", test_l1_bundle_import_non_commit_tips);
+    runTest("test_l3", test_l3_escape_path_and_nonzero_exit);
 
     std::cout << "\nALL 10 CORE FIXES TESTS PASSED SUCCESSFULLY!\n";
     return 0;

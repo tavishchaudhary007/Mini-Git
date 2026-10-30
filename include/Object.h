@@ -35,6 +35,7 @@ public:
     std::string type() const override { return "tree"; }
     std::string serialize() const override;
     static Tree parse(const std::string& body);
+    void dropPrefixParents();
 };
 
 class Commit : public Object {
