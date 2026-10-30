@@ -63,6 +63,23 @@ bool decode(const std::string& in, std::string& out, std::string& err) {
         return false;
     }
 
+    size_t firstEq = clean.find('=');
+    if (firstEq != std::string::npos) {
+        if (firstEq < clean.size() - 2) {
+            err = "invalid base64 padding (garbage after padding or padding in middle)";
+            return false;
+        }
+        for (size_t p = firstEq; p < clean.size(); ++p) {
+            if (clean[p] != '=') {
+                err = "trailing characters after padding";
+                return false;
+            }
+        }
+        if (clean.size() - firstEq > 2) {
+            err = "too many padding characters";
+            return false;
+        }
+    }
     size_t padding = 0;
     if (clean.back() == '=') {
         padding++;

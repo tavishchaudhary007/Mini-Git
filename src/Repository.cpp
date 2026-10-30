@@ -495,6 +495,14 @@ Hash Repository::commit(const std::string& message) {
             }
         }
         for (const auto& cp : allConflicted) {
+            fs::path wp = root_ / cp;
+            if (fs::exists(wp) && !fs::is_directory(wp)) {
+                std::string wc = readFile(wp);
+                if ((wc.find("<<<<<<<") != std::string::npos && wc.find("=======") != std::string::npos && wc.find(">>>>>>>") != std::string::npos) ||
+                    wc.find("<<<<<<< ours") != std::string::npos) {
+                    throw MergeException("cannot commit: working tree file '" + cp + "' still contains conflict markers");
+                }
+            }
             if (index_.has(cp)) {
                 Hash bHash = index_.get(cp);
                 if (store_.exists(bHash)) {
@@ -844,6 +852,16 @@ std::string Repository::mergeAbort() {
     if (!fs::exists(mergeHead)) {
         throw MergeException("no merge in progress to abort");
     }
+    std::vector<std::string> confPaths = conflictedPaths();
+    fs::path cAll = gitDir_ / "MERGE_CONFLICTS_ALL";
+    if (fs::exists(cAll)) {
+        std::ifstream ifs(cAll);
+        std::string line;
+        while (std::getline(ifs, line)) {
+            while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
+            if (!line.empty()) confPaths.push_back(line);
+        }
+    }
     fs::remove(mergeHead);
     std::error_code ec;
     fs::remove(gitDir_ / "MERGE_CONFLICTS", ec);
@@ -852,6 +870,18 @@ std::string Repository::mergeAbort() {
     if (!cur.empty()) {
         restoreCommit(cur);
     }
+    auto headTreeBlobs = headTree();
+    for (const auto& cp : confPaths) {
+        if (!headTreeBlobs.count(cp)) {
+            fs::path fp = root_ / cp;
+            if (fs::exists(fp, ec) && !fs::is_directory(fp, ec)) {
+                fs::remove(fp, ec);
+                pruneEmptyParents(root_, fp);
+            }
+            index_.remove(cp);
+        }
+    }
+    index_.save();
     return "Merge aborted.";
 }
 
@@ -1576,6 +1606,9 @@ std::string Repository::stashPop() {
         bool changedInHead = (cHash != bHash);
 
         if (changedInStash && changedInHead) {
+            if (sHash == cHash) {
+                continue;
+            }
             throw MiniGitException("conflict: path '" + p + "' changed in both stash and current HEAD");
         }
 

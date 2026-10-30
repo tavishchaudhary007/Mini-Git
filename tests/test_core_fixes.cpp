@@ -1,3 +1,4 @@
+#include "Base64.h"
 #include "HtmlExporter.h"
 #include <iostream>
 #include <cstdlib>
@@ -1543,6 +1544,78 @@ void test_group5_html_exporter_tracked_files_only() {
     std::cout << "PASSED\n";
 }
 
+
+// Group 6 Regression Tests
+void test_group6_edge_cases_and_polish() {
+    std::cout << "[Group 6] Edge cases and polish tests... ";
+
+    // 25. Trailing dot/space under Windows
+#if defined(_WIN32) || defined(__CYGWIN__)
+    CHECK(!isSafeRepoPath("a./b"));
+    CHECK(!isSafeRepoPath("a."));
+    CHECK(!isSafeRepoPath("a "));
+    CHECK(!isSafeRepoPath("foo/bar "));
+#endif
+
+    // 26. Hex hashes (only 40 lowercase hex chars)
+    CHECK(isValidHash("0123456789abcdef0123456789abcdef01234567"));
+    CHECK(!isValidHash("0123456789ABCDEF0123456789abcdef01234567")); // uppercase rejected
+    CHECK(!isValidHash("0123456789abcdef0123456789abcdef0123456"));   // length 39 rejected
+    CHECK(!isValidHash("0123456789abcdef0123456789abcdef012345678"));  // length 41 rejected
+    CHECK(!isValidHash("0123456789abcdef0123456789abcdef0123456g"));  // non-hex rejected
+
+    // 27. Json \u0000 and unicode escapes to UTF-8
+    std::string errJ;
+    JsonValue jVal = JsonValue::parse("\"hello\\u0000world\\u0041\\u20ac\"", &errJ);
+    CHECK(errJ.empty());
+    CHECK(jVal.is_string());
+    std::string jStr = jVal.as_string();
+    CHECK(jStr.find('\0') != std::string::npos);
+    CHECK(jStr.find("A") != std::string::npos);
+
+    // 28. Base64 rejects trailing garbage after padding
+    std::string b64Out, b64Err;
+    CHECK(!Base64::decode("AA==extra", b64Out, b64Err));
+    CHECK(!Base64::decode("AA=A", b64Out, b64Err));
+    CHECK(!Base64::decode("AA===", b64Out, b64Err));
+    CHECK(Base64::decode("AAAA", b64Out, b64Err));
+
+    // 29. Branch names: reject peer-<name> when empty or invalid
+    CHECK(!RefManager::isValidBranchName("peer-"));
+    CHECK(!RefManager::isValidBranchName("peer-.hidden"));
+    CHECK(!RefManager::isValidBranchName("peer--dash"));
+    CHECK(!RefManager::isValidBranchName("peer-has space"));
+    CHECK(!RefManager::isValidBranchName("peer-has/slash"));
+    CHECK(RefManager::isValidBranchName("peer-valid-name"));
+
+    // 32. stashPop: if applied changes match current HEAD, drop stash cleanly without error
+    fs::path dir = fs::current_path() / "test_g6_stash_repo";
+    cleanDir(dir);
+    Repository::init(dir);
+    Repository repo(dir);
+    writeFile(dir / "f.txt", "initial\n");
+    repo.add("f.txt", true);
+    repo.commit("c1");
+    writeFile(dir / "f.txt", "new edit\n");
+    repo.stashSave("save edit");
+    CHECK(repo.stashList().size() == 1);
+    // HEAD also makes the identical edit
+    writeFile(dir / "f.txt", "new edit\n");
+    repo.add("f.txt", true);
+    repo.commit("c2 same edit");
+    // Popping stash with identical edit must drop cleanly and not error
+    std::string popMsg = repo.stashPop();
+    CHECK(repo.stashList().empty());
+    CHECK(readFile(dir / "f.txt") == "new edit\n");
+
+    // 33. isoTime fallback
+    std::string tFallback = isoTime(static_cast<std::time_t>(-1));
+    CHECK(!tFallback.empty());
+
+    removeDir(dir);
+    std::cout << "PASSED\n";
+}
+
 int main() {
     std::cout << "\n============================================\n";
     std::cout << "  Mini-Git Core Fixes Automated Tests\n";
@@ -1585,6 +1658,7 @@ int main() {
     runTest("test_g3_wf", test_group3_writefile_atomic_and_symlink_refusal);
     runTest("test_g3_sym", test_group3_workingfiles_skips_symlinks);
     runTest("test_g5_html", test_group5_html_exporter_tracked_files_only);
+    runTest("test_g6", test_group6_edge_cases_and_polish);
 
     std::cout << "\nALL 10 CORE FIXES TESTS PASSED SUCCESSFULLY!\n";
     return 0;

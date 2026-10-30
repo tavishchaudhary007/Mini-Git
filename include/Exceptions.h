@@ -1,3 +1,4 @@
+#include "Hash.h"
 #pragma once
 #include <stdexcept>
 #include <string>
@@ -25,3 +26,9 @@ MG_DEFINE_EXCEPTION(BranchException,         "branch")
 MG_DEFINE_EXCEPTION(NothingToCommitException,"commit")
 MG_DEFINE_EXCEPTION(CheckoutException,       "checkout")
 MG_DEFINE_EXCEPTION(MergeException,          "merge")
+
+inline void validateHash(const std::string& s) {
+    if (!isValidHash(s)) {
+        throw InvalidObjectException("invalid hash (expected 40 lowercase hex characters): " + s);
+    }
+}

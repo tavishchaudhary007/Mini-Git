@@ -46,9 +46,12 @@ Tree Tree::parse(const std::string& body) {
     Tree t;
     for (const auto& line : splitLines(body)) {
         if (line.size() < 42) continue;
+        std::string hStr = line.substr(0, 40);
+        validateHash(hStr);
+        if (line[40] != ' ') throw InvalidObjectException("invalid tree line format");
         std::string p = line.substr(41);
         if (!isSafeRepoPath(p)) throw InvalidObjectException("unsafe path in tree: " + p);
-        t.set(p, Hash(line.substr(0, 40)));
+        t.set(p, Hash(hStr));
     }
     return t;
 }
@@ -69,9 +72,16 @@ Commit Commit::parse(const std::string& body) {
     std::time_t t = 0;
     while (std::getline(in, line) && !line.empty()) {
         if (!line.empty() && line.back() == '\r') line.pop_back();
-        if (line.rfind("tree ", 0) == 0)         tree = line.substr(5);
-        else if (line.rfind("parent2 ", 0) == 0) parent2 = line.substr(8);
-        else if (line.rfind("parent ", 0) == 0)  parent = line.substr(7);
+        if (line.rfind("tree ", 0) == 0) {
+            tree = line.substr(5);
+            validateHash(tree);
+        } else if (line.rfind("parent2 ", 0) == 0) {
+            parent2 = line.substr(8);
+            validateHash(parent2);
+        } else if (line.rfind("parent ", 0) == 0) {
+            parent = line.substr(7);
+            if (!parent.empty() && parent != "-") validateHash(parent);
+        }
         else if (line.rfind("author ", 0) == 0) {
             author = line.substr(7);
             for (char ch : author) {

@@ -330,7 +330,15 @@ static void handleClientConnection(socket_t clientSock, sockaddr_in clientAddr, 
                     headersTooLarge = true;
                     break;
                 }
-                // Header complete. Check Content-Length case-insensitively
+                // Header complete. Check Transfer-Encoding
+                std::string teStr = getHeaderValue(request, "Transfer-Encoding");
+                if (!teStr.empty()) {
+                    sendHttpResponse(clientSock, 501, "Not Implemented", "application/json",
+                                     "{\"ok\":false,\"error\":\"Transfer-Encoding not supported\"}");
+                    CLOSESOCKET(clientSock);
+                    return;
+                }
+                // Check Content-Length case-insensitively
                 std::string clStr = getHeaderValue(request, "Content-Length");
                 size_t cl = 0;
                 if (!clStr.empty()) {
@@ -793,16 +801,12 @@ static void handleClientConnection(socket_t clientSock, sockaddr_in clientAddr, 
             } else if (method == "GET" && path == "/api/snapshot") {
                 Snapshot snap = repo->snapshot();
                 snap.lan = lan;
+                snap.lanUrl = lanUrl;
                 std::string ver = HtmlExporter::computeVersion(snap);
                 std::string quotedEtag = "\"" + ver + "\"";
                 std::string ifNoneMatch = getHeaderValue(request, "If-None-Match");
                 if (!ifNoneMatch.empty() && (ifNoneMatch == quotedEtag || ifNoneMatch == ver || ifNoneMatch == "W/" + quotedEtag || ifNoneMatch == "*")) {
-                    std::ostringstream oss;
-                    oss << "HTTP/1.1 304 Not Modified\r\n"
-                        << "ETag: " << quotedEtag << "\r\n"
-                        << "Content-Length: 0\r\n"
-                        << "Connection: close\r\n\r\n";
-                    sendAll(clientSock, oss.str());
+                    sendHttpResponse(clientSock, 304, "Not Modified", "", "", corsOrigin, "ETag: " + quotedEtag + "\r\n");
                 } else {
                     std::string json = HtmlExporter::toJson(snap, repoName);
                     sendHttpResponse(clientSock, 200, "OK", "application/json; charset=utf-8", json, corsOrigin, "ETag: " + quotedEtag + "\r\n");

@@ -14,6 +14,11 @@ std::unique_ptr<Object> ObjectStore::load(const Hash& h) const {
 
 Hash ObjectStore::resolvePrefix(const std::string& prefix) const {
     if (prefix.size() < 4) throw InvalidObjectException("unknown revision: " + prefix);
+    for (char c : prefix) {
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
+            throw InvalidObjectException("unknown revision: " + prefix);
+        }
+    }
     Hash found;
     int matches = 0;
     if (fs::exists(dir_))

@@ -5,6 +5,14 @@
 #include <utility>
 
 // Value type wrapping a hex digest. Demonstrates operator overloading.
+inline bool isValidHash(const std::string& s) {
+    if (s.size() != 40) return false;
+    for (char c : s) {
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+    }
+    return true;
+}
+
 class Hash {
     std::string value_;
 public:

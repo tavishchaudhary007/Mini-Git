@@ -41,6 +41,10 @@ bool RefManager::isValidBranchName(const std::string& n) {
     if (n.empty() || n.size() > 100 || n[0] == '.' || n[0] == '-') return false;
     if (n == "HEAD") return false;
     if (n.size() >= 5 && n.compare(n.size() - 5, 5, ".lock") == 0) return false;
+    if (n.rfind("peer-", 0) == 0) {
+        std::string suffix = n.substr(5);
+        if (suffix.empty() || suffix[0] == '.' || suffix[0] == '-') return false;
+    }
     return std::all_of(n.begin(), n.end(), [](unsigned char c) {
         return std::isalnum(c) || c == '-' || c == '_' || c == '.';
     });

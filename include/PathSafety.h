@@ -95,6 +95,9 @@ inline bool isSafeRepoPath(const std::string& path) {
 
         if (seg.empty()) return false;
         if (seg == "." || seg == "..") return false;
+#if defined(_WIN32) || defined(__CYGWIN__)
+        if (seg.back() == '.' || seg.back() == ' ') return false;
+#endif
 
         std::string lowerSeg = seg;
         for (char& ch : lowerSeg) {

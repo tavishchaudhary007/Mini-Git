@@ -35,8 +35,8 @@ inline int processExitCode(int status) {
 inline std::string isoTime(std::time_t t) {
     char buf[32];
     std::tm* tm = std::gmtime(&t);
-    if (!tm) return "1970-01-01T00:00:00Z";
-    std::strftime(buf, sizeof buf, "%Y-%m-%dT%H:%M:%SZ", tm);
+    if (!tm) return std::to_string(t);
+    if (std::strftime(buf, sizeof buf, "%Y-%m-%dT%H:%M:%SZ", tm) == 0) return std::to_string(t);
     return buf;
 }
 
