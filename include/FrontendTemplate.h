@@ -123,6 +123,15 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             transform: scale(1.18);
         }
     </style>
+    <style>
+        /* graph (Agent 3) */
+        .dag-node {
+            transition: transform 0.15s ease, filter 0.15s ease;
+        }
+        .dag-node:hover {
+            filter: brightness(1.15);
+        }
+    </style>
 </head>
 <body class="bg-theme-bg text-theme-text font-sans h-screen flex flex-col overflow-hidden select-none antialiased">
 
@@ -203,6 +212,11 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                 <span>Branch</span>
             </button>
 
+            <!-- Delete Branch Capsule Button -->
+            <button onclick="openDeleteBranchModal()" title="Delete Branch" class="rounded-full bg-zinc-100 hover:bg-rose-100 dark:bg-zinc-900 dark:hover:bg-rose-950/40 text-theme-muted hover:text-rose-600 dark:hover:text-rose-400 border border-theme-border px-2.5 py-1.5 text-xs font-medium flex items-center space-x-1 transition cursor-pointer">
+                <i class="fa-regular fa-trash-can text-[10px]"></i>
+            </button>
+
             <!-- Theme Toggle Button -->
             <button onclick="toggleTheme()" title="Toggle Light/Dark Theme" class="w-8 h-8 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-theme-text border border-theme-border flex items-center justify-center transition cursor-pointer">
                 <i id="themeToggleIcon" class="fa-solid fa-moon text-xs"></i>
@@ -264,6 +278,10 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                             <button onclick="executePopStash()" title="Restore and apply stashed changes" class="px-3 py-1 rounded-full bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-theme-text border border-theme-border text-xs font-medium cursor-pointer transition">Pop</button>
                         </div>
                     </div>
+                    <div class="flex items-center space-x-1.5 px-1 text-[11px] text-theme-muted">
+                        <input type="checkbox" id="stashIncludeUntracked" class="rounded cursor-pointer">
+                        <label for="stashIncludeUntracked" class="cursor-pointer select-none">Include untracked (-u)</label>
+                    </div>
                     <div id="stashListContainer" class="hidden space-y-1.5 px-1 text-xs">
                         <div class="flex items-center justify-between text-[11px] text-theme-muted">
                             <span>Stash Stack</span>
@@ -321,6 +339,22 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
 
         <!-- MAIN CENTER CONTENT -->
         <main class="flex-1 flex flex-col bg-theme-bg overflow-hidden">
+
+            <!-- MERGE CONFLICT BANNER -->
+            <div id="mergeConflictBanner" class="hidden bg-amber-500/10 border-b border-amber-500/30 px-6 py-3 flex items-center justify-between z-10 shrink-0">
+                <div class="flex items-center space-x-3 text-xs">
+                    <i class="fa-solid fa-triangle-exclamation text-amber-500 text-sm"></i>
+                    <div>
+                        <span class="font-bold text-amber-600 dark:text-amber-400">Merge Conflict:</span>
+                        <span id="mergeConflictFilesList" class="ml-1 text-theme-text font-mono"></span>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-2 text-xs">
+                    <button onclick="abortMerge()" class="px-3 py-1 rounded-full bg-rose-600 hover:bg-rose-500 text-white font-semibold transition cursor-pointer">
+                        Abort Merge
+                    </button>
+                </div>
+            </div>
 
             <!-- ================================================================= -->
             <!-- VIEW 1: PULSE-INSPIRED INTELLIGENCE DASHBOARD                     -->
@@ -596,7 +630,7 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                 <div class="h-12 border-b border-theme-border flex items-center justify-between px-6 text-xs font-mono bg-theme-card text-theme-muted">
                     <div class="flex items-center space-x-2">
                         <span>File:</span>
-                        <select id="diffFileSelect" onchange="ACTIVE_FILE = this.value; renderFileTree(); renderDiffView();" class="bg-zinc-100 dark:bg-zinc-900 border border-theme-border text-theme-text px-3 py-1 rounded-full focus:outline-none cursor-pointer">
+                        <select id="diffFileSelect" onchange="onDiffFileSelectChange(this.value)" class="bg-zinc-100 dark:bg-zinc-900 border border-theme-border text-theme-text px-3 py-1 rounded-full focus:outline-none cursor-pointer">
                             <!-- Populated dynamically -->
                         </select>
                         <span id="diffFileStatsBadge" class="hidden items-center space-x-1.5 font-mono text-[11px] px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 border border-theme-border"></span>
@@ -632,9 +666,14 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
                         <i class="fa-regular fa-file-code text-theme-muted"></i>
                         <span id="editorFolderPathDisplay" class="text-theme-muted">/</span>
                         <span id="editorFilePathDisplay" class="text-theme-text font-semibold">index.html</span>
+                        <span id="editorUnsavedDot" class="hidden w-2 h-2 rounded-full bg-amber-400 inline-block ml-1" title="Unsaved changes"></span>
                     </div>
                     <div class="flex items-center space-x-2">
-                        <button onclick="saveActiveFileFromEditor()" class="rounded-full bg-black hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-black px-4 py-1 text-xs font-sans font-semibold flex items-center space-x-1.5 transition cursor-pointer shadow-sm">
+                        <button id="editorRestoreFileBtn" onclick="discardFile(ACTIVE_FILE)" class="hidden rounded-full bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 text-xs font-sans font-medium flex items-center space-x-1 transition cursor-pointer">
+                            <i class="fa-solid fa-rotate-left text-[10px]"></i>
+                            <span>Restore File</span>
+                        </button>
+                        <button id="editorSaveBtn" onclick="saveActiveFileFromEditor()" class="rounded-full bg-black hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-black px-4 py-1 text-xs font-sans font-semibold flex items-center space-x-1.5 transition cursor-pointer shadow-sm">
                             <i class="fa-solid fa-floppy-disk text-[10px]"></i>
                             <span>Save</span>
                         </button>
@@ -693,6 +732,26 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
             <div class="flex justify-end space-x-2 pt-2 text-xs">
                 <button onclick="closeMergeModal()" class="px-4 py-2 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-theme-text transition font-medium">Cancel</button>
                 <button onclick="submitMergeModal()" class="px-5 py-2 rounded-full bg-black hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-black transition font-semibold shadow-sm">Confirm Merge</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: DELETE BRANCH -->
+    <div id="deleteBranchModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center hidden" onclick="if(event.target===this)closeDeleteBranchModal()">
+        <div class="bg-theme-card border border-theme-border w-full max-w-sm rounded-3xl shadow-2xl p-6 space-y-4">
+            <div class="flex items-center justify-between border-b border-theme-border pb-3">
+                <h3 class="font-serif font-bold text-theme-text text-lg">Delete Branch</h3>
+                <button onclick="closeDeleteBranchModal()" class="text-theme-muted hover:text-theme-text"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="space-y-2 text-xs">
+                <label class="block text-theme-muted font-medium">Select Branch</label>
+                <select id="deleteBranchSelect" onchange="onDeleteBranchSelectChange()" class="w-full bg-zinc-50 dark:bg-zinc-900 border border-theme-border rounded-full px-4 py-2.5 text-xs text-theme-text focus:outline-none font-mono cursor-pointer">
+                </select>
+                <p id="deleteBranchWarning" class="text-rose-500 text-[11px] hidden">Cannot delete the currently active branch.</p>
+            </div>
+            <div class="flex justify-end space-x-2 pt-2 text-xs">
+                <button onclick="closeDeleteBranchModal()" class="px-4 py-2 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-theme-text transition font-medium">Cancel</button>
+                <button id="btnConfirmDeleteBranch" onclick="submitDeleteBranchModal()" class="px-5 py-2 rounded-full bg-rose-600 hover:bg-rose-700 text-white transition font-semibold shadow-sm">Delete</button>
             </div>
         </div>
     </div>
@@ -996,32 +1055,28 @@ inline const char kFrontendTemplate[] = R"MGHTML(<!DOCTYPE html>
 
     <!-- Live Data Hook (Injected when generated by minigit html) -->
     <script>
-        function escapeHtml(str) {
-            if (str === null || str === undefined) return '';
-            return String(str)
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;')
-                .replace(/'/g, '&#39;');
-        }
 window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
 
     <script>
-        function escapeHtml(str) {
-            if (str === null || str === undefined) return '';
-            return String(str)
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;')
-                .replace(/'/g, '&#39;');
-        }
-
         /* ---------------------------------------------------------------------
          * MINIGIT ENGINE & DATA STRUCTURES
          * --------------------------------------------------------------------- */
-        const IS_SERVER_MODE = window.location.protocol.startsWith('http');
+        let IS_SERVER_MODE = window.location.protocol.startsWith('http');
+        let IS_STATIC_EXPORT = (window.location.protocol === 'file:') || (window.MINIGIT_LIVE && window.MINIGIT_LIVE.__staticExport) || (!!window.__staticExport);
+        let LATEST_SNAPSHOT_ETAG = null;
+        let IS_LAN_MODE = !!(window.MINIGIT_LIVE && window.MINIGIT_LIVE.lan);
+        let _lanPollTimer = null;
+        function updateLanMode(lan) {
+            IS_LAN_MODE = !!lan;
+            if (IS_LAN_MODE && !_lanPollTimer && IS_SERVER_MODE) {
+                _lanPollTimer = setInterval(pollPendingPairRequests, 2000);
+            } else if (!IS_LAN_MODE && _lanPollTimer) {
+                clearInterval(_lanPollTimer);
+                _lanPollTimer = null;
+            }
+        }
+        let SERVER_REFLOG_COUNT = 0;
+        const DIRTY_BUFFERS = {};
 
         let VFS = {};
         let STAGING_INDEX = {};
@@ -1144,23 +1199,23 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                     body: JSON.stringify(payload || {})
                 });
                 const data = await res.json();
-                if (!data.ok) {
-                    const peerRefs = data.peerRefs || (data.result && data.result.peerRefs);
-                    if (peerRefs && peerRefs.length > 0) {
-                        const peerBranch = peerRefs[0];
-                        showToast(data.error || data.message || `Diverged: peer tip saved as ${peerBranch}`, 'warning', {
-                            label: `Merge ${peerBranch}`,
-                            onClick: async () => {
-                                showToast(`Merging ${peerBranch}...`);
-                                const mRes = await apiPost('merge', { branch: peerBranch });
-                                if (mRes && mRes.ok) {
-                                    showToast(mRes.result || `Merged ${peerBranch} successfully!`);
-                                }
+                const peerRefs = data.peerRefs || (data.result && data.result.peerRefs);
+                if (peerRefs && peerRefs.length > 0) {
+                    const peerBranch = peerRefs[0];
+                    showToast(data.message || data.error || `Peer tip saved as ${peerBranch}`, 'info', {
+                        label: `Merge ${peerBranch}`,
+                        onClick: async () => {
+                            showToast(`Merging ${peerBranch}...`);
+                            const mRes = await apiPost('merge', { branch: peerBranch });
+                            if (mRes && mRes.ok) {
+                                showToast(mRes.result || `Merged ${peerBranch} successfully!`);
                             }
-                        });
-                    } else {
-                        showToast(data.error || "Operation failed", 'error');
-                    }
+                        }
+                    });
+                } else if (!data.ok) {
+                    showToast(data.error || "Operation failed", 'error');
+                }
+                if (!data.ok) {
                     if (data.snapshot) {
                         window.MINIGIT_LIVE = data.snapshot;
                         loadLiveRepo();
@@ -1189,8 +1244,18 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         async function refreshRepositorySnapshot(silent = false) {
             if (!IS_SERVER_MODE) return;
             try {
-                const res = await fetch('/api/snapshot');
+                const headers = {};
+                if (LATEST_SNAPSHOT_ETAG) {
+                    headers['If-None-Match'] = LATEST_SNAPSHOT_ETAG;
+                }
+                const res = await fetch('/api/snapshot', { headers });
+                if (res.status === 304) {
+                    if (!silent) showToast("Repository synchronized (no changes)");
+                    return;
+                }
                 if (res.ok) {
+                    const etag = res.headers.get('ETag');
+                    if (etag) LATEST_SNAPSHOT_ETAG = etag;
                     const snap = await res.json();
                     const isInitial = (!VFS || Object.keys(VFS).length === 0);
                     const changed = hasRepositorySnapshotChanged(window.MINIGIT_LIVE, snap);
@@ -1199,9 +1264,22 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                         loadLiveRepo();
                     }
                     if (!silent) showToast("Repository synchronized");
+                    try {
+                        const rRes = await fetch('/api/reflog');
+                        if (rRes.ok) {
+                            const rData = await rRes.json();
+                            if (rData && Array.isArray(rData.reflog)) {
+                                SERVER_REFLOG_COUNT = rData.reflog.length;
+                                const rCountEl = document.getElementById('dashReflogCount');
+                                if (rCountEl) rCountEl.textContent = SERVER_REFLOG_COUNT;
+                            }
+                        }
+                    } catch (_) {}
+                } else {
+                    if (!silent) showToast(`Server returned HTTP ${res.status}`, "error");
                 }
             } catch (err) {
-                if (!silent) showToast("Failed to connect to local server", "error");
+                if (!silent) showToast("Failed to connect to local server: " + err.message, "error");
             }
         }
 
@@ -1318,7 +1396,13 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         }
 
         function getHeadBlobText(filepath) {
-            const headCommitHash = BRANCHES[CURRENT_BRANCH];
+            let headCommitHash = BRANCHES[CURRENT_BRANCH];
+            if (!headCommitHash && (window.MINIGIT_LIVE?.detached || CURRENT_BRANCH === "")) {
+                headCommitHash = window.MINIGIT_LIVE?.head;
+            }
+            if (!headCommitHash && window.MINIGIT_LIVE?.head) {
+                headCommitHash = window.MINIGIT_LIVE.head;
+            }
             if (!headCommitHash || !OBJECTS[headCommitHash]) return "";
             const treeHash = OBJECTS[headCommitHash].data?.tree;
             if (!treeHash || !OBJECTS[treeHash]) return "";
@@ -1467,13 +1551,14 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         }
 
         function splitPath(filepath) {
+            if (!filepath) return { folder: '', filename: '', fullPath: '' };
             const parts = filepath.split('/');
             if (parts.length > 1) {
                 const folder = parts.slice(0, -1).join('/');
                 const filename = parts[parts.length - 1];
                 return { folder, filename, fullPath: filepath };
             }
-            return { folder: 'root', filename: filepath, fullPath: filepath };
+            return { folder: '', filename: filepath, fullPath: filepath };
         }
 
         function toggleFolderCollapse(folderName) {
@@ -1491,12 +1576,13 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         }
 
         function recordDemoReflog(action, oldHash, newHash, description) {
+            const fallbackOld = (CURRENT_BRANCH && BRANCHES[CURRENT_BRANCH]) ? BRANCHES[CURRENT_BRANCH] : (DEMO_REFLOG[0]?.newHash || "0000000");
             DEMO_REFLOG.unshift({
                 timestamp: new Date().toISOString(),
-                action,
-                oldHash: oldHash || "0000000",
-                newHash: newHash || "0000000",
-                description
+                action: action || "action",
+                oldHash: (oldHash && oldHash !== "undefined") ? oldHash : fallbackOld,
+                newHash: (newHash && newHash !== "undefined") ? newHash : "0000000",
+                description: description || ""
             });
         }
 
@@ -1547,93 +1633,354 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             updateUI();
         }
 
+        function isFileDeleted(filepath) {
+            if (!filepath) return false;
+            if (window.MINIGIT_LIVE?.status?.deleted && window.MINIGIT_LIVE.status.deleted.includes(filepath)) return true;
+            if (window.MINIGIT_LIVE?.stagedDeleted && window.MINIGIT_LIVE.stagedDeleted.includes(filepath)) return true;
+            if (window.MINIGIT_LIVE?.stagedStatus && window.MINIGIT_LIVE.stagedStatus[filepath] === 'D') return true;
+            if (window.MINIGIT_LIVE?.status?.staged && window.MINIGIT_LIVE.status.staged.some(x => x.replace(' (deleted)', '') === filepath && x.includes('(deleted)'))) return true;
+            return false;
+        }
+
+        function isBinaryFile(filepath) {
+            if (!filepath) return false;
+            if (isFileDeleted(filepath)) return false; // Staged or working deletions are never binary
+            if (window.MINIGIT_LIVE?.binaryFiles && window.MINIGIT_LIVE.binaryFiles.includes(filepath)) return true;
+            const content = VFS[filepath];
+            if (content === '[binary file]') return true;
+            if (typeof content === 'string' && content.includes('\0')) return true;
+            const ext = filepath.split('.').pop().toLowerCase();
+            const binExts = ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'pdf', 'zip', 'tar', 'gz', 'exe', 'bin', 'o', 'obj', 'so', 'dylib', 'dll'];
+            if (binExts.includes(ext) && (content === undefined || content === '')) return true;
+            return false;
+        }
+
+        function hasUnsavedEdits(filepath = null) {
+            if (filepath) return DIRTY_BUFFERS[filepath] !== undefined;
+            return Object.keys(DIRTY_BUFFERS).length > 0;
+        }
+
+        function syncEditorWithActiveFile() {
+            const area = document.getElementById('codeEditorArea');
+            const folderDisp = document.getElementById('editorFolderPathDisplay');
+            const fileDisp = document.getElementById('editorFilePathDisplay');
+            const activeTabName = document.getElementById('activeEditorFileName');
+            const restoreBtn = document.getElementById('editorRestoreFileBtn');
+            const dot = document.getElementById('editorUnsavedDot');
+
+            if (!ACTIVE_FILE) {
+                if (area) {
+                    area.value = '';
+                    area.placeholder = 'No file open. Select or create a file in the repository.';
+                    area.readOnly = true;
+                }
+                if (folderDisp) folderDisp.innerText = '/';
+                if (fileDisp) fileDisp.innerText = 'No file open';
+                if (activeTabName) activeTabName.innerText = 'No file open';
+                if (restoreBtn) restoreBtn.classList.add('hidden');
+                if (dot) dot.classList.add('hidden');
+                return;
+            }
+
+            const { folder, filename } = splitPath(ACTIVE_FILE);
+            if (folderDisp) folderDisp.innerText = folder ? `/${folder}/` : '/';
+            if (fileDisp) fileDisp.innerText = filename;
+            if (activeTabName) activeTabName.innerText = filename;
+
+            const isDirty = DIRTY_BUFFERS[ACTIVE_FILE] !== undefined;
+            if (dot) dot.classList.toggle('hidden', !isDirty);
+
+            if (IS_STATIC_EXPORT || window.location.protocol === 'file:') {
+                if (area) {
+                    area.value = VFS[ACTIVE_FILE] !== undefined ? VFS[ACTIVE_FILE] : '';
+                    area.readOnly = true;
+                }
+                if (restoreBtn) restoreBtn.classList.add('hidden');
+            } else if (isFileDeleted(ACTIVE_FILE)) {
+                if (area) {
+                    area.value = "(This file has been deleted in the working directory)\n\nClick 'Restore File' to recover it from HEAD.";
+                    area.readOnly = true;
+                }
+                if (restoreBtn) restoreBtn.classList.remove('hidden');
+            } else if (isBinaryFile(ACTIVE_FILE)) {
+                if (area) {
+                    area.value = "binary file, not shown";
+                    area.readOnly = true;
+                }
+                if (restoreBtn) restoreBtn.classList.add('hidden');
+            } else {
+                if (area) {
+                    area.value = isDirty ? DIRTY_BUFFERS[ACTIVE_FILE] : (VFS[ACTIVE_FILE] !== undefined ? VFS[ACTIVE_FILE] : '');
+                    area.readOnly = false;
+                }
+                if (restoreBtn) restoreBtn.classList.add('hidden');
+            }
+        }
+
+        function renderMergeConflictBanner() {
+            const banner = document.getElementById('mergeConflictBanner');
+            const filesList = document.getElementById('mergeConflictFilesList');
+            if (!banner || !filesList) return;
+
+            const isMerging = !!(window.MINIGIT_LIVE && window.MINIGIT_LIVE.merging);
+            const conflicts = (window.MINIGIT_LIVE && Array.isArray(window.MINIGIT_LIVE.conflicts)) ? window.MINIGIT_LIVE.conflicts : [];
+
+            if (isMerging) {
+                banner.classList.remove('hidden');
+                filesList.innerHTML = '';
+                if (conflicts.length === 0) {
+                    filesList.textContent = 'All conflicts resolved! Ready to commit.';
+                } else {
+                    conflicts.forEach(fp => {
+                        const item = document.createElement('span');
+                        item.className = 'inline-flex items-center space-x-1.5 mr-2 py-0.5 px-2 rounded bg-amber-100 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800';
+
+                        const nameBtn = document.createElement('button');
+                        nameBtn.className = 'font-semibold hover:underline cursor-pointer';
+                        nameBtn.textContent = fp;
+                        nameBtn.onclick = () => openFileInEditor(fp);
+
+                        const resolveBtn = document.createElement('button');
+                        resolveBtn.className = 'ml-1 px-1.5 py-0.2 bg-black dark:bg-white text-white dark:text-black rounded text-[10px] font-bold hover:opacity-80 transition cursor-pointer';
+                        resolveBtn.textContent = 'Mark Resolved';
+                        resolveBtn.title = 'Stage file to mark conflict resolved';
+                        resolveBtn.onclick = () => stageFile(fp);
+
+                        item.appendChild(nameBtn);
+                        item.appendChild(resolveBtn);
+                        filesList.appendChild(item);
+                    });
+                }
+            } else {
+                banner.classList.add('hidden');
+            }
+        }
+
+        async function abortMerge() {
+            if (!IS_SERVER_MODE) {
+                showToast("Abort merge is only available in server mode", "warning");
+                return;
+            }
+            if (IS_SERVER_MODE) {
+                const res = await apiPost('merge', { abort: true });
+                if (res && res.ok) {
+                    showToast("Merge aborted");
+                }
+                return;
+            }
+            showToast("Merge aborted");
+            updateUI();
+        }
+
         function loadLiveRepo() {
             if (!window.MINIGIT_LIVE) return;
             const live = window.MINIGIT_LIVE;
-            VFS = { ...(live.files || {}) };
+            if (live.lan !== undefined) {
+                updateLanMode(live.lan);
+            }
+            const serverFiles = live.files || {};
+
+            // Preserve dirty buffers
+            VFS = { ...serverFiles };
+            for (const [fp, dirtyContent] of Object.entries(DIRTY_BUFFERS)) {
+                VFS[fp] = dirtyContent;
+            }
+
             STAGING_INDEX = { ...(live.staged || {}) };
             OBJECTS = { ...(live.objects || {}) };
             BRANCHES = { ...(live.branches || {}) };
             if (!Object.keys(BRANCHES).length) {
                 BRANCHES["main"] = null;
             }
-            CURRENT_BRANCH = live.currentBranch || Object.keys(BRANCHES)[0] || "main";
-            if (!ACTIVE_FILE || !(ACTIVE_FILE in VFS)) {
-                ACTIVE_FILE = Object.keys(VFS)[0] || "index.html";
+            if (live.detached || live.currentBranch === "") {
+                CURRENT_BRANCH = "";
+            } else {
+                CURRENT_BRANCH = live.currentBranch || Object.keys(BRANCHES)[0] || "main";
             }
+
+            const fileKeys = Object.keys(VFS);
+            const deletedFiles = live.status?.deleted || [];
+            if (fileKeys.length === 0 && deletedFiles.length === 0) {
+                ACTIVE_FILE = null;
+            } else if (!ACTIVE_FILE || (!(ACTIVE_FILE in VFS) && !deletedFiles.includes(ACTIVE_FILE))) {
+                ACTIVE_FILE = fileKeys[0] || deletedFiles[0] || null;
+            }
+
             const repoDisp = document.getElementById('repoNameDisplay');
             if (repoDisp) repoDisp.textContent = live.repoName || 'minigit';
 
             const area = document.getElementById('codeEditorArea');
-            if (area && ACTIVE_FILE && VFS[ACTIVE_FILE] !== undefined) {
-                if (document.activeElement !== area) {
-                    area.value = VFS[ACTIVE_FILE];
+            if (area && ACTIVE_FILE) {
+                if (!DIRTY_BUFFERS[ACTIVE_FILE] && document.activeElement !== area) {
+                    syncEditorWithActiveFile();
                 }
+            } else if (area && !ACTIVE_FILE) {
+                syncEditorWithActiveFile();
             }
+
             const activeTabName = document.getElementById('activeEditorFileName');
-            if (activeTabName && ACTIVE_FILE) {
-                const { filename } = splitPath(ACTIVE_FILE);
-                activeTabName.innerText = filename;
+            if (activeTabName) {
+                if (ACTIVE_FILE) {
+                    const { filename } = splitPath(ACTIVE_FILE);
+                    activeTabName.innerText = filename;
+                } else {
+                    activeTabName.innerText = 'No file open';
+                }
             }
 
             updateUI();
+            renderMergeConflictBanner();
+            refreshStashList();
         }
 
         /* ---------------------------------------------------------------------
          * FILE OPERATIONS & EDITING
          * --------------------------------------------------------------------- */
         function openFileInEditor(filepath) {
+            if (!filepath) {
+                ACTIVE_FILE = null;
+                syncEditorWithActiveFile();
+                return;
+            }
+            const area = document.getElementById('codeEditorArea');
+            if (area && ACTIVE_FILE && !area.readOnly && area.value !== (VFS[ACTIVE_FILE] || '')) {
+                DIRTY_BUFFERS[ACTIVE_FILE] = area.value;
+            }
+
             ACTIVE_FILE = filepath;
             const { folder, filename } = splitPath(filepath);
-            if (folder && folder !== 'root') {
-                FOLDER_COLLAPSED_STATE[folder] = false;
+            if (folder) {
+                const parts = folder.split('/');
+                let cur = '';
+                for (const p of parts) {
+                    cur = cur ? `${cur}/${p}` : p;
+                    FOLDER_COLLAPSED_STATE[cur] = false;
+                }
             }
-            
-            const activeTabName = document.getElementById('activeEditorFileName');
-            if (activeTabName) activeTabName.innerText = filename;
 
-            const folderDisp = document.getElementById('editorFolderPathDisplay');
-            if (folderDisp) folderDisp.innerText = (folder === 'root' ? '/' : `/${folder}/`);
-
-            const fileDisp = document.getElementById('editorFilePathDisplay');
-            if (fileDisp) fileDisp.innerText = filename;
-
-            const area = document.getElementById('codeEditorArea');
-            if (area) area.value = (VFS[filepath] !== undefined) ? VFS[filepath] : "";
-            
+            syncEditorWithActiveFile();
             switchViewTab('editor');
             renderFileTree();
             renderSourceControlLists();
+            if (!IS_SERVER_MODE) {
+                const btnLanPull = document.getElementById('btnLanPull');
+                if (btnLanPull) {
+                    btnLanPull.disabled = true;
+                    btnLanPull.title = "LAN pull is only available in server mode";
+                    btnLanPull.classList.add('opacity-50', 'cursor-not-allowed');
+                }
+                const btnAbort = document.querySelector('#mergeConflictBanner button');
+                if (btnAbort) {
+                    btnAbort.disabled = true;
+                    btnAbort.title = "Abort merge is only available in server mode";
+                    btnAbort.classList.add('opacity-50', 'cursor-not-allowed');
+                }
+                const btnConfirmMerge = document.querySelector('#mergeModal button[onclick="submitMergeModal()"]');
+                if (btnConfirmMerge) {
+                    btnConfirmMerge.disabled = true;
+                    btnConfirmMerge.title = "Merge is only available in server mode";
+                    btnConfirmMerge.classList.add('opacity-50', 'cursor-not-allowed');
+                }
+            }
             populateDiffFileSelect(filepath);
+        }
+
+        let _scDebounceTimer = null;
+        function debouncedRenderSourceControlLists() {
+            if (_scDebounceTimer) clearTimeout(_scDebounceTimer);
+            _scDebounceTimer = setTimeout(() => {
+                renderSourceControlLists();
+            }, 100);
         }
 
         function markFileAsModified() {
             const area = document.getElementById('codeEditorArea');
             if (area && ACTIVE_FILE) {
+                const serverContent = (window.MINIGIT_LIVE?.files && window.MINIGIT_LIVE.files[ACTIVE_FILE] !== undefined)
+                    ? window.MINIGIT_LIVE.files[ACTIVE_FILE]
+                    : (VFS[ACTIVE_FILE] !== undefined ? VFS[ACTIVE_FILE] : '');
+
+                if (area.value !== serverContent) {
+                    DIRTY_BUFFERS[ACTIVE_FILE] = area.value;
+                } else {
+                    delete DIRTY_BUFFERS[ACTIVE_FILE];
+                }
                 VFS[ACTIVE_FILE] = area.value;
-                renderSourceControlLists();
+
+                const dot = document.getElementById('editorUnsavedDot');
+                if (dot) dot.classList.toggle('hidden', DIRTY_BUFFERS[ACTIVE_FILE] === undefined);
+
+                renderFileTree();
+                debouncedRenderSourceControlLists();
             }
         }
 
         async function saveActiveFileFromEditor() {
             const area = document.getElementById('codeEditorArea');
             if (!area || !ACTIVE_FILE) return;
-            VFS[ACTIVE_FILE] = area.value;
+            if (IS_STATIC_EXPORT || window.location.protocol === 'file:') {
+                showToast("Static export is read-only", "warning");
+                return;
+            }
+            if (area.readOnly || isBinaryFile(ACTIVE_FILE) || isFileDeleted(ACTIVE_FILE)) {
+                showToast("File is read-only", "warning");
+                return;
+            }
+            const content = area.value;
+            VFS[ACTIVE_FILE] = content;
             if (IS_SERVER_MODE) {
-                const res = await apiPost('file/save', { path: ACTIVE_FILE, content: area.value });
+                const res = await apiPost('file/save', { path: ACTIVE_FILE, content });
                 if (res && res.ok) {
+                    delete DIRTY_BUFFERS[ACTIVE_FILE];
+                    syncEditorWithActiveFile();
                     showToast(`Saved '${ACTIVE_FILE}'`);
                 }
                 return;
             }
+            delete DIRTY_BUFFERS[ACTIVE_FILE];
+            syncEditorWithActiveFile();
             showToast(`Saved '${ACTIVE_FILE}'`);
             updateUI();
         }
 
         async function createNewFilePrompt() {
+            if (IS_STATIC_EXPORT || window.location.protocol === 'file:') {
+                showToast("Static export is read-only", "warning");
+                return;
+            }
             const path = prompt("Enter new file path (e.g. notes.txt or src/app.js):");
             if (!path || !path.trim()) return;
-            const cleanPath = path.trim();
+            const cleanPath = path.trim().replace(/^\/+/, '');
+            if (!cleanPath) return;
+
+            // Reject control characters and illegal characters (\ : * ? " < > |)
+            for (let i = 0; i < cleanPath.length; i++) {
+                const code = cleanPath.charCodeAt(i);
+                const ch = cleanPath[i];
+                if (code < 32 || code === 127 || ['\\', ':', '*', '?', '"', '<', '>', '|'].includes(ch)) {
+                    showToast("Invalid path: contains illegal character", 'error');
+                    return;
+                }
+            }
+
+            // Check VFS, live files, live binaryFiles, status deleted, and other status entries
+            if (isFileDeleted(cleanPath)) {
+                showToast(`File '${cleanPath}' is deleted; restore it instead`, 'error');
+                return;
+            }
+            if (window.MINIGIT_LIVE?.binaryFiles && window.MINIGIT_LIVE.binaryFiles.includes(cleanPath)) {
+                showToast(`File '${cleanPath}' already exists as a binary file`, 'error');
+                return;
+            }
+            if (VFS[cleanPath] !== undefined ||
+                (window.MINIGIT_LIVE?.files && window.MINIGIT_LIVE.files[cleanPath] !== undefined) ||
+                (window.MINIGIT_LIVE?.status?.modified && window.MINIGIT_LIVE.status.modified.includes(cleanPath)) ||
+                (window.MINIGIT_LIVE?.status?.staged && window.MINIGIT_LIVE.status.staged.some(x => x.replace(' (deleted)', '') === cleanPath)) ||
+                (window.MINIGIT_LIVE?.status?.untracked && window.MINIGIT_LIVE.status.untracked.includes(cleanPath))) {
+                showToast(`File '${cleanPath}' already exists`, 'error');
+                return;
+            }
+
             if (IS_SERVER_MODE) {
                 const res = await apiPost('file/save', { path: cleanPath, content: '' });
                 if (res && res.ok) {
@@ -1650,25 +1997,21 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
 
         async function deleteFile(filepath) {
             if (!filepath) return;
+            if (IS_STATIC_EXPORT || window.location.protocol === 'file:') {
+                showToast("Static export is read-only", "warning");
+                return;
+            }
             const { filename } = splitPath(filepath);
             if (!confirm(`Are you sure you want to delete '${filename}'?`)) return;
 
             if (IS_SERVER_MODE) {
                 const res = await apiPost('file/delete', { path: filepath });
                 if (res && res.ok) {
+                    delete DIRTY_BUFFERS[filepath];
                     showToast(`Deleted '${filename}'`);
                     if (ACTIVE_FILE === filepath) {
-                        ACTIVE_FILE = Object.keys(VFS)[0] || '';
-                        if (ACTIVE_FILE) {
-                            openFileInEditor(ACTIVE_FILE);
-                        } else {
-                            const area = document.getElementById('codeEditorArea');
-                            if (area) area.value = '';
-                            const activeTabName = document.getElementById('activeEditorFileName');
-                            if (activeTabName) activeTabName.innerText = 'No file open';
-                            const fileDisp = document.getElementById('editorFilePathDisplay');
-                            if (fileDisp) fileDisp.innerText = 'No file open';
-                        }
+                        ACTIVE_FILE = Object.keys(VFS).filter(f => f !== filepath)[0] || '';
+                        syncEditorWithActiveFile();
                     }
                 }
                 return;
@@ -1676,19 +2019,11 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
 
             delete VFS[filepath];
             delete STAGING_INDEX[filepath];
+            delete DIRTY_BUFFERS[filepath];
             showToast(`Deleted '${filename}'`);
             if (ACTIVE_FILE === filepath) {
                 ACTIVE_FILE = Object.keys(VFS)[0] || '';
-                if (ACTIVE_FILE) {
-                    openFileInEditor(ACTIVE_FILE);
-                } else {
-                    const area = document.getElementById('codeEditorArea');
-                    if (area) area.value = '';
-                    const activeTabName = document.getElementById('activeEditorFileName');
-                    if (activeTabName) activeTabName.innerText = 'No file open';
-                    const fileDisp = document.getElementById('editorFilePathDisplay');
-                    if (fileDisp) fileDisp.innerText = 'No file open';
-                }
+                syncEditorWithActiveFile();
             }
             updateUI();
         }
@@ -1696,10 +2031,42 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         /* ---------------------------------------------------------------------
          * GIT STAGING & COMMIT OPERATIONS
          * --------------------------------------------------------------------- */
+        async function saveFileBuffer(filepath) {
+            if (DIRTY_BUFFERS[filepath] === undefined) return true;
+            const content = DIRTY_BUFFERS[filepath];
+            if (IS_SERVER_MODE) {
+                const res = await apiPost('file/save', { path: filepath, content });
+                if (res && res.ok) {
+                    delete DIRTY_BUFFERS[filepath];
+                    VFS[filepath] = content;
+                    if (ACTIVE_FILE === filepath) syncEditorWithActiveFile();
+                    return true;
+                }
+                return false;
+            } else {
+                delete DIRTY_BUFFERS[filepath];
+                VFS[filepath] = content;
+                if (ACTIVE_FILE === filepath) syncEditorWithActiveFile();
+                return true;
+            }
+        }
+
         async function stageFile(filepath) {
+            if (IS_STATIC_EXPORT || window.location.protocol === 'file:') {
+                showToast("Static export is read-only", "warning");
+                return;
+            }
+            if (DIRTY_BUFFERS[filepath] !== undefined) {
+                if (!confirm(`File '${filepath}' has unsaved edits. Save before staging?`)) return;
+                const saved = await saveFileBuffer(filepath);
+                if (!saved) {
+                    showToast(`Failed to save '${filepath}'. Staging aborted.`, "error");
+                    return;
+                }
+            }
             if (IS_SERVER_MODE) {
                 const res = await apiPost('stage', { path: filepath });
-                if (res) showToast(`Staged '${filepath}'`);
+                if (res && res.ok) showToast(`Staged '${filepath}'`);
                 return;
             }
             const content = VFS[filepath] || "";
@@ -1711,9 +2078,13 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         }
 
         async function unstageFile(filepath) {
+            if (IS_STATIC_EXPORT || window.location.protocol === 'file:') {
+                showToast("Static export is read-only", "warning");
+                return;
+            }
             if (IS_SERVER_MODE) {
                 const res = await apiPost('unstage', { path: filepath });
-                if (res) showToast(`Unstaged '${filepath}'`);
+                if (res && res.ok) showToast(`Unstaged '${filepath}'`);
                 return;
             }
             delete STAGING_INDEX[filepath];
@@ -1722,39 +2093,84 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         }
 
         async function discardFile(filepath, isUntracked = false) {
+            if (IS_STATIC_EXPORT || window.location.protocol === 'file:') {
+                showToast("Static export is read-only", "warning");
+                return;
+            }
             const promptMsg = isUntracked
                 ? `Delete untracked file '${filepath}' permanently?`
                 : `Discard uncommitted changes in '${filepath}'?`;
             if (!confirm(promptMsg)) return;
+
             if (IS_SERVER_MODE) {
                 const res = await apiPost('discard', { path: filepath });
-                if (res) showToast(isUntracked ? `Deleted untracked file '${filepath}'` : `Discarded '${filepath}'`);
+                if (res && res.ok) {
+                    delete DIRTY_BUFFERS[filepath];
+                    showToast(isUntracked ? `Deleted untracked file '${filepath}'` : `Discarded '${filepath}'`);
+                }
                 return;
             }
-            delete VFS[filepath];
-            showToast(isUntracked ? `Deleted untracked file '${filepath}'` : `Discarded '${filepath}'`);
+
+            delete DIRTY_BUFFERS[filepath];
+            let headTreeBlobs = {};
+            const headCommitHash = BRANCHES[CURRENT_BRANCH];
+            if (headCommitHash && OBJECTS[headCommitHash]) {
+                const treeHash = OBJECTS[headCommitHash].data.tree;
+                headTreeBlobs = OBJECTS[treeHash]?.data || {};
+            }
+
+            if (headTreeBlobs[filepath]) {
+                VFS[filepath] = getBlobText(headTreeBlobs[filepath]);
+                showToast(`Discarded '${filepath}'`);
+            } else {
+                delete VFS[filepath];
+                showToast(`Deleted untracked file '${filepath}'`);
+            }
+            if (ACTIVE_FILE === filepath) syncEditorWithActiveFile();
             updateUI();
         }
 
         async function executeGitStageAll() {
+            if (IS_STATIC_EXPORT || window.location.protocol === 'file:') {
+                showToast("Static export is read-only", "warning");
+                return;
+            }
+            if (hasUnsavedEdits()) {
+                if (!confirm("You have unsaved edits in open files. Stage anyway?")) return;
+            }
             if (IS_SERVER_MODE) {
                 const res = await apiPost('stage', { path: '.' });
-                if (res) showToast("Staged all changes");
+                if (res && res.ok) showToast("Staged all changes");
                 return;
+            }
+            let headTreeBlobs = {};
+            const headCommitHash = BRANCHES[CURRENT_BRANCH];
+            if (headCommitHash && OBJECTS[headCommitHash]) {
+                const treeHash = OBJECTS[headCommitHash].data.tree;
+                headTreeBlobs = OBJECTS[treeHash]?.data || {};
             }
             for (const [fp, content] of Object.entries(VFS)) {
                 const blobHash = await sha256(content);
                 OBJECTS[blobHash] = { type: 'blob', content };
                 STAGING_INDEX[fp] = blobHash;
             }
+            for (const fp of Object.keys(headTreeBlobs)) {
+                if (VFS[fp] === undefined) {
+                    STAGING_INDEX[fp] = null;
+                }
+            }
             showToast("Staged all changes");
             updateUI();
         }
 
         async function executeGitUnstageAll() {
+            if (IS_STATIC_EXPORT || window.location.protocol === 'file:') {
+                showToast("Static export is read-only", "warning");
+                return;
+            }
             if (IS_SERVER_MODE) {
                 const res = await apiPost('unstage', { path: '.' });
-                if (res) showToast("Unstaged all files");
+                if (res && res.ok) showToast("Unstaged all files");
                 return;
             }
             STAGING_INDEX = {};
@@ -1763,6 +2179,21 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         }
 
         async function executeGitCommit(customMsg = null) {
+            if (IS_STATIC_EXPORT || window.location.protocol === 'file:') {
+                showToast("Static export is read-only", "warning");
+                return;
+            }
+            if (window.MINIGIT_LIVE && window.MINIGIT_LIVE.merging) {
+                const conflicts = window.MINIGIT_LIVE.conflicts || [];
+                if (conflicts.length > 0) {
+                    showToast("Cannot commit: please resolve conflicts first (" + conflicts.join(', ') + ")", "error");
+                    return;
+                }
+            }
+            if (hasUnsavedEdits()) {
+                if (!confirm("You have unsaved edits in open files. Commit anyway?")) return;
+            }
+
             const msgInput = document.getElementById('commitMsgInput');
             const message = customMsg ? customMsg.trim() : (msgInput ? msgInput.value.trim() : '');
 
@@ -1773,9 +2204,10 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
 
             if (IS_SERVER_MODE) {
                 const res = await apiPost('commit', { message });
-                if (res) {
+                if (res && res.ok) {
                     if (msgInput) msgInput.value = '';
-                    showToast(`Committed [${res.hash.substring(0, 7)}]`);
+                    const shortHash = res.hash ? res.hash.substring(0, 7) : (res.result ? String(res.result).substring(0, 7) : '');
+                    showToast(shortHash ? `Committed [${shortHash}]` : "Committed successfully");
                 }
                 return;
             }
@@ -1798,7 +2230,15 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 if (VFS[f] === undefined) delete combinedTree[f];
             }
             for (const [filepath, blobHash] of Object.entries(STAGING_INDEX)) {
-                combinedTree[filepath] = blobHash;
+                if (blobHash === null || blobHash === undefined) {
+                    delete combinedTree[filepath];
+                } else {
+                    combinedTree[filepath] = blobHash;
+                }
+            }
+            // Ensure no null or empty entries in combinedTree
+            for (const [fp, bh] of Object.entries(combinedTree)) {
+                if (!bh) delete combinedTree[fp];
             }
 
             const treeContent = JSON.stringify(combinedTree);
@@ -1830,25 +2270,54 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
          * --------------------------------------------------------------------- */
         function renderDashboardMetrics() {
             const commits = getChronologicalCommits();
-            const headHash = BRANCHES[CURRENT_BRANCH];
+            const headHash = window.MINIGIT_LIVE?.head || (CURRENT_BRANCH ? BRANCHES[CURRENT_BRANCH] : null);
 
             // 1. Total Commits
             const cCountEl = document.getElementById('dashTotalCommits');
             if (cCountEl) cCountEl.textContent = commits.length;
 
-            // 2. Operational / Working Tree Status
+            // 2. Operational / Working Tree Status (Item 32: Use full status)
             const opEl = document.getElementById('dashOperationalStatus');
-            let stagedCount = Object.keys(STAGING_INDEX).length;
+            let stagedCount = 0;
             let modifiedCount = 0;
-            let headTreeBlobs = {};
-            if (headHash && OBJECTS[headHash]) {
-                const treeHash = OBJECTS[headHash].data.tree;
-                headTreeBlobs = OBJECTS[treeHash]?.data || {};
+            let deletedCount = 0;
+            let untrackedCount = 0;
+
+            if (IS_SERVER_MODE && window.MINIGIT_LIVE?.status) {
+                const st = window.MINIGIT_LIVE.status;
+                stagedCount = (st.staged || []).length;
+                modifiedCount = (st.modified || []).length;
+                deletedCount = (st.deleted || []).length;
+                untrackedCount = (st.untracked || []).length;
+            } else {
+                stagedCount = Object.keys(STAGING_INDEX).length;
+                let headTreeBlobs = {};
+                if (headHash && OBJECTS[headHash]) {
+                    const treeHash = OBJECTS[headHash].data.tree;
+                    headTreeBlobs = OBJECTS[treeHash]?.data || {};
+                }
+                for (const [fp, content] of Object.entries(VFS)) {
+                    const headH = headTreeBlobs[fp];
+                    const stagedH = STAGING_INDEX[fp];
+                    if (!headH && !stagedH) {
+                        untrackedCount++;
+                    } else if (headH && !stagedH) {
+                        if (window.MINIGIT_LIVE?.files && window.MINIGIT_LIVE.files[fp] === content) {
+                            // Unchanged in static export
+                        } else {
+                            modifiedCount++;
+                        }
+                    }
+                }
+                for (const fp of Object.keys(headTreeBlobs)) {
+                    if (VFS[fp] === undefined && STAGING_INDEX[fp] === undefined) {
+                        deletedCount++;
+                    }
+                }
             }
-            for (const [fp, content] of Object.entries(VFS)) {
-                if (!headTreeBlobs[fp] && !STAGING_INDEX[fp]) modifiedCount++;
-            }
-            const totalPending = stagedCount + modifiedCount;
+
+            const totalUnstaged = modifiedCount + deletedCount + untrackedCount;
+            const totalPending = stagedCount + totalUnstaged;
 
             if (opEl) {
                 if (totalPending === 0) {
@@ -1866,13 +2335,18 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
 
             // 4. Branches
             const bCountEl = document.getElementById('dashTotalBranches');
-            if (bCountEl) bCountEl.textContent = Object.keys(BRANCHES).length;
+            if (bCountEl) bCountEl.textContent = Object.keys(BRANCHES).filter(b => b.trim() !== '').length;
             const bSubEl = document.getElementById('dashActiveBranchSub');
-            if (bSubEl) bSubEl.textContent = `Active: ${CURRENT_BRANCH}`;
+            if (bSubEl) {
+                const activeName = CURRENT_BRANCH || (window.MINIGIT_LIVE?.detached ? 'detached' : 'main');
+                bSubEl.textContent = `Active: ${activeName}`;
+            }
 
-            // 5. Reflog count
+            // 5. Reflog count (Item 32: Use server's /api/reflog)
             const rCountEl = document.getElementById('dashReflogCount');
-            if (rCountEl) rCountEl.textContent = Math.max(commits.length, DEMO_REFLOG.length);
+            if (rCountEl) {
+                rCountEl.textContent = IS_SERVER_MODE ? (SERVER_REFLOG_COUNT || 0) : Math.max(commits.length, DEMO_REFLOG.length);
+            }
 
             // 6. Hero Health Banner: Tile 1 - Objects Stored
             const objValEl = document.getElementById('dashObjectsStoredVal');
@@ -1936,7 +2410,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             if (headShortEl) headShortEl.textContent = headHash ? headHash.substring(0, 7) : "root";
             const headSubEl = document.getElementById('dashHeadContextSub');
             if (headSubEl) {
-                const branchName = CURRENT_BRANCH || 'detached';
+                const branchName = CURRENT_BRANCH || (window.MINIGIT_LIVE?.detached ? 'detached' : 'detached');
                 headSubEl.textContent = `${branchName} · HEAD`;
                 headSubEl.title = `Branch: ${branchName} | HEAD: ${headHash || 'root'}`;
             }
@@ -1982,48 +2456,123 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             svg.innerHTML = '';
 
             const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-            const commits = getChronologicalCommits();
-            const xStep = 90;
-            const y = 80;
-            const nodeRadius = 12;
-            const totalWidth = Math.max(500, 60 + commits.length * xStep);
+            const { commits } = getGraphCommits();
+            if (!commits || commits.length === 0) return;
+
+            // Compact horizontal DAG layout: oldest commits on the left, newest on the right
+            const miniCommits = [...commits].reverse();
+            const xStep = 85;
+            const nodeRadius = 11;
+            const maxLane = Math.max(0, ...miniCommits.map(c => c.lane || 0));
+            const totalWidth = Math.max(500, 70 + miniCommits.length * xStep + 40);
+            const totalHeight = Math.max(180, 50 + (maxLane + 1) * 45 + 35);
+
             svg.setAttribute('width', totalWidth);
+            svg.setAttribute('height', totalHeight);
+            svg.style.minHeight = `${totalHeight}px`;
 
-            commits.forEach((node, index) => {
-                const nodeX = 50 + index * xStep;
-                const isHead = (node.hash === BRANCHES[CURRENT_BRANCH]);
+            const head = getGraphHead();
+            const detached = isHeadDetached();
 
-                // Edge Line
-                if (index > 0) {
-                    const prevX = 50 + (index - 1) * xStep;
-                    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                    line.setAttribute('x1', prevX);
-                    line.setAttribute('y1', y);
-                    line.setAttribute('x2', nodeX);
-                    line.setAttribute('y2', y);
-                    line.setAttribute('stroke', isDark ? '#3F3F46' : '#A1A1AA');
-                    line.setAttribute('stroke-width', '2');
-                    svg.appendChild(line);
+            const coords = new Map();
+            miniCommits.forEach((c, idx) => {
+                coords.set(c.hash, {
+                    x: 50 + idx * xStep,
+                    y: 55 + (c.lane || 0) * 45,
+                    node: c,
+                    index: idx
+                });
+            });
+
+            // 1. Draw real parent and parent2 edges
+            miniCommits.forEach(node => {
+                const childCoord = coords.get(node.hash);
+                if (!childCoord) return;
+
+                // First parent edge (fork or same lane)
+                if (node.parent && coords.has(node.parent)) {
+                    const pCoord = coords.get(node.parent);
+                    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                    path.setAttribute('d', createHorizontalEdgePath(pCoord.x, pCoord.y, childCoord.x, childCoord.y, false));
+                    path.setAttribute('fill', 'none');
+                    const edgeColor = (childCoord.y !== pCoord.y)
+                        ? (childCoord.node.color || DAG_PALETTE[0])
+                        : (childCoord.node.color || (isDark ? '#3F3F46' : '#A1A1AA'));
+                    path.setAttribute('stroke', edgeColor);
+                    path.setAttribute('stroke-width', '2');
+                    if (!node.isReachable) path.setAttribute('stroke-dasharray', '4 3');
+                    svg.appendChild(path);
                 }
+
+                // Second parent edge (merge)
+                if (node.parent2 && coords.has(node.parent2)) {
+                    const p2Coord = coords.get(node.parent2);
+                    const path2 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                    path2.setAttribute('d', createHorizontalEdgePath(p2Coord.x, p2Coord.y, childCoord.x, childCoord.y, true));
+                    path2.setAttribute('fill', 'none');
+                    const edgeColor2 = p2Coord.node.color || DAG_PALETTE[1];
+                    path2.setAttribute('stroke', edgeColor2);
+                    path2.setAttribute('stroke-width', '2');
+                    if (!node.isReachable) path2.setAttribute('stroke-dasharray', '4 3');
+                    svg.appendChild(path2);
+                }
+            });
+
+            // 2. Draw nodes and labels
+            miniCommits.forEach(node => {
+                const coord = coords.get(node.hash);
+                if (!coord) return;
+                const { x: nodeX, y: nodeY } = coord;
+                const isHead = (node.hash === head);
+                const isMerge = Boolean(node.parent && node.parent2);
 
                 const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
                 group.style.cursor = 'pointer';
                 group.onclick = () => openCommitDetailModal(node.hash);
+                if (!node.isReachable) group.style.opacity = '0.5';
+
+                const titleEl = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+                titleEl.textContent = `${node.hash.substring(0, 7)}: ${node.message || 'commit'}`;
+                group.appendChild(titleEl);
+
+                // Halo ring for HEAD
+                if (isHead) {
+                    const halo = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    halo.setAttribute('cx', nodeX);
+                    halo.setAttribute('cy', nodeY);
+                    halo.setAttribute('r', nodeRadius + 4);
+                    halo.setAttribute('fill', 'none');
+                    halo.setAttribute('stroke', isDark ? '#FFFFFF' : '#000000');
+                    halo.setAttribute('stroke-width', '1.5');
+                    halo.setAttribute('stroke-dasharray', '3 2');
+                    group.appendChild(halo);
+                }
 
                 // Commit Circle
                 const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
                 circle.setAttribute('cx', nodeX);
-                circle.setAttribute('cy', y);
+                circle.setAttribute('cy', nodeY);
                 circle.setAttribute('r', isHead ? nodeRadius + 2 : nodeRadius);
                 circle.setAttribute('fill', isDark ? (isHead ? '#FFFFFF' : '#18181B') : (isHead ? '#000000' : '#FFFFFF'));
-                circle.setAttribute('stroke', isDark ? (isHead ? '#FFFFFF' : '#A1A1AA') : '#000000');
-                circle.setAttribute('stroke-width', '2.5');
+                circle.setAttribute('stroke', node.color || DAG_PALETTE[0]);
+                circle.setAttribute('stroke-width', isHead ? '2.5' : '2');
+                if (!node.isReachable) circle.setAttribute('stroke-dasharray', '3 2');
                 group.appendChild(circle);
 
-                // Hash Text
+                // Inner dot for merges
+                if (isMerge && !isHead) {
+                    const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    dot.setAttribute('cx', nodeX);
+                    dot.setAttribute('cy', nodeY);
+                    dot.setAttribute('r', 3.5);
+                    dot.setAttribute('fill', node.color || DAG_PALETTE[0]);
+                    group.appendChild(dot);
+                }
+
+                // Short hash text
                 const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
                 text.setAttribute('x', nodeX);
-                text.setAttribute('y', y + 26);
+                text.setAttribute('y', nodeY + 22);
                 text.setAttribute('fill', isDark ? '#E4E4E7' : '#6B7280');
                 text.setAttribute('font-size', '10px');
                 text.setAttribute('font-family', 'JetBrains Mono, monospace');
@@ -2031,12 +2580,12 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 text.textContent = node.hash.substring(0, 6);
                 group.appendChild(text);
 
-                // Mini graph: Total only, keep it tiny
+                // Stats text (+X -Y)
                 const stats = commitStats(node.hash);
                 if (stats && (stats.totalAdded > 0 || stats.totalRemoved > 0)) {
                     const statText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
                     statText.setAttribute('x', nodeX);
-                    statText.setAttribute('y', y + 38);
+                    statText.setAttribute('y', nodeY + 34);
                     statText.setAttribute('font-size', '9px');
                     statText.setAttribute('font-family', 'JetBrains Mono, monospace');
                     statText.setAttribute('text-anchor', 'middle');
@@ -2062,6 +2611,50 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                         statText.appendChild(minusTspan);
                     }
                     group.appendChild(statText);
+                }
+
+                // Branch labels / HEAD badge above node
+                const branchBadges = [];
+                if (detached && isHead) {
+                    branchBadges.push({ name: 'HEAD', isCur: true });
+                }
+                if (typeof BRANCHES === 'object' && BRANCHES !== null) {
+                    for (const [bName, bHash] of Object.entries(BRANCHES)) {
+                        if (bHash === node.hash && !bName.toLowerCase().startsWith('(detached')) {
+                            branchBadges.push({
+                                name: bName,
+                                isCur: (!detached && bName === CURRENT_BRANCH)
+                            });
+                        }
+                    }
+                }
+                if (!node.isReachable) {
+                    branchBadges.push({ name: 'unreachable', isCur: false });
+                }
+
+                if (branchBadges.length > 0) {
+                    const badge = branchBadges[0];
+                    const bWidth = badge.name.length * 6 + 12;
+                    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                    rect.setAttribute('x', nodeX - bWidth / 2);
+                    rect.setAttribute('y', nodeY - 24);
+                    rect.setAttribute('width', bWidth);
+                    rect.setAttribute('height', 14);
+                    rect.setAttribute('rx', 7);
+                    rect.setAttribute('fill', badge.isCur ? (isDark ? '#FFFFFF' : '#000000') : (isDark ? '#27272A' : '#F3F4F6'));
+                    rect.setAttribute('stroke', badge.isCur ? (isDark ? '#FFFFFF' : '#000000') : (isDark ? '#3F3F46' : '#E5E7EB'));
+                    group.appendChild(rect);
+
+                    const bText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    bText.setAttribute('x', nodeX);
+                    bText.setAttribute('y', nodeY - 14);
+                    bText.setAttribute('fill', badge.isCur ? (isDark ? '#000000' : '#FFFFFF') : (isDark ? '#E4E4E7' : '#4B5563'));
+                    bText.setAttribute('font-size', '8px');
+                    bText.setAttribute('font-family', 'Inter, sans-serif');
+                    bText.setAttribute('text-anchor', 'middle');
+                    bText.setAttribute('font-weight', '700');
+                    bText.textContent = badge.name;
+                    group.appendChild(bText);
                 }
 
                 svg.appendChild(group);
@@ -2203,8 +2796,28 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             const contentEl = document.getElementById('timeTravelFileContent');
             if (nameEl) nameEl.textContent = filepath;
             if (contentEl) {
-                const blob = OBJECTS[blobHash];
-                contentEl.textContent = (blob && blob.content !== undefined) ? blob.content : "File content unavailable";
+                const text = getBlobText(blobHash);
+                if (text === "[binary file]" || isBinaryFile(filepath)) {
+                    contentEl.textContent = "[binary file, preview unavailable]";
+                } else if (text !== "") {
+                    contentEl.textContent = text;
+                } else {
+                    const blob = OBJECTS[blobHash];
+                    if (blob && blob.encoding === 'base64' && typeof blob.content === 'string') {
+                        try {
+                            const decoded = atob(blob.content);
+                            if (decoded.includes('\0')) {
+                                contentEl.textContent = "[binary file, preview unavailable]";
+                            } else {
+                                contentEl.textContent = decoded;
+                            }
+                        } catch {
+                            contentEl.textContent = "[binary file, preview unavailable]";
+                        }
+                    } else {
+                        contentEl.textContent = (blob && blob.content !== undefined) ? blob.content : "File content unavailable";
+                    }
+                }
             }
         }
 
@@ -2239,10 +2852,14 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 if (icon) icon.className = "fa-solid fa-pause text-[10px]";
                 TIME_TRAVEL_PLAY_TIMER = setInterval(() => {
                     if (TIME_TRAVEL_INDEX >= TIME_TRAVEL_COMMITS.length - 1) {
-                        TIME_TRAVEL_INDEX = 0;
-                    } else {
-                        TIME_TRAVEL_INDEX = (TIME_TRAVEL_INDEX !== null ? TIME_TRAVEL_INDEX : 0) + 1;
+                        // Item 47: Stop playback at the end
+                        clearInterval(TIME_TRAVEL_PLAY_TIMER);
+                        TIME_TRAVEL_PLAY_TIMER = null;
+                        if (label) label.textContent = "Play";
+                        if (icon) icon.className = "fa-solid fa-play text-[10px]";
+                        return;
                     }
+                    TIME_TRAVEL_INDEX = (TIME_TRAVEL_INDEX !== null ? TIME_TRAVEL_INDEX : 0) + 1;
                     if (TIME_TRAVEL_COMMITS[TIME_TRAVEL_INDEX]) {
                         TIME_TRAVEL_SELECTED_HASH = TIME_TRAVEL_COMMITS[TIME_TRAVEL_INDEX].hash;
                     }
@@ -2256,11 +2873,13 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         async function actionTimeTravelRestore() {
             const c = TIME_TRAVEL_COMMITS[TIME_TRAVEL_INDEX];
             if (!c) return;
-            if (!confirm(`Restore all working directory files to commit [${c.hash.substring(0, 7)}]?`)) return;
+            const short = c.hash.substring(0, 7);
+            const confirmed = confirm(`Checkout commit [${short}] (detached HEAD)?\n\nTo start new work here without detaching HEAD, you can use "Branch Here" instead.`);
+            if (!confirmed) return;
 
             if (IS_SERVER_MODE) {
                 const res = await apiPost('reflog/restore', { hash: c.hash });
-                if (res) showToast(`Restored files to [${c.hash.substring(0, 7)}]`);
+                if (res && res.ok) showToast(`Checked out commit [${short}] (detached HEAD)`);
                 return;
             }
 
@@ -2268,10 +2887,12 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             if (treeObj && treeObj.data) {
                 VFS = {};
                 for (const [fp, bHash] of Object.entries(treeObj.data)) {
-                    if (OBJECTS[bHash]) VFS[fp] = OBJECTS[bHash].content;
+                    if (OBJECTS[bHash]) VFS[fp] = getBlobText(bHash);
                 }
-                recordDemoReflog("restore", BRANCHES[CURRENT_BRANCH], c.hash, `Restored working tree to ${c.hash.substring(0, 7)}`);
-                showToast(`Restored working tree to [${c.hash.substring(0, 7)}]`);
+                const oldHash = (CURRENT_BRANCH && BRANCHES[CURRENT_BRANCH]) ? BRANCHES[CURRENT_BRANCH] : (DEMO_REFLOG[0]?.newHash || "0000000");
+                CURRENT_BRANCH = "";
+                recordDemoReflog("restore", oldHash, c.hash, `Checked out commit ${short} (detached HEAD)`);
+                showToast(`Checked out commit [${short}] (detached HEAD)`);
                 updateUI();
             }
         }
@@ -2280,7 +2901,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             const c = TIME_TRAVEL_COMMITS[TIME_TRAVEL_INDEX];
             if (!c) return;
             SELECTED_COMMIT_HASH = c.hash;
-            openNewBranchModal();
+            openNewBranchModal(c.hash);
         }
 
         async function actionTimeTravelCheckout() {
@@ -2352,10 +2973,18 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         async function generateNewPairCode() {
             if (!IS_SERVER_MODE) return;
             try {
-                const res = await fetch('/api/pair/generate-code', { method: 'POST' });
-                if (res.ok) {
+                const res = await fetch('/api/pair/generate-code', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: '{}'
+                });
+                const data = await res.json().catch(() => null);
+                if (res.ok && data && data.ok) {
                     showToast("Generated new 6-digit pair code");
                     await openLanSyncModal();
+                } else {
+                    const err = (data && data.error) ? data.error : ("Failed to generate code (HTTP " + res.status + ")");
+                    showToast(err, "error");
                 }
             } catch (e) {
                 showToast("Failed to generate code: " + e.message, "error");
@@ -2428,7 +3057,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         }
 
         async function pollPendingPairRequests() {
-            if (!IS_SERVER_MODE || document.hidden) return;
+            if (!IS_SERVER_MODE || !IS_LAN_MODE || document.hidden) return;
             try {
                 const res = await fetch('/api/pair/pending');
                 if (res.ok) {
@@ -2463,12 +3092,17 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                         action: allow ? 'allow' : 'deny'
                     })
                 });
-                if (allow) {
-                    showToast("Device paired successfully! Session token granted.");
-                    await refreshPairedPeersList();
-                    await openLanSyncModal();
+                const data = await res.json();
+                if (res.ok && data.ok) {
+                    if (allow) {
+                        showToast("Device paired successfully! Session token granted.");
+                        await refreshPairedPeersList();
+                        await openLanSyncModal();
+                    } else {
+                        showToast("Pairing request denied.");
+                    }
                 } else {
-                    showToast("Pairing request denied.");
+                    showToast(data.error || "Failed to process pairing decision", "error");
                 }
             } catch (e) {
                 showToast("Failed to respond to pairing: " + e.message, "error");
@@ -2583,6 +3217,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                         const data = await res.json();
                         if (data.ok) {
                             LOCAL_PAIR_CODE = data.code || "";
+                            IS_LAN_MODE = !!data.lan;
                             if (data.lan) {
                                 if (codeContainer) codeContainer.classList.remove('hidden');
                                 if (pairedContainer) pairedContainer.classList.remove('hidden');
@@ -2592,7 +3227,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                                     statusBadge.className = "px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800 text-[10px] font-bold";
                                 }
                                 if (hintText) {
-                                    hintText.innerHTML = `<i class="fa-solid fa-circle-info text-[10px] mr-1"></i>LAN active! Share your LAN URL (${data.lanUrl || 'see terminal'}) and 6-digit code with peers.`;
+                                    hintText.innerHTML = '<i class="fa-solid fa-circle-info text-[10px] mr-1"></i>LAN active! Share your LAN URL (' + escapeHtml(data.lanUrl || 'see terminal') + ') and 6-digit code with peers.';
                                 }
 
                                 if (LOCAL_PAIR_TIMER) clearInterval(LOCAL_PAIR_TIMER);
@@ -2678,6 +3313,10 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         let IS_SYNCING_LAN = false;
 
         async function executeLanPull() {
+            if (!IS_SERVER_MODE) {
+                showToast("LAN pull is only available in server mode", "warning");
+                return;
+            }
             if (IS_SYNCING_LAN) return;
             const input = document.getElementById('lanPeerUrlInput');
             let peerUrl = cleanPeerUrl(input ? input.value : '');
@@ -2832,10 +3471,20 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             if (IS_SERVER_MODE) {
                 try {
                     const res = await fetch('/api/sync/bundle');
+                    if (!res.ok) {
+                        showToast(`Failed to export bundle: HTTP ${res.status}`, 'error');
+                        return;
+                    }
                     bundleObj = await res.json();
-                } catch (e) {}
-            }
-            if (!bundleObj) {
+                    if (!bundleObj || bundleObj.ok === false) {
+                        showToast(bundleObj?.error || "Failed to export bundle", 'error');
+                        return;
+                    }
+                } catch (e) {
+                    showToast("Failed to download bundle: " + e.message, 'error');
+                    return;
+                }
+            } else {
                 bundleObj = {
                     minigit_bundle: 1,
                     repoName: "minigit",
@@ -2859,6 +3508,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         function uploadRepositoryBundle(event) {
             const file = event.target.files[0];
             if (!file) return;
+            event.target.value = '';
             const reader = new FileReader();
             reader.onload = async (e) => {
                 try {
@@ -2869,11 +3519,37 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                             showToast(res.message || "Bundle imported successfully");
                             closeLanSyncModal();
                         } else if (res) {
-                            showToast(res.error || res.message || "Bundle import failed", "error");
+                            const peerRefs = res.peerRefs || (res.result && res.result.peerRefs);
+                            if (peerRefs && peerRefs.length > 0) {
+                                const peerBranch = peerRefs[0];
+                                showToast(res.error || res.message || `Diverged: peer tip saved as ${peerBranch}`, 'warning', {
+                                    label: `Merge ${peerBranch}`,
+                                    onClick: async () => {
+                                        const mRes = await apiPost('merge', { branch: peerBranch });
+                                        if (mRes && mRes.ok) showToast(mRes.result || `Merged ${peerBranch} successfully!`);
+                                    }
+                                });
+                                closeLanSyncModal();
+                            } else {
+                                showToast(res.error || res.message || "Bundle import failed", "error");
+                            }
                         }
                     } else {
                         if (bundle.objects) Object.assign(OBJECTS, bundle.objects);
-                        if (bundle.branches) Object.assign(BRANCHES, bundle.branches);
+                        if (bundle.branches) {
+                            for (const [bName, bHash] of Object.entries(bundle.branches)) {
+                                if (!BRANCHES[bName]) {
+                                    BRANCHES[bName] = bHash;
+                                } else if (BRANCHES[bName] !== bHash) {
+                                    const peerBranch = `peer-${bName}`;
+                                    BRANCHES[peerBranch] = bHash;
+                                    showToast(`Diverged: peer tip saved as ${peerBranch}`, 'warning', {
+                                        label: `Merge ${peerBranch}`,
+                                        onClick: () => mergeBranchUI(peerBranch)
+                                    });
+                                }
+                            }
+                        }
                         recordDemoReflog("bundle_import", null, null, "Imported bundle file");
                         showToast("Bundle imported successfully into demo");
                         updateUI();
@@ -2892,7 +3568,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         async function executeQuickUndo() {
             if (IS_SERVER_MODE) {
                 const res = await apiPost('undo');
-                if (res) showToast(res.message || "Undo successful!");
+                if (res && res.ok) showToast(res.message || "Undo successful!");
                 return;
             }
 
@@ -2901,7 +3577,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 showToast("Nothing to undo", "error");
                 return;
             }
-            const parent = OBJECTS[curHash].data.parent;
+            const parent = OBJECTS[curHash].data?.parent;
             if (!parent) {
                 showToast("Cannot undo the initial commit", "error");
                 return;
@@ -2912,7 +3588,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             updateUI();
         }
 
-                let DEMO_STASHES = [];
+        let DEMO_STASHES = [];
 
         async function refreshStashList() {
             const container = document.getElementById('stashListContainer');
@@ -2924,8 +3600,10 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             if (IS_SERVER_MODE) {
                 try {
                     const res = await fetch('/api/stash/list');
-                    const data = await res.json();
-                    if (data && data.stashes) stashes = data.stashes;
+                    if (res.ok) {
+                        const data = await res.json();
+                        if (data && Array.isArray(data.stashes)) stashes = data.stashes;
+                    }
                 } catch (e) {}
             } else {
                 stashes = DEMO_STASHES.map((s, idx) => ({
@@ -2964,27 +3642,48 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         }
 
         async function executeQuickStash() {
+            const includeUntracked = !!document.getElementById('stashIncludeUntracked')?.checked;
             if (IS_SERVER_MODE) {
-                const res = await apiPost('stash/save', { message: 'Quick Stash' });
-                if (res) showToast(res.message || "Saved stash checkpoint");
+                const res = await apiPost('stash/save', { message: 'Quick Stash', includeUntracked });
+                if (res && res.ok) {
+                    showToast(res.message || "Saved stash checkpoint");
+                    await refreshStashList();
+                }
                 return;
             }
 
             const headHash = BRANCHES[CURRENT_BRANCH];
-            DEMO_STASHES.unshift({
-                vfs: { ...VFS },
-                hash: "stash_" + Math.random().toString(16).substring(2, 8),
-                message: "Quick Stash",
-                timestamp: new Date().toISOString()
-            });
+            let headTreeBlobs = {};
             if (headHash && OBJECTS[headHash]) {
                 const treeHash = OBJECTS[headHash].data.tree;
-                const treeData = OBJECTS[treeHash]?.data || {};
-                VFS = {};
-                for (const [fp, bHash] of Object.entries(treeData)) {
-                    if (OBJECTS[bHash]) VFS[fp] = OBJECTS[bHash].content;
+                headTreeBlobs = OBJECTS[treeHash]?.data || {};
+            }
+
+            const stashedVfs = {};
+            for (const [fp, content] of Object.entries(VFS)) {
+                if (headTreeBlobs[fp] || includeUntracked) {
+                    stashedVfs[fp] = content;
                 }
             }
+
+            DEMO_STASHES.unshift({
+                vfs: stashedVfs,
+                hash: "stash_" + Math.random().toString(16).substring(2, 8),
+                message: "Quick Stash" + (includeUntracked ? " (with untracked)" : ""),
+                timestamp: new Date().toISOString()
+            });
+
+            if (includeUntracked) {
+                VFS = {};
+                for (const [fp, bHash] of Object.entries(headTreeBlobs)) {
+                    if (OBJECTS[bHash]) VFS[fp] = getBlobText(bHash);
+                }
+            } else {
+                for (const [fp, bHash] of Object.entries(headTreeBlobs)) {
+                    if (OBJECTS[bHash]) VFS[fp] = getBlobText(bHash);
+                }
+            }
+
             recordDemoReflog("stash", headHash, headHash, "Saved working directory stash");
             showToast("Saved working changes into safety stash");
             updateUI();
@@ -2994,7 +3693,10 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         async function executePopStash() {
             if (IS_SERVER_MODE) {
                 const res = await apiPost('stash/pop');
-                if (res) showToast(res.message || "Stash applied");
+                if (res && res.ok) {
+                    showToast(res.message || "Stash applied");
+                    await refreshStashList();
+                }
                 return;
             }
 
@@ -3003,7 +3705,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 return;
             }
             const popped = DEMO_STASHES.shift();
-            VFS = { ...popped.vfs };
+            Object.assign(VFS, popped.vfs);
             recordDemoReflog("stash_pop", null, null, "Restored and popped stash");
             showToast("Restored and applied stash");
             updateUI();
@@ -3085,11 +3787,12 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         }
 
         async function restoreSafetyNetCommit(hash) {
-            if (!confirm(`Restore repository to commit [${hash.substring(0, 7)}]?`)) return;
+            const short = hash.substring(0, 7);
+            if (!confirm(`Checkout checkpoint [${short}] (detached HEAD)?\n\nTip: You can create a branch at this checkpoint afterwards.`)) return;
             closeSafetyNetModal();
             if (IS_SERVER_MODE) {
                 const res = await apiPost('reflog/restore', { hash });
-                if (res) showToast(`Restored to checkpoint [${hash.substring(0, 7)}]`);
+                if (res && res.ok) showToast(`Checked out checkpoint [${short}] (detached HEAD)`);
             } else {
                 SELECTED_COMMIT_HASH = hash;
                 await actionCheckoutSelectedCommit();
@@ -3144,7 +3847,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             }
             showToast("Exporting to standard Git repository...");
             const res = await apiPost('git/export');
-            if (res) {
+            if (res && res.ok) {
                 showToast(res.message || "Exported to .git successfully!");
                 closeGitBridgeModal();
             }
@@ -3157,7 +3860,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             }
             showToast("Importing from standard Git repository...");
             const res = await apiPost('git/import');
-            if (res) {
+            if (res && res.ok) {
                 showToast(res.message || "Imported from .git successfully!");
                 closeGitBridgeModal();
             }
@@ -3166,7 +3869,8 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         /* ---------------------------------------------------------------------
          * BRANCHING & CHECKOUT ENGINE
          * --------------------------------------------------------------------- */
-        function openNewBranchModal() {
+        function openNewBranchModal(atCommit = null) {
+            SELECTED_COMMIT_HASH = atCommit || null;
             const input = document.getElementById('modalBranchNameInput');
             if (input) input.value = '';
             const modal = document.getElementById('newBranchModal');
@@ -3175,24 +3879,37 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         }
 
         function closeNewBranchModal() {
+            SELECTED_COMMIT_HASH = null;
             const modal = document.getElementById('newBranchModal');
             if (modal) modal.classList.add('hidden');
         }
 
         async function submitNewBranchModal() {
             const input = document.getElementById('modalBranchNameInput');
-            const name = (input ? input.value : '').trim().toLowerCase().replace(/\s+/g, '-');
+            // Item 48: Keep case, backend rule [A-Za-z0-9._-], not starting with '.'
+            const name = (input ? input.value : '').trim();
             if (!name) return;
+            if (name.startsWith('.') || !/^[A-Za-z0-9._-]+$/.test(name)) {
+                showToast("Invalid branch name. Must match [A-Za-z0-9._-] and not start with '.'", "error");
+                return;
+            }
+            const atCommit = SELECTED_COMMIT_HASH;
             closeNewBranchModal();
-            await createNewBranch(name);
+            await createNewBranch(name, atCommit);
         }
 
-        async function createNewBranch(branchName) {
+        async function createNewBranch(branchName, atCommit = null) {
             if (!branchName) return;
 
             if (IS_SERVER_MODE) {
-                const res = await apiPost('branch/create', { name: branchName });
-                if (res) showToast(`Created branch '${branchName}'`);
+                // Item 31: POST /api/branch/create {name, at?}
+                const payload = { name: branchName };
+                if (atCommit) payload.at = atCommit;
+                const res = await apiPost('branch/create', payload);
+                if (res && res.ok) {
+                    showToast(res.message || `Created branch '${branchName}'`);
+                    await refreshRepositorySnapshot(true);
+                }
                 return;
             }
 
@@ -3201,20 +3918,115 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 return;
             }
 
-            BRANCHES[branchName] = BRANCHES[CURRENT_BRANCH];
-            recordDemoReflog("branch", BRANCHES[CURRENT_BRANCH], BRANCHES[CURRENT_BRANCH], `Created branch ${branchName}`);
+            const targetCommit = atCommit || (BRANCHES ? BRANCHES[CURRENT_BRANCH] : null) || null;
+            BRANCHES[branchName] = targetCommit;
+            recordDemoReflog("branch", BRANCHES[CURRENT_BRANCH], targetCommit, `Created branch ${branchName}`);
             showToast(`Created branch '${branchName}'`);
+            updateUI();
+        }
+
+        // Item 42: Delete Branch Actions
+        function openDeleteBranchModal() {
+            const select = document.getElementById('deleteBranchSelect');
+            if (!select) return;
+
+            select.innerHTML = '';
+            const allBranches = Object.keys(BRANCHES || {}).filter(b => b && !b.startsWith('(detached'));
+            if (allBranches.length === 0) {
+                showToast("No branches available to delete", "error");
+                return;
+            }
+
+            for (const b of allBranches) {
+                const opt = document.createElement('option');
+                opt.value = b;
+                opt.textContent = (b === CURRENT_BRANCH) ? `${b} (active)` : b;
+                select.appendChild(opt);
+            }
+
+            const nonActive = allBranches.find(b => b !== CURRENT_BRANCH);
+            if (nonActive) {
+                select.value = nonActive;
+            }
+
+            onDeleteBranchSelectChange();
+
+            const modal = document.getElementById('deleteBranchModal');
+            if (modal) modal.classList.remove('hidden');
+        }
+
+        function closeDeleteBranchModal() {
+            const modal = document.getElementById('deleteBranchModal');
+            if (modal) modal.classList.add('hidden');
+        }
+
+        function onDeleteBranchSelectChange() {
+            const select = document.getElementById('deleteBranchSelect');
+            const warning = document.getElementById('deleteBranchWarning');
+            const confirmBtn = document.getElementById('btnConfirmDeleteBranch');
+            if (!select) return;
+
+            const isCurrent = (select.value === CURRENT_BRANCH);
+            if (warning) {
+                if (isCurrent) warning.classList.remove('hidden');
+                else warning.classList.add('hidden');
+            }
+            if (confirmBtn) {
+                confirmBtn.disabled = isCurrent;
+                if (isCurrent) {
+                    confirmBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                } else {
+                    confirmBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                }
+            }
+        }
+
+        async function submitDeleteBranchModal() {
+            const select = document.getElementById('deleteBranchSelect');
+            if (!select || !select.value) return;
+            const branchName = select.value;
+            if (branchName === CURRENT_BRANCH) {
+                showToast("Cannot delete the active branch", "error");
+                return;
+            }
+            closeDeleteBranchModal();
+            await executeDeleteBranch(branchName);
+        }
+
+        async function executeDeleteBranch(branchName) {
+            if (!branchName || branchName === CURRENT_BRANCH) {
+                showToast("Cannot delete the active branch", "error");
+                return;
+            }
+
+            if (IS_SERVER_MODE) {
+                const res = await apiPost('branch/delete', { name: branchName });
+                if (res && res.ok) {
+                    showToast(res.message || `Deleted branch '${branchName}'`);
+                    await refreshRepositorySnapshot(true);
+                }
+                return;
+            }
+
+            if (!BRANCHES[branchName]) {
+                showToast(`Branch '${branchName}' not found`, 'error');
+                return;
+            }
+
+            delete BRANCHES[branchName];
+            recordDemoReflog("branch", BRANCHES[CURRENT_BRANCH], BRANCHES[CURRENT_BRANCH], `Deleted branch ${branchName}`);
+            showToast(`Deleted branch '${branchName}'`);
             updateUI();
         }
 
         function openMergeModal() {
             const select = document.getElementById('modalMergeBranchSelect');
             const targetActive = document.getElementById('mergeTargetActiveBranch');
-            if (targetActive) targetActive.textContent = CURRENT_BRANCH;
+            if (targetActive) targetActive.textContent = CURRENT_BRANCH || "HEAD";
             if (select) {
                 select.innerHTML = '';
                 for (const b of Object.keys(BRANCHES)) {
-                    if (b !== CURRENT_BRANCH) {
+                    if (b !== CURRENT_BRANCH && !b.startsWith('(detached')) {
                         const opt = document.createElement('option');
                         opt.value = b;
                         opt.textContent = b;
@@ -3244,9 +4056,16 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         }
 
         async function mergeBranchUI(targetBranch) {
+            if (!IS_SERVER_MODE) {
+                showToast("Merge is only available in server mode", "warning");
+                return;
+            }
             if (IS_SERVER_MODE) {
                 const res = await apiPost('merge', { branch: targetBranch });
-                if (res) showToast(res.result || `Merged '${targetBranch}'`);
+                if (res && res.ok) {
+                    showToast(res.result || res.message || `Merged '${targetBranch}'`);
+                    await refreshRepositorySnapshot(true);
+                }
                 return;
             }
             recordDemoReflog("merge", BRANCHES[CURRENT_BRANCH], BRANCHES[targetBranch], `Merged branch ${targetBranch} into ${CURRENT_BRANCH}`);
@@ -3257,13 +4076,41 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         async function switchBranchUI(targetBranch) {
             if (!targetBranch || targetBranch === CURRENT_BRANCH) return;
 
+            // Item N9: On branch switch, ask to save or discard dirty buffers. Never carry them over.
+            if (hasUnsavedEdits()) {
+                const doSave = confirm("You have unsaved changes. Click OK to save them before switching, or Cancel to discard them.");
+                if (doSave) {
+                    for (const fp of Object.keys(DIRTY_BUFFERS)) {
+                        const ok = await saveFileBuffer(fp);
+                        if (!ok) {
+                            showToast(`Failed to save '${fp}'. Branch switch aborted.`, "error");
+                            updateBranchDropdown();
+                            return;
+                        }
+                    }
+                } else {
+                    for (const fp of Object.keys(DIRTY_BUFFERS)) {
+                        delete DIRTY_BUFFERS[fp];
+                    }
+                }
+            }
+
             if (IS_SERVER_MODE) {
                 const res = await apiPost('checkout', { target: targetBranch });
-                if (res) showToast(`Switched to '${targetBranch}'`);
+                if (res && res.ok) {
+                    showToast(`Switched to '${targetBranch}'`);
+                    await refreshRepositorySnapshot(true);
+                } else {
+                    // Item 33: The branch dropdown keeps the new name after a failed switch. Revert it.
+                    updateBranchDropdown();
+                }
                 return;
             }
 
-            if (!BRANCHES[targetBranch] && BRANCHES[targetBranch] !== null) return;
+            if (!BRANCHES[targetBranch] && BRANCHES[targetBranch] !== null) {
+                updateBranchDropdown();
+                return;
+            }
             const oldBranch = CURRENT_BRANCH;
             CURRENT_BRANCH = targetBranch;
             const targetCommitHash = BRANCHES[targetBranch];
@@ -3390,32 +4237,62 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
 
         async function actionCheckoutSelectedCommit() {
             if (!SELECTED_COMMIT_HASH) return;
+            const hashToCheckout = SELECTED_COMMIT_HASH;
             closeCommitActionModal();
+
+            // Item 52: Check out the branch instead of detaching if commit is at a branch tip
+            let matchingBranch = null;
+            if (typeof BRANCHES === 'object' && BRANCHES !== null) {
+                for (const [bName, bHash] of Object.entries(BRANCHES)) {
+                    if (bHash === hashToCheckout && !bName.toLowerCase().startsWith('(detached')) {
+                        matchingBranch = bName;
+                        break;
+                    }
+                }
+            }
+
+            if (matchingBranch) {
+                await switchBranchUI(matchingBranch);
+                return;
+            }
+
             if (IS_SERVER_MODE) {
-                const res = await apiPost('checkout', { target: SELECTED_COMMIT_HASH });
-                if (res) showToast(`Checked out [${SELECTED_COMMIT_HASH.substring(0, 7)}]`);
+                const res = await apiPost('checkout', { target: hashToCheckout });
+                if (res && res.ok) {
+                    showToast(`Checked out [${hashToCheckout.substring(0, 7)}] (detached HEAD)`);
+                    await refreshRepositorySnapshot(true);
+                }
             } else {
-                recordDemoReflog("checkout", BRANCHES[CURRENT_BRANCH], SELECTED_COMMIT_HASH, `Detached HEAD at ${SELECTED_COMMIT_HASH.substring(0, 7)}`);
-                showToast(`Checked out [${SELECTED_COMMIT_HASH.substring(0, 7)}]`);
+                const oldHash = (CURRENT_BRANCH && BRANCHES[CURRENT_BRANCH]) ? BRANCHES[CURRENT_BRANCH] : (DEMO_REFLOG[0]?.newHash || "0000000");
+                CURRENT_BRANCH = "";
+                recordDemoReflog("checkout", oldHash, hashToCheckout, `Detached HEAD at ${hashToCheckout.substring(0, 7)}`);
+                showToast(`Checked out [${hashToCheckout.substring(0, 7)}] (detached HEAD)`);
+                updateUI();
             }
         }
 
         function actionBranchAtSelectedCommit() {
             if (!SELECTED_COMMIT_HASH) return;
+            const targetHash = SELECTED_COMMIT_HASH;
             closeCommitActionModal();
-            openNewBranchModal();
+            openNewBranchModal(targetHash);
         }
 
         async function actionRevertSelectedCommit() {
             if (!SELECTED_COMMIT_HASH) return;
+            const hashToRevert = SELECTED_COMMIT_HASH;
             closeCommitActionModal();
-            if (!confirm(`Revert commit '${SELECTED_COMMIT_HASH.substring(0, 7)}'?`)) return;
+            if (!confirm(`Revert commit '${hashToRevert.substring(0, 7)}'?`)) return;
+
             if (IS_SERVER_MODE) {
-                const res = await apiPost('revert', { hash: SELECTED_COMMIT_HASH });
-                if (res) showToast(`Reverted commit [${res.hash.substring(0, 7)}]`);
+                const res = await apiPost('revert', { hash: hashToRevert });
+                if (res && res.ok) {
+                    const hashStr = res.hash ? ` [${res.hash.substring(0, 7)}]` : '';
+                    showToast(`Reverted commit${hashStr}`);
+                    await refreshRepositorySnapshot(true);
+                }
             } else {
-                recordDemoReflog("revert", BRANCHES[CURRENT_BRANCH], SELECTED_COMMIT_HASH, `Reverted commit ${SELECTED_COMMIT_HASH.substring(0, 7)}`);
-                showToast(`Reverted [${SELECTED_COMMIT_HASH.substring(0, 7)}]`);
+                showToast("Revert commit is only supported in server mode ('minigit ui')", "warning");
             }
         }
 
@@ -3431,6 +4308,8 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             populateDiffFileSelect();
             renderDiffView();
             initTimeTravelSlider(true);
+            renderMergeConflictBanner();
+            refreshStashList();
         }
 
         function renderFileTree() {
@@ -3438,47 +4317,93 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             if (!container) return;
             container.innerHTML = '';
 
-            const folders = {};
-            for (const filepath of Object.keys(VFS).sort()) {
-                const { folder } = splitPath(filepath);
-                if (!folders[folder]) folders[folder] = [];
-                folders[folder].push(filepath);
+            const allPaths = Object.keys(VFS).sort();
+            if (allPaths.length === 0) {
+                const emptyEl = document.createElement('div');
+                emptyEl.className = "text-theme-muted italic text-[11px] p-2";
+                emptyEl.textContent = "No files in repository";
+                container.appendChild(emptyEl);
+                return;
             }
 
-            for (const [folderName, files] of Object.entries(folders)) {
-                if (folderName !== 'root') {
-                    const isCollapsed = !!FOLDER_COLLAPSED_STATE[folderName];
+            // Item 45: Build a real hierarchical tree supporting nested directories without flattening
+            // and without merging top-level files into a folder named 'root'.
+            const rootNode = { dirs: {}, files: [] };
+            for (const filepath of allPaths) {
+                const parts = filepath.split('/');
+                let current = rootNode;
+                for (let i = 0; i < parts.length - 1; i++) {
+                    const dirName = parts[i];
+                    const dirFullPath = parts.slice(0, i + 1).join('/');
+                    if (!current.dirs[dirName]) {
+                        current.dirs[dirName] = { name: dirName, fullPath: dirFullPath, dirs: {}, files: [] };
+                    }
+                    current = current.dirs[dirName];
+                }
+                current.files.push({ name: parts[parts.length - 1], fullPath: filepath });
+            }
+
+            function renderTreeLevel(node, depth, parentEl) {
+                // Render subdirectories
+                const dirNames = Object.keys(node.dirs).sort();
+                for (const dName of dirNames) {
+                    const dirObj = node.dirs[dName];
+                    const isCollapsed = !!FOLDER_COLLAPSED_STATE[dirObj.fullPath];
+                    
                     const folderEl = document.createElement('div');
                     folderEl.className = "flex items-center space-x-1.5 py-1.5 px-2 rounded-xl text-theme-muted hover:text-theme-text hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer font-medium text-xs transition";
-                    folderEl.onclick = () => toggleFolderCollapse(folderName);
+                    folderEl.style.paddingLeft = `${depth * 14 + 8}px`;
+                    folderEl.onclick = () => toggleFolderCollapse(dirObj.fullPath);
+
                     const chevron = document.createElement('i');
                     chevron.className = `fa-solid fa-chevron-right text-[9px] transition-transform ${isCollapsed ? '' : 'rotate-90'}`;
+
                     const folderIcon = document.createElement('i');
-                    folderIcon.className = "fa-regular fa-folder text-theme-muted";
+                    folderIcon.className = isCollapsed ? "fa-regular fa-folder text-theme-muted" : "fa-regular fa-folder-open text-theme-muted";
+
                     const folderSpan = document.createElement('span');
-                    folderSpan.textContent = folderName;
+                    folderSpan.className = "truncate";
+                    folderSpan.textContent = dName;
+
                     folderEl.appendChild(chevron);
                     folderEl.appendChild(folderIcon);
                     folderEl.appendChild(folderSpan);
-                    container.appendChild(folderEl);
+                    parentEl.appendChild(folderEl);
 
-                    if (isCollapsed) continue;
+                    if (!isCollapsed) {
+                        renderTreeLevel(dirObj, depth + 1, parentEl);
+                    }
                 }
 
-                for (const filepath of files) {
-                    const { filename } = splitPath(filepath);
+                // Render files in current directory
+                for (const fileObj of node.files) {
+                    const filepath = fileObj.fullPath;
+                    const filename = fileObj.name;
                     const isSelected = (filepath === ACTIVE_FILE);
+                    const isDirty = (DIRTY_BUFFERS[filepath] !== undefined);
+
                     const fileEl = document.createElement('div');
                     fileEl.setAttribute('data-filepath', filepath);
                     fileEl.className = `group flex items-center justify-between py-1.5 px-3 rounded-full cursor-pointer transition text-xs ${isSelected ? 'bg-black dark:bg-white text-white dark:text-black font-semibold shadow-sm' : 'text-theme-text hover:bg-zinc-100 dark:hover:bg-zinc-800'}`;
+                    fileEl.style.paddingLeft = `${depth * 14 + 12}px`;
                     fileEl.onclick = () => openFileInEditor(filepath);
+
                     const fileLeft = document.createElement('div');
                     fileLeft.className = "flex items-center space-x-2 truncate";
                     fileLeft.innerHTML = getFileIcon(filename);
+
                     const fileSpan = document.createElement('span');
                     fileSpan.className = "truncate";
                     fileSpan.textContent = filename;
                     fileLeft.appendChild(fileSpan);
+
+                    if (isDirty) {
+                        const unsavedDot = document.createElement('span');
+                        unsavedDot.className = "w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0";
+                        unsavedDot.title = "Unsaved changes";
+                        fileLeft.appendChild(unsavedDot);
+                    }
+
                     fileEl.appendChild(fileLeft);
 
                     const fileRight = document.createElement('div');
@@ -3539,20 +4464,26 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                     fileRight.appendChild(delBtn);
 
                     fileEl.appendChild(fileRight);
-                    container.appendChild(fileEl);
+                    parentEl.appendChild(fileEl);
                 }
             }
+
+            renderTreeLevel(rootNode, 0, container);
         }
 
+        let sourceControlRenderGen = 0;
         async function renderSourceControlLists() {
+            const thisGen = ++sourceControlRenderGen;
             const stagedList = document.getElementById('stagedList');
             const unstagedList = document.getElementById('unstagedList');
             const stagedLabel = document.getElementById('stagedCountLabel');
             const unstagedLabel = document.getElementById('unstagedCountLabel');
             const sidebarBadge = document.getElementById('sidebarChangesBadge');
 
-            if (stagedList) stagedList.innerHTML = '';
-            if (unstagedList) unstagedList.innerHTML = '';
+            if (!stagedList || !unstagedList) return;
+
+            const stagedFragment = document.createDocumentFragment();
+            const unstagedFragment = document.createDocumentFragment();
 
             let stagedCount = 0;
             let unstagedCount = 0;
@@ -3563,41 +4494,45 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 const modified = liveStatus.modified || [];
                 const untracked = liveStatus.untracked || [];
                 const deleted = liveStatus.deleted || [];
+                const stagedStatusMap = window.MINIGIT_LIVE.stagedStatus || {};
 
                 // Render Staged Files
                 for (const filepath of staged) {
                     stagedCount++;
-                    if (stagedList) {
-                        const item = document.createElement('div');
-                        const rawPath = filepath.replace(" (deleted)", "");
-                        const isSelected = (rawPath === ACTIVE_FILE);
-                        item.className = `flex items-center justify-between p-2.5 ${isSelected ? 'bg-zinc-200 dark:bg-zinc-800 ring-1 ring-black dark:ring-white' : 'bg-zinc-50 dark:bg-zinc-900'} border border-theme-border rounded-2xl text-xs transition`;
+                    const rawPath = filepath.replace(" (deleted)", "");
+                    const isSelected = (rawPath === ACTIVE_FILE);
+                    const item = document.createElement('div');
+                    item.className = `flex items-center justify-between p-2.5 ${isSelected ? 'bg-zinc-200 dark:bg-zinc-800 ring-1 ring-black dark:ring-white' : 'bg-zinc-50 dark:bg-zinc-900'} border border-theme-border rounded-2xl text-xs transition`;
 
-                        const leftDiv = document.createElement('div');
-                        leftDiv.className = "flex items-center space-x-2 truncate cursor-pointer";
-                        leftDiv.onclick = () => openFileInEditor(rawPath);
+                    const leftDiv = document.createElement('div');
+                    leftDiv.className = "flex items-center space-x-2 truncate cursor-pointer";
+                    leftDiv.onclick = () => openFileInEditor(rawPath);
 
-                        const tag = document.createElement('span');
-                        tag.className = "text-xs text-emerald-500 font-bold";
-                        tag.textContent = filepath.includes("(deleted)") ? "D" : "A";
+                    // Item 43: Staged rows are tagged with stagedStatus ("A"|"M"|"D")
+                    const statusTag = stagedStatusMap[rawPath] || stagedStatusMap[filepath] || (filepath.includes("(deleted)") ? "D" : "A");
+                    const tag = document.createElement('span');
+                    let tagColor = "text-emerald-500";
+                    if (statusTag === "M") tagColor = "text-amber-500";
+                    else if (statusTag === "D") tagColor = "text-rose-500";
+                    tag.className = `text-xs ${tagColor} font-bold`;
+                    tag.textContent = statusTag;
 
-                        const pathSpan = document.createElement('span');
-                        pathSpan.className = "truncate text-theme-text font-mono";
-                        pathSpan.textContent = filepath;
+                    const pathSpan = document.createElement('span');
+                    pathSpan.className = `truncate text-theme-text font-mono ${statusTag === 'D' ? 'line-through text-theme-muted' : ''}`;
+                    pathSpan.textContent = filepath;
 
-                        leftDiv.appendChild(tag);
-                        leftDiv.appendChild(pathSpan);
+                    leftDiv.appendChild(tag);
+                    leftDiv.appendChild(pathSpan);
 
-                        const unstageBtn = document.createElement('button');
-                        unstageBtn.className = "w-6 h-6 rounded-full bg-theme-card border border-theme-border text-theme-muted hover:text-theme-text flex items-center justify-center transition shadow-xs";
-                        unstageBtn.title = "Unstage";
-                        unstageBtn.innerHTML = '<i class="fa-solid fa-minus text-[10px]"></i>';
-                        unstageBtn.onclick = () => unstageFile(rawPath);
+                    const unstageBtn = document.createElement('button');
+                    unstageBtn.className = "w-6 h-6 rounded-full bg-theme-card border border-theme-border text-theme-muted hover:text-theme-text flex items-center justify-center transition shadow-xs cursor-pointer";
+                    unstageBtn.title = "Unstage";
+                    unstageBtn.innerHTML = '<i class="fa-solid fa-minus text-[10px]"></i>';
+                    unstageBtn.onclick = () => unstageFile(rawPath);
 
-                        item.appendChild(leftDiv);
-                        item.appendChild(unstageBtn);
-                        stagedList.appendChild(item);
-                    }
+                    item.appendChild(leftDiv);
+                    item.appendChild(unstageBtn);
+                    stagedFragment.appendChild(item);
                 }
 
                 // Render Unstaged Files: Modified, Untracked, Deleted
@@ -3608,9 +4543,115 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
 
                 for (const { filepath, status } of unstagedItems) {
                     unstagedCount++;
-                    if (unstagedList) {
-                        const item = document.createElement('div');
+                    const isSelected = (filepath === ACTIVE_FILE);
+                    const item = document.createElement('div');
+                    item.className = `flex items-center justify-between p-2.5 ${isSelected ? 'bg-zinc-200 dark:bg-zinc-800 ring-1 ring-black dark:ring-white' : 'bg-zinc-50 dark:bg-zinc-900'} border border-theme-border rounded-2xl text-xs transition`;
+
+                    const leftDiv = document.createElement('div');
+                    leftDiv.className = "flex items-center space-x-2 truncate cursor-pointer";
+                    leftDiv.onclick = () => openFileInEditor(filepath);
+
+                    const tag = document.createElement('span');
+                    tag.className = `text-xs ${status === 'U' ? 'text-theme-muted' : (status === 'D' ? 'text-rose-500' : 'text-amber-500')} font-bold`;
+                    tag.textContent = status;
+
+                    const pathSpan = document.createElement('span');
+                    pathSpan.className = `truncate text-theme-text font-mono ${status === 'D' ? 'line-through text-theme-muted' : ''}`;
+                    pathSpan.textContent = filepath;
+
+                    leftDiv.appendChild(tag);
+                    leftDiv.appendChild(pathSpan);
+
+                    const rightDiv = document.createElement('div');
+                    rightDiv.className = "flex items-center space-x-1.5";
+
+                    const discardBtn = document.createElement('button');
+                    discardBtn.className = "w-6 h-6 rounded-full bg-theme-card border border-theme-border text-theme-muted hover:text-rose-500 flex items-center justify-center transition shadow-xs cursor-pointer";
+                    discardBtn.title = (status === 'U') ? "Delete untracked file permanently" : (status === 'D' ? "Restore deleted file" : "Discard changes");
+                    discardBtn.innerHTML = '<i class="fa-solid fa-rotate-left text-[10px]"></i>';
+                    discardBtn.onclick = () => discardFile(filepath, status === 'U');
+
+                    const stageBtn = document.createElement('button');
+                    stageBtn.className = "w-6 h-6 rounded-full bg-black dark:bg-white text-white dark:text-black hover:bg-zinc-800 dark:hover:bg-zinc-200 flex items-center justify-center transition shadow-xs font-semibold cursor-pointer";
+                    stageBtn.title = (status === 'D') ? "Stage deletion" : "Stage file";
+                    stageBtn.innerHTML = '<i class="fa-solid fa-plus text-[10px]"></i>';
+                    stageBtn.onclick = () => stageFile(filepath);
+
+                    rightDiv.appendChild(discardBtn);
+                    rightDiv.appendChild(stageBtn);
+                    item.appendChild(leftDiv);
+                    item.appendChild(rightDiv);
+                    unstagedFragment.appendChild(item);
+                }
+            } else {
+                let headTreeBlobs = {};
+                const headCommitHash = (window.MINIGIT_LIVE && window.MINIGIT_LIVE.head) || BRANCHES[CURRENT_BRANCH];
+                if (headCommitHash && OBJECTS[headCommitHash]) {
+                    const treeHash = OBJECTS[headCommitHash].data.tree;
+                    headTreeBlobs = OBJECTS[treeHash]?.data || {};
+                }
+
+                // Staged Files
+                for (const [filepath, blobHash] of Object.entries(STAGING_INDEX)) {
+                    stagedCount++;
+                    const isSelected = (filepath === ACTIVE_FILE);
+                    const isDeleted = (blobHash === null || VFS[filepath] === undefined);
+                    const item = document.createElement('div');
+                    item.className = `flex items-center justify-between p-2.5 ${isSelected ? 'bg-zinc-200 dark:bg-zinc-800 ring-1 ring-black dark:ring-white' : 'bg-zinc-50 dark:bg-zinc-900'} border border-theme-border rounded-2xl text-xs transition`;
+
+                    const leftDiv = document.createElement('div');
+                    leftDiv.className = "flex items-center space-x-2 truncate cursor-pointer";
+                    leftDiv.onclick = () => openFileInEditor(filepath);
+
+                    const statusTag = isDeleted ? "D" : (headTreeBlobs[filepath] ? "M" : "A");
+                    const tag = document.createElement('span');
+                    tag.className = `text-xs ${statusTag === 'D' ? 'text-rose-500' : (statusTag === 'M' ? 'text-amber-500' : 'text-emerald-500')} font-bold`;
+                    tag.textContent = statusTag;
+
+                    const pathSpan = document.createElement('span');
+                    pathSpan.className = `truncate text-theme-text font-mono ${statusTag === 'D' ? 'line-through text-theme-muted' : ''}`;
+                    pathSpan.textContent = filepath;
+
+                    leftDiv.appendChild(tag);
+                    leftDiv.appendChild(pathSpan);
+
+                    const unstageBtn = document.createElement('button');
+                    unstageBtn.className = "w-6 h-6 rounded-full bg-theme-card border border-theme-border text-theme-muted hover:text-theme-text flex items-center justify-center transition shadow-xs cursor-pointer";
+                    unstageBtn.title = "Unstage";
+                    unstageBtn.innerHTML = '<i class="fa-solid fa-minus text-[10px]"></i>';
+                    unstageBtn.onclick = () => unstageFile(filepath);
+
+                    item.appendChild(leftDiv);
+                    item.appendChild(unstageBtn);
+                    stagedFragment.appendChild(item);
+                }
+
+                // Unstaged / Modified Files
+                for (const [filepath, content] of Object.entries(VFS)) {
+                    // Item 37: For static exports or demo mode, if file matches static export content, it's unmodified
+                    let status = null;
+                    if (IS_STATIC_EXPORT && window.MINIGIT_LIVE && window.MINIGIT_LIVE.files && window.MINIGIT_LIVE.files[filepath] !== undefined) {
+                        if (content !== window.MINIGIT_LIVE.files[filepath]) {
+                            status = 'M';
+                        }
+                    } else {
+                        const currentHash = await sha256(content);
+                        const headHash = headTreeBlobs[filepath];
+                        const stagedHash = STAGING_INDEX[filepath];
+
+                        if (!headHash && !stagedHash) {
+                            status = 'U';
+                        } else if (stagedHash && currentHash !== stagedHash) {
+                            status = 'M';
+                        } else if (!stagedHash && headHash && currentHash !== headHash) {
+                            status = 'M';
+                        }
+                    }
+
+                    if (status) {
+                        unstagedCount++;
                         const isSelected = (filepath === ACTIVE_FILE);
+                        const item = document.createElement('div');
                         item.className = `flex items-center justify-between p-2.5 ${isSelected ? 'bg-zinc-200 dark:bg-zinc-800 ring-1 ring-black dark:ring-white' : 'bg-zinc-50 dark:bg-zinc-900'} border border-theme-border rounded-2xl text-xs transition`;
 
                         const leftDiv = document.createElement('div');
@@ -3618,7 +4659,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                         leftDiv.onclick = () => openFileInEditor(filepath);
 
                         const tag = document.createElement('span');
-                        tag.className = `text-xs ${status === 'U' ? 'text-theme-muted' : (status === 'D' ? 'text-rose-500' : 'text-amber-500')} font-bold`;
+                        tag.className = `text-xs ${status === 'U' ? 'text-theme-muted' : 'text-amber-500'} font-bold`;
                         tag.textContent = status;
 
                         const pathSpan = document.createElement('span');
@@ -3632,13 +4673,13 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                         rightDiv.className = "flex items-center space-x-1.5";
 
                         const discardBtn = document.createElement('button');
-                        discardBtn.className = "w-6 h-6 rounded-full bg-theme-card border border-theme-border text-theme-muted hover:text-rose-500 flex items-center justify-center transition shadow-xs";
+                        discardBtn.className = "w-6 h-6 rounded-full bg-theme-card border border-theme-border text-theme-muted hover:text-rose-500 flex items-center justify-center transition shadow-xs cursor-pointer";
                         discardBtn.title = (status === 'U') ? "Delete untracked file permanently" : "Discard changes";
                         discardBtn.innerHTML = '<i class="fa-solid fa-rotate-left text-[10px]"></i>';
                         discardBtn.onclick = () => discardFile(filepath, status === 'U');
 
                         const stageBtn = document.createElement('button');
-                        stageBtn.className = "w-6 h-6 rounded-full bg-black dark:bg-white text-white dark:text-black hover:bg-zinc-800 dark:hover:bg-zinc-200 flex items-center justify-center transition shadow-xs font-semibold";
+                        stageBtn.className = "w-6 h-6 rounded-full bg-black dark:bg-white text-white dark:text-black hover:bg-zinc-800 dark:hover:bg-zinc-200 flex items-center justify-center transition shadow-xs font-semibold cursor-pointer";
                         stageBtn.title = "Stage file";
                         stageBtn.innerHTML = '<i class="fa-solid fa-plus text-[10px]"></i>';
                         stageBtn.onclick = () => stageFile(filepath);
@@ -3647,113 +4688,17 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                         rightDiv.appendChild(stageBtn);
                         item.appendChild(leftDiv);
                         item.appendChild(rightDiv);
-                        unstagedList.appendChild(item);
-                    }
-                }
-            } else {
-                let headTreeBlobs = {};
-                const headCommitHash = BRANCHES[CURRENT_BRANCH];
-                if (headCommitHash && OBJECTS[headCommitHash]) {
-                    const treeHash = OBJECTS[headCommitHash].data.tree;
-                    headTreeBlobs = OBJECTS[treeHash]?.data || {};
-                }
-
-                // Staged Files
-                for (const [filepath, blobHash] of Object.entries(STAGING_INDEX)) {
-                    stagedCount++;
-                    if (stagedList) {
-                        const item = document.createElement('div');
-                        const isSelected = (filepath === ACTIVE_FILE);
-                        item.className = `flex items-center justify-between p-2.5 ${isSelected ? 'bg-zinc-200 dark:bg-zinc-800 ring-1 ring-black dark:ring-white' : 'bg-zinc-50 dark:bg-zinc-900'} border border-theme-border rounded-2xl text-xs transition`;
-
-                        const leftDiv = document.createElement('div');
-                        leftDiv.className = "flex items-center space-x-2 truncate cursor-pointer";
-                        leftDiv.onclick = () => openFileInEditor(filepath);
-
-                        const tag = document.createElement('span');
-                        tag.className = "text-xs text-emerald-500 font-bold";
-                        tag.textContent = "A";
-
-                        const pathSpan = document.createElement('span');
-                        pathSpan.className = "truncate text-theme-text font-mono";
-                        pathSpan.textContent = filepath;
-
-                        leftDiv.appendChild(tag);
-                        leftDiv.appendChild(pathSpan);
-
-                        const unstageBtn = document.createElement('button');
-                        unstageBtn.className = "w-6 h-6 rounded-full bg-theme-card border border-theme-border text-theme-muted hover:text-theme-text flex items-center justify-center transition shadow-xs";
-                        unstageBtn.title = "Unstage";
-                        unstageBtn.innerHTML = '<i class="fa-solid fa-minus text-[10px]"></i>';
-                        unstageBtn.onclick = () => unstageFile(filepath);
-
-                        item.appendChild(leftDiv);
-                        item.appendChild(unstageBtn);
-                        stagedList.appendChild(item);
-                    }
-                }
-
-                // Unstaged / Modified Files
-                for (const [filepath, content] of Object.entries(VFS)) {
-                    const currentHash = await sha256(content);
-                    const headHash = headTreeBlobs[filepath];
-                    const stagedHash = STAGING_INDEX[filepath];
-
-                    let status = null;
-                    if (!headHash && !stagedHash) {
-                        status = 'U';
-                    } else if (stagedHash && currentHash !== stagedHash) {
-                        status = 'M';
-                    } else if (!stagedHash && headHash && currentHash !== headHash) {
-                        status = 'M';
-                    }
-
-                    if (status) {
-                        unstagedCount++;
-                        if (unstagedList) {
-                            const item = document.createElement('div');
-                            const isSelected = (filepath === ACTIVE_FILE);
-                            item.className = `flex items-center justify-between p-2.5 ${isSelected ? 'bg-zinc-200 dark:bg-zinc-800 ring-1 ring-black dark:ring-white' : 'bg-zinc-50 dark:bg-zinc-900'} border border-theme-border rounded-2xl text-xs transition`;
-
-                            const leftDiv = document.createElement('div');
-                            leftDiv.className = "flex items-center space-x-2 truncate cursor-pointer";
-                            leftDiv.onclick = () => openFileInEditor(filepath);
-
-                            const tag = document.createElement('span');
-                            tag.className = `text-xs ${status === 'U' ? 'text-theme-muted' : 'text-theme-text'} font-bold`;
-                            tag.textContent = status;
-
-                            const pathSpan = document.createElement('span');
-                            pathSpan.className = "truncate text-theme-text font-mono";
-                            pathSpan.textContent = filepath;
-
-                            leftDiv.appendChild(tag);
-                            leftDiv.appendChild(pathSpan);
-
-                            const rightDiv = document.createElement('div');
-                            rightDiv.className = "flex items-center space-x-1.5";
-
-                            const discardBtn = document.createElement('button');
-                            discardBtn.className = "w-6 h-6 rounded-full bg-theme-card border border-theme-border text-theme-muted hover:text-rose-500 flex items-center justify-center transition shadow-xs";
-                            discardBtn.title = (status === 'U') ? "Delete untracked file permanently" : "Discard changes";
-                            discardBtn.innerHTML = '<i class="fa-solid fa-rotate-left text-[10px]"></i>';
-                            discardBtn.onclick = () => discardFile(filepath, status === 'U');
-
-                            const stageBtn = document.createElement('button');
-                            stageBtn.className = "w-6 h-6 rounded-full bg-black dark:bg-white text-white dark:text-black hover:bg-zinc-800 dark:hover:bg-zinc-200 flex items-center justify-center transition shadow-xs font-semibold";
-                            stageBtn.title = "Stage file";
-                            stageBtn.innerHTML = '<i class="fa-solid fa-plus text-[10px]"></i>';
-                            stageBtn.onclick = () => stageFile(filepath);
-
-                            rightDiv.appendChild(discardBtn);
-                            rightDiv.appendChild(stageBtn);
-                            item.appendChild(leftDiv);
-                            item.appendChild(rightDiv);
-                            unstagedList.appendChild(item);
-                        }
+                        unstagedFragment.appendChild(item);
                     }
                 }
             }
+
+            // Item 39: Prevent race conditions from multiple async renders
+            if (thisGen !== sourceControlRenderGen) return;
+
+            // Atomically replace DOM children
+            stagedList.replaceChildren(stagedFragment);
+            unstagedList.replaceChildren(unstagedFragment);
 
             if (stagedLabel) stagedLabel.textContent = `(${stagedCount})`;
             if (unstagedLabel) unstagedLabel.textContent = `(${unstagedCount})`;
@@ -3769,12 +4714,28 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             const select = document.getElementById('branchSelect');
             if (!select) return;
             select.innerHTML = '';
-            for (const b of Object.keys(BRANCHES)) {
+
+            const isDetached = (!CURRENT_BRANCH || (window.MINIGIT_LIVE && window.MINIGIT_LIVE.detached));
+            const headHash = (window.MINIGIT_LIVE && window.MINIGIT_LIVE.head) || (BRANCHES ? BRANCHES[CURRENT_BRANCH] : '') || '';
+
+            if (isDetached) {
                 const opt = document.createElement('option');
-                opt.value = b;
-                opt.textContent = b;
-                if (b === CURRENT_BRANCH) opt.selected = true;
+                opt.value = "";
+                const shortHead = headHash ? headHash.substring(0, 7) : 'HEAD';
+                opt.textContent = `(detached at ${shortHead})`;
+                opt.selected = true;
                 select.appendChild(opt);
+            }
+
+            if (BRANCHES && typeof BRANCHES === 'object') {
+                for (const b of Object.keys(BRANCHES).sort()) {
+                    if (!b || b.startsWith('(detached')) continue;
+                    const opt = document.createElement('option');
+                    opt.value = b;
+                    opt.textContent = b;
+                    if (!isDetached && b === CURRENT_BRANCH) opt.selected = true;
+                    select.appendChild(opt);
+                }
             }
         }
 
@@ -3783,13 +4744,33 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             if (!select) return;
             const target = preferredFile || ACTIVE_FILE || select.value;
             select.innerHTML = '';
-            for (const fp of Object.keys(VFS).sort()) {
+            const allFiles = new Set(Object.keys(VFS));
+            if (window.MINIGIT_LIVE?.status?.deleted) {
+                for (const d of window.MINIGIT_LIVE.status.deleted) allFiles.add(d);
+            }
+            if (window.MINIGIT_LIVE?.stagedDeleted) {
+                for (const d of window.MINIGIT_LIVE.stagedDeleted) allFiles.add(d);
+            }
+            if (window.MINIGIT_LIVE?.status?.staged) {
+                for (const s of window.MINIGIT_LIVE.status.staged) {
+                    allFiles.add(s.replace(' (deleted)', ''));
+                }
+            }
+            for (const fp of Array.from(allFiles).sort()) {
                 const opt = document.createElement('option');
                 opt.value = fp;
-                opt.textContent = fp;
+                opt.textContent = isFileDeleted(fp) ? `${fp} (deleted)` : fp;
                 if (fp === target) opt.selected = true;
                 select.appendChild(opt);
             }
+        }
+
+        function onDiffFileSelectChange(filepath) {
+            if (!filepath) return;
+            ACTIVE_FILE = filepath;
+            syncEditorWithActiveFile();
+            populateDiffFileSelect(filepath);
+            renderDiffView();
         }
 
         function renderDiffView() {
@@ -3886,58 +4867,492 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             }
         }
 
+        // ===== GRAPH LAYOUT (Agent 3) =====
+        const DAG_PALETTE = [
+            '#3B82F6', // Blue (main/primary)
+            '#10B981', // Emerald (feature 1)
+            '#F59E0B', // Amber (feature 2)
+            '#8B5CF6', // Purple (feature 3)
+            '#EC4899', // Pink (feature 4)
+            '#06B6D4', // Cyan (feature 5)
+            '#F97316', // Orange (feature 6)
+            '#14B8A6'  // Teal (feature 7)
+        ];
+
+        function getGraphHead() {
+            return (window.MINIGIT_LIVE && window.MINIGIT_LIVE.head) || (typeof BRANCHES === 'object' && BRANCHES ? BRANCHES[CURRENT_BRANCH] : null) || null;
+        }
+
+        function isHeadDetached() {
+            const head = getGraphHead();
+            if (window.MINIGIT_LIVE && typeof window.MINIGIT_LIVE.detached === 'boolean') {
+                return window.MINIGIT_LIVE.detached;
+            }
+            if (!CURRENT_BRANCH || String(CURRENT_BRANCH).toLowerCase().includes('detached')) {
+                return true;
+            }
+            if (!BRANCHES || BRANCHES[CURRENT_BRANCH] !== head) {
+                return true;
+            }
+            return false;
+        }
+
+        function getGraphReachability() {
+            const reachable = new Set();
+            const tips = new Set();
+
+            const head = getGraphHead();
+            if (head && OBJECTS[head] && OBJECTS[head].type === 'commit') {
+                tips.add(head);
+            }
+            if (typeof BRANCHES === 'object' && BRANCHES !== null) {
+                for (const [bName, bHash] of Object.entries(BRANCHES)) {
+                    if (bHash && OBJECTS[bHash] && OBJECTS[bHash].type === 'commit') {
+                        tips.add(bHash);
+                    }
+                }
+            }
+
+            const queue = Array.from(tips);
+            while (queue.length > 0) {
+                const h = queue.pop();
+                if (reachable.has(h)) continue;
+                reachable.add(h);
+                const obj = OBJECTS[h];
+                if (obj && obj.type === 'commit' && obj.data) {
+                    const p1 = obj.data.parent;
+                    const p2 = obj.data.parent2;
+                    if (p1 && OBJECTS[p1] && OBJECTS[p1].type === 'commit') {
+                        queue.push(p1);
+                    }
+                    if (p2 && OBJECTS[p2] && OBJECTS[p2].type === 'commit') {
+                        queue.push(p2);
+                    }
+                }
+            }
+
+            let unreachableCount = 0;
+            for (const [hash, obj] of Object.entries(OBJECTS)) {
+                if (obj && obj.type === 'commit') {
+                    if (!reachable.has(hash)) {
+                        unreachableCount++;
+                    }
+                }
+            }
+
+            return { reachable, tips: Array.from(tips), unreachableCount };
+        }
+
+        function assignGraphLanes(sortedCommits) {
+            if (!sortedCommits || sortedCommits.length === 0) return;
+
+            const commitMap = new Map();
+            sortedCommits.forEach(c => commitMap.set(c.hash, c));
+
+            const head = getGraphHead();
+            const detached = isHeadDetached();
+
+            const branchSeeds = [];
+            const seenTips = new Set();
+
+            if (detached && head && commitMap.has(head)) {
+                branchSeeds.push({ name: 'HEAD', tip: head });
+                seenTips.add(head);
+            } else if (CURRENT_BRANCH && BRANCHES && BRANCHES[CURRENT_BRANCH] && commitMap.has(BRANCHES[CURRENT_BRANCH])) {
+                branchSeeds.push({ name: CURRENT_BRANCH, tip: BRANCHES[CURRENT_BRANCH] });
+                seenTips.add(BRANCHES[CURRENT_BRANCH]);
+            }
+
+            if (typeof BRANCHES === 'object' && BRANCHES !== null) {
+                const sortedBranchNames = Object.keys(BRANCHES).sort((a, b) => {
+                    if (a === 'main' || a === 'master') return -1;
+                    if (b === 'main' || b === 'master') return 1;
+                    return a.localeCompare(b);
+                });
+                for (const bName of sortedBranchNames) {
+                    const bTip = BRANCHES[bName];
+                    if (bTip && commitMap.has(bTip) && !seenTips.has(bTip) && !bName.toLowerCase().startsWith('(detached')) {
+                        branchSeeds.push({ name: bName, tip: bTip });
+                        seenTips.add(bTip);
+                    }
+                }
+            }
+
+            const branchChains = [];
+            const claimedCommits = new Set();
+
+            for (const seed of branchSeeds) {
+                const chain = [];
+                let curr = seed.tip;
+                while (curr && commitMap.has(curr) && !claimedCommits.has(curr)) {
+                    claimedCommits.add(curr);
+                    chain.push(curr);
+                    const node = commitMap.get(curr);
+                    curr = node.parent;
+                }
+                if (chain.length > 0) {
+                    branchChains.push({ name: seed.name, commits: chain });
+                }
+            }
+
+            for (const c of sortedCommits) {
+                if (!claimedCommits.has(c.hash)) {
+                    const chain = [];
+                    let curr = c.hash;
+                    while (curr && commitMap.has(curr) && !claimedCommits.has(curr)) {
+                        claimedCommits.add(curr);
+                        chain.push(curr);
+                        const node = commitMap.get(curr);
+                        curr = node.parent;
+                    }
+                    if (chain.length > 0) {
+                        branchChains.push({ name: `branch-${c.hash.substring(0, 6)}`, commits: chain });
+                    }
+                }
+            }
+
+            const commitRowIndex = new Map();
+            sortedCommits.forEach((c, idx) => commitRowIndex.set(c.hash, idx));
+
+            const laneRowIntervals = [];
+
+            branchChains.forEach((chainObj, chainIdx) => {
+                let assignedLane = -1;
+                const rows = chainObj.commits.map(h => commitRowIndex.get(h)).filter(r => r !== undefined);
+                const minR = Math.min(...rows);
+                const maxR = Math.max(...rows);
+
+                if (chainIdx === 0) {
+                    assignedLane = 0;
+                } else if (branchChains.length <= 6) {
+                    assignedLane = chainIdx;
+                } else {
+                    for (let l = 1; l < laneRowIntervals.length; l++) {
+                        const intervals = laneRowIntervals[l] || [];
+                        const overlaps = intervals.some(([r1, r2]) => !(maxR < r1 - 1 || minR > r2 + 1));
+                        if (!overlaps) {
+                            assignedLane = l;
+                            break;
+                        }
+                    }
+                    if (assignedLane === -1) {
+                        assignedLane = laneRowIntervals.length === 0 ? 1 : laneRowIntervals.length;
+                    }
+                }
+
+                if (!laneRowIntervals[assignedLane]) {
+                    laneRowIntervals[assignedLane] = [];
+                }
+                laneRowIntervals[assignedLane].push([minR, maxR]);
+
+                const color = DAG_PALETTE[assignedLane % DAG_PALETTE.length];
+                for (const h of chainObj.commits) {
+                    const node = commitMap.get(h);
+                    if (node) {
+                        node.lane = assignedLane;
+                        node.color = color;
+                        node.branchSpine = chainObj.name;
+                    }
+                }
+            });
+
+            for (const c of sortedCommits) {
+                if (c.lane === undefined) {
+                    c.lane = 0;
+                    c.color = DAG_PALETTE[0];
+                    c.branchSpine = 'main';
+                }
+            }
+        }
+
+        function getGraphCommits(includeUnreachable = Boolean(window.__showUnreachableCommits)) {
+            const { reachable, unreachableCount } = getGraphReachability();
+            const candidateCommits = [];
+
+            for (const [hash, obj] of Object.entries(OBJECTS)) {
+                if (obj && obj.type === 'commit' && obj.data) {
+                    const isReachable = reachable.has(hash);
+                    if (isReachable || includeUnreachable) {
+                        candidateCommits.push({
+                            hash,
+                            ...obj.data,
+                            isReachable
+                        });
+                    }
+                }
+            }
+
+            if (candidateCommits.length === 0) {
+                return { commits: [], unreachableCount };
+            }
+
+            const commitMap = new Map();
+            candidateCommits.forEach(c => commitMap.set(c.hash, c));
+
+            const childrenCount = new Map();
+            candidateCommits.forEach(c => childrenCount.set(c.hash, 0));
+
+            for (const c of candidateCommits) {
+                if (c.parent && commitMap.has(c.parent)) {
+                    childrenCount.set(c.parent, childrenCount.get(c.parent) + 1);
+                }
+                if (c.parent2 && commitMap.has(c.parent2)) {
+                    childrenCount.set(c.parent2, childrenCount.get(c.parent2) + 1);
+                }
+            }
+
+            const ready = candidateCommits.filter(c => childrenCount.get(c.hash) === 0);
+
+            const getCommitTime = (c) => {
+                if (typeof c.time === 'number' && !isNaN(c.time)) return c.time * 1000;
+                if (c.timestamp) {
+                    const parsed = Date.parse(c.timestamp);
+                    if (!isNaN(parsed)) return parsed;
+                }
+                return 0;
+            };
+
+            const sorted = [];
+            const head = getGraphHead();
+
+            while (ready.length > 0) {
+                ready.sort((a, b) => {
+                    const diff = getCommitTime(b) - getCommitTime(a);
+                    if (diff !== 0) return diff;
+                    if (a.hash === head) return -1;
+                    if (b.hash === head) return 1;
+                    return b.hash.localeCompare(a.hash);
+                });
+
+                const next = ready.shift();
+                sorted.push(next);
+
+                const parents = [];
+                if (next.parent && commitMap.has(next.parent)) parents.push(next.parent);
+                if (next.parent2 && commitMap.has(next.parent2)) parents.push(next.parent2);
+
+                for (const pHash of parents) {
+                    const rem = childrenCount.get(pHash) - 1;
+                    childrenCount.set(pHash, rem);
+                    if (rem === 0) {
+                        ready.push(commitMap.get(pHash));
+                    }
+                }
+            }
+
+            if (sorted.length < candidateCommits.length) {
+                const emitted = new Set(sorted.map(c => c.hash));
+                const rem = candidateCommits.filter(c => !emitted.has(c.hash));
+                rem.sort((a, b) => getCommitTime(b) - getCommitTime(a));
+                sorted.push(...rem);
+            }
+
+            assignGraphLanes(sorted);
+
+            return { commits: sorted, unreachableCount };
+        }
+
+        function createVerticalEdgePath(x1, y1, x2, y2, isParent2 = false) {
+            if (x1 === x2) {
+                return `M ${x1} ${y1} L ${x2} ${y2}`;
+            }
+            const dy = y2 - y1;
+            const curveH = Math.min(dy, 55);
+            if (isParent2) {
+                return `M ${x1} ${y1} C ${x1} ${y1 + curveH * 0.5}, ${x2} ${y1 + curveH * 0.5}, ${x2} ${y1 + curveH} L ${x2} ${y2}`;
+            }
+            return `M ${x1} ${y1} L ${x1} ${y2 - curveH} C ${x1} ${y2 - curveH * 0.5}, ${x2} ${y2 - curveH * 0.5}, ${x2} ${y2}`;
+        }
+
+        function createHorizontalEdgePath(x1, y1, x2, y2, isParent2 = false) {
+            if (y1 === y2) {
+                return `M ${x1} ${y1} L ${x2} ${y2}`;
+            }
+            const dx = x2 - x1;
+            const curveW = Math.min(dx, 45);
+            if (!isParent2) {
+                return `M ${x1} ${y1} C ${x1 + curveW * 0.5} ${y1}, ${x1 + curveW * 0.5} ${y2}, ${x1 + curveW} ${y2} L ${x2} ${y2}`;
+            }
+            return `M ${x1} ${y1} L ${x2 - curveW} ${y1} C ${x2 - curveW * 0.5} ${y1}, ${x2 - curveW * 0.5} ${y2}, ${x2} ${y2}`;
+        }
+        // ===== END GRAPH LAYOUT =====
+
         function renderCommitDagGraph() {
             const svg = document.getElementById('commitDagSvg');
             if (!svg) return;
             svg.innerHTML = '';
 
             const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-            const commitNodes = getChronologicalCommits();
+            const { commits, unreachableCount } = getGraphCommits();
 
-            let y = 60;
-            const x = 70;
-            const nodeRadius = 14;
-            const totalHeight = Math.max(360, y + commitNodes.length * 80 + 40);
+            if (!commits || commits.length === 0) {
+                const emptyText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                emptyText.setAttribute('x', '50');
+                emptyText.setAttribute('y', '50');
+                emptyText.setAttribute('fill', isDark ? '#71717A' : '#9CA3AF');
+                emptyText.setAttribute('font-size', '12px');
+                emptyText.setAttribute('font-family', 'Inter, sans-serif');
+                emptyText.textContent = 'No commits found in repository';
+                svg.appendChild(emptyText);
+                return;
+            }
+
+            // Unreachable toggle in graph header area
+            let headerY = 22;
+            let startY = 45;
+            if (unreachableCount > 0) {
+                startY = 68;
+                const toggleGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                toggleGroup.style.cursor = 'pointer';
+                toggleGroup.onclick = (e) => {
+                    e.stopPropagation();
+                    window.__showUnreachableCommits = !window.__showUnreachableCommits;
+                    renderCommitDagGraph();
+                    renderMiniDagGraph();
+                };
+
+                const isShown = Boolean(window.__showUnreachableCommits);
+                const toggleTextStr = isShown
+                    ? `✕ Hide ${unreachableCount} unreachable commit${unreachableCount > 1 ? 's' : ''}`
+                    : `👁 Show ${unreachableCount} unreachable commit${unreachableCount > 1 ? 's' : ''}`;
+                const tWidth = toggleTextStr.length * 6.5 + 24;
+
+                const tRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                tRect.setAttribute('x', 45);
+                tRect.setAttribute('y', headerY - 12);
+                tRect.setAttribute('width', tWidth);
+                tRect.setAttribute('height', 22);
+                tRect.setAttribute('rx', 11);
+                tRect.setAttribute('fill', isShown ? (isDark ? '#3F3F46' : '#E4E4E7') : (isDark ? '#27272A' : '#F4F4F5'));
+                tRect.setAttribute('stroke', isDark ? '#52525B' : '#D4D4D8');
+                tRect.setAttribute('stroke-width', '1');
+                toggleGroup.appendChild(tRect);
+
+                const tText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                tText.setAttribute('x', 45 + tWidth / 2);
+                tText.setAttribute('y', headerY + 3);
+                tText.setAttribute('fill', isDark ? '#E4E4E7' : '#3F3F46');
+                tText.setAttribute('font-size', '10px');
+                tText.setAttribute('font-family', 'Inter, sans-serif');
+                tText.setAttribute('text-anchor', 'middle');
+                tText.setAttribute('font-weight', '600');
+                tText.textContent = toggleTextStr;
+                toggleGroup.appendChild(tText);
+
+                svg.appendChild(toggleGroup);
+            }
+
+            const rowStep = 75;
+            const laneStep = 32;
+            const startX = 45;
+            const nodeRadius = 11;
+            const maxLane = Math.max(0, ...commits.map(c => c.lane || 0));
+            const totalHeight = Math.max(360, startY + commits.length * rowStep + 40);
             svg.setAttribute('height', totalHeight);
             svg.style.minHeight = `${totalHeight}px`;
 
-            commitNodes.forEach((node, index) => {
-                const nodeY = y + index * 80;
-                const isHead = (node.hash === BRANCHES[CURRENT_BRANCH]);
+            const textStartX = startX + (maxLane + 1) * laneStep + 20;
+            const head = getGraphHead();
+            const detached = isHeadDetached();
 
-                // Edge Line
-                if (node.parent) {
-                    const parentIndex = commitNodes.findIndex(c => c.hash === node.parent);
-                    if (parentIndex !== -1) {
-                        const parentY = y + parentIndex * 80;
-                        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                        line.setAttribute('x1', x);
-                        line.setAttribute('y1', parentY);
-                        line.setAttribute('x2', x);
-                        line.setAttribute('y2', nodeY);
-                        line.setAttribute('stroke', isDark ? '#3F3F46' : '#D1D5DB');
-                        line.setAttribute('stroke-width', '2.5');
-                        svg.appendChild(line);
-                    }
+            const coords = new Map();
+            commits.forEach((c, idx) => {
+                coords.set(c.hash, {
+                    x: startX + (c.lane || 0) * laneStep,
+                    y: startY + idx * rowStep,
+                    node: c,
+                    index: idx
+                });
+            });
+
+            // 1. Draw Edges first so circles stay on top
+            commits.forEach(node => {
+                const childCoord = coords.get(node.hash);
+                if (!childCoord) return;
+
+                // First parent edge
+                if (node.parent && coords.has(node.parent)) {
+                    const pCoord = coords.get(node.parent);
+                    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                    path.setAttribute('d', createVerticalEdgePath(childCoord.x, childCoord.y, pCoord.x, pCoord.y, false));
+                    path.setAttribute('fill', 'none');
+                    const edgeColor = (childCoord.x !== pCoord.x)
+                        ? (childCoord.node.color || DAG_PALETTE[0])
+                        : (childCoord.node.color || (isDark ? '#52525B' : '#CBD5E1'));
+                    path.setAttribute('stroke', edgeColor);
+                    path.setAttribute('stroke-width', '2.5');
+                    if (!node.isReachable) path.setAttribute('stroke-dasharray', '4 3');
+                    svg.appendChild(path);
                 }
+
+                // Second parent edge (parent2 merge curve)
+                if (node.parent2 && coords.has(node.parent2)) {
+                    const p2Coord = coords.get(node.parent2);
+                    const path2 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                    path2.setAttribute('d', createVerticalEdgePath(childCoord.x, childCoord.y, p2Coord.x, p2Coord.y, true));
+                    path2.setAttribute('fill', 'none');
+                    const edgeColor2 = p2Coord.node.color || DAG_PALETTE[1];
+                    path2.setAttribute('stroke', edgeColor2);
+                    path2.setAttribute('stroke-width', '2.5');
+                    if (!node.isReachable) path2.setAttribute('stroke-dasharray', '4 3');
+                    svg.appendChild(path2);
+                }
+            });
+
+            // 2. Draw Nodes and Labels
+            commits.forEach(node => {
+                const coord = coords.get(node.hash);
+                if (!coord) return;
+                const { x: nodeX, y: nodeY } = coord;
+                const isHead = (node.hash === head);
+                const isMerge = Boolean(node.parent && node.parent2);
 
                 const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
                 group.style.cursor = 'pointer';
                 group.onclick = () => openCommitDetailModal(node.hash);
+                if (!node.isReachable) group.style.opacity = '0.5';
 
-                // Commit Circle
+                const titleEl = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+                titleEl.textContent = `${node.hash.substring(0, 7)}: ${node.message || 'commit'} (${node.author || 'unknown'})`;
+                group.appendChild(titleEl);
+
+                // Halo ring for HEAD
+                if (isHead) {
+                    const halo = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    halo.setAttribute('cx', nodeX);
+                    halo.setAttribute('cy', nodeY);
+                    halo.setAttribute('r', nodeRadius + 5);
+                    halo.setAttribute('fill', 'none');
+                    halo.setAttribute('stroke', isDark ? '#FFFFFF' : '#000000');
+                    halo.setAttribute('stroke-width', '1.5');
+                    halo.setAttribute('stroke-dasharray', '3 2');
+                    group.appendChild(halo);
+                }
+
+                // Commit circle
                 const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-                circle.setAttribute('cx', x);
+                circle.setAttribute('cx', nodeX);
                 circle.setAttribute('cy', nodeY);
                 circle.setAttribute('r', isHead ? nodeRadius + 2 : nodeRadius);
                 circle.setAttribute('fill', isDark ? (isHead ? '#FFFFFF' : '#18181B') : (isHead ? '#000000' : '#FFFFFF'));
-                circle.setAttribute('stroke', isDark ? (isHead ? '#FFFFFF' : '#A1A1AA') : (isHead ? '#000000' : '#6B7280'));
-                circle.setAttribute('stroke-width', isHead ? '3' : '2');
+                circle.setAttribute('stroke', node.color || DAG_PALETTE[0]);
+                circle.setAttribute('stroke-width', isHead ? '3' : '2.5');
+                if (!node.isReachable) circle.setAttribute('stroke-dasharray', '3 2');
                 group.appendChild(circle);
+
+                // Merge inner dot
+                if (isMerge && !isHead) {
+                    const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    dot.setAttribute('cx', nodeX);
+                    dot.setAttribute('cy', nodeY);
+                    dot.setAttribute('r', 4);
+                    dot.setAttribute('fill', node.color || DAG_PALETTE[0]);
+                    group.appendChild(dot);
+                }
 
                 // Hash & message text
                 const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                text.setAttribute('x', x + 30);
+                text.setAttribute('x', textStartX);
                 text.setAttribute('y', nodeY + 4);
                 text.setAttribute('fill', isDark ? '#F3F4F6' : '#111827');
                 text.setAttribute('font-size', '12px');
@@ -3952,12 +5367,12 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 const msgSpan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
                 msgSpan.setAttribute('fill', isDark ? '#FFFFFF' : '#111827');
                 msgSpan.setAttribute('font-weight', isHead ? '600' : '400');
-                msgSpan.textContent = node.message;
+                msgSpan.textContent = node.message || '(no commit message)';
 
                 text.appendChild(hashSpan);
                 text.appendChild(msgSpan);
 
-                // Small green/red +12 -3 badge next to the message
+                // Stats badges
                 const stats = commitStats(node.hash);
                 let statStrLen = 0;
                 if (stats && (stats.totalAdded > 0 || stats.totalRemoved > 0)) {
@@ -3984,38 +5399,75 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                         statStrLen += (String(stats.totalRemoved).length + 3);
                     }
                 }
-
                 group.appendChild(text);
 
-                // Branch labels
-                let labelOffset = x + 30 + ((node.message.length + statStrLen) * 7.5) + 80;
-                for (const [bName, bHash] of Object.entries(BRANCHES)) {
-                    if (bHash === node.hash) {
-                        const isCur = (bName === CURRENT_BRANCH);
-                        const bWidth = bName.length * 7 + 24;
-                        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-                        rect.setAttribute('x', labelOffset);
-                        rect.setAttribute('y', nodeY - 10);
-                        rect.setAttribute('width', bWidth);
-                        rect.setAttribute('height', 20);
-                        rect.setAttribute('rx', 10);
-                        rect.setAttribute('fill', isCur ? (isDark ? '#FFFFFF' : '#000000') : (isDark ? '#27272A' : '#F3F4F6'));
-                        rect.setAttribute('stroke', isCur ? (isDark ? '#FFFFFF' : '#000000') : (isDark ? '#3F3F46' : '#E5E7EB'));
-                        group.appendChild(rect);
+                // Branch labels & HEAD badge
+                let labelOffset = textStartX + ((node.message.length + statStrLen) * 7.4) + 65;
 
-                        const bText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                        bText.setAttribute('x', labelOffset + bWidth / 2);
-                        bText.setAttribute('y', nodeY + 4);
-                        bText.setAttribute('fill', isCur ? (isDark ? '#000000' : '#FFFFFF') : (isDark ? '#E4E4E7' : '#4B5563'));
-                        bText.setAttribute('font-size', '10px');
-                        bText.setAttribute('font-family', 'Inter, sans-serif');
-                        bText.setAttribute('text-anchor', 'middle');
-                        bText.setAttribute('font-weight', '600');
-                        bText.textContent = bName;
-                        group.appendChild(bText);
-
-                        labelOffset += bWidth + 8;
+                const badges = [];
+                if (detached && isHead) {
+                    badges.push({ name: 'HEAD', isCur: true, isHeadBadge: true });
+                }
+                if (typeof BRANCHES === 'object' && BRANCHES !== null) {
+                    for (const [bName, bHash] of Object.entries(BRANCHES)) {
+                        if (bHash === node.hash && !bName.toLowerCase().startsWith('(detached')) {
+                            badges.push({
+                                name: bName,
+                                isCur: (!detached && bName === CURRENT_BRANCH),
+                                isHeadBadge: false
+                            });
+                        }
                     }
+                }
+                if (!node.isReachable) {
+                    badges.push({ name: 'unreachable', isCur: false, isUnreachable: true });
+                }
+
+                for (const badge of badges) {
+                    const bWidth = badge.name.length * 7 + 22;
+                    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                    rect.setAttribute('x', labelOffset);
+                    rect.setAttribute('y', nodeY - 10);
+                    rect.setAttribute('width', bWidth);
+                    rect.setAttribute('height', 20);
+                    rect.setAttribute('rx', 10);
+
+                    if (badge.isHeadBadge) {
+                        rect.setAttribute('fill', isDark ? '#FFFFFF' : '#000000');
+                        rect.setAttribute('stroke', isDark ? '#FFFFFF' : '#000000');
+                    } else if (badge.isCur) {
+                        rect.setAttribute('fill', isDark ? '#FFFFFF' : '#000000');
+                        rect.setAttribute('stroke', isDark ? '#FFFFFF' : '#000000');
+                    } else if (badge.isUnreachable) {
+                        rect.setAttribute('fill', isDark ? '#27272A' : '#F3F4F6');
+                        rect.setAttribute('stroke', '#EF4444');
+                        rect.setAttribute('stroke-dasharray', '2 2');
+                    } else {
+                        rect.setAttribute('fill', isDark ? '#27272A' : '#F3F4F6');
+                        rect.setAttribute('stroke', isDark ? '#3F3F46' : '#E5E7EB');
+                    }
+                    group.appendChild(rect);
+
+                    const bText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    bText.setAttribute('x', labelOffset + bWidth / 2);
+                    bText.setAttribute('y', nodeY + 4);
+
+                    if (badge.isHeadBadge || badge.isCur) {
+                        bText.setAttribute('fill', isDark ? '#000000' : '#FFFFFF');
+                    } else if (badge.isUnreachable) {
+                        bText.setAttribute('fill', '#EF4444');
+                    } else {
+                        bText.setAttribute('fill', isDark ? '#E4E4E7' : '#4B5563');
+                    }
+
+                    bText.setAttribute('font-size', '10px');
+                    bText.setAttribute('font-family', 'Inter, sans-serif');
+                    bText.setAttribute('text-anchor', 'middle');
+                    bText.setAttribute('font-weight', '600');
+                    bText.textContent = badge.name;
+                    group.appendChild(bText);
+
+                    labelOffset += bWidth + 8;
                 }
 
                 svg.appendChild(group);
@@ -4044,6 +5496,15 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             });
 
             const activeClass = "px-4 py-2 rounded-full font-semibold bg-black dark:bg-white text-white dark:text-black shadow-sm transition flex items-center space-x-2 cursor-pointer";
+
+            if (view !== 'timeline' && TIME_TRAVEL_PLAY_TIMER) {
+                clearInterval(TIME_TRAVEL_PLAY_TIMER);
+                TIME_TRAVEL_PLAY_TIMER = null;
+                const label = document.getElementById('timeTravelPlayLabel');
+                const icon = document.getElementById('timeTravelPlayIcon');
+                if (label) label.textContent = "Play";
+                if (icon) icon.className = "fa-solid fa-play text-[10px]";
+            }
 
             if (view === 'dashboard') {
                 dashboardView?.classList.remove('hidden');
@@ -4104,6 +5565,30 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         window.onload = async function() {
             initTheme();
 
+            // Item 37: Detect server mode with a GET /api/snapshot probe, and in file:// export mode be read-only
+            if (window.location.protocol === 'file:' || window.__staticExport || (window.MINIGIT_LIVE && window.MINIGIT_LIVE.__staticExport)) {
+                IS_SERVER_MODE = false;
+                IS_STATIC_EXPORT = true;
+            } else if (window.location.protocol.startsWith('http')) {
+                try {
+                    const probeRes = await fetch('/api/snapshot');
+                    if (probeRes.ok) {
+                        IS_SERVER_MODE = true;
+                        IS_STATIC_EXPORT = false;
+                        LATEST_SNAPSHOT_ETAG = probeRes.headers.get('ETag');
+                        const probeData = await probeRes.json();
+                        if (probeData) {
+                            window.MINIGIT_LIVE = probeData;
+                            IS_LAN_MODE = !!probeData.lan;
+                        }
+                    } else {
+                        IS_SERVER_MODE = false;
+                    }
+                } catch (e) {
+                    IS_SERVER_MODE = false;
+                }
+            }
+
             if (window.MINIGIT_LIVE && typeof window.MINIGIT_LIVE === 'object') {
                 loadLiveRepo();
             }
@@ -4118,37 +5603,39 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 if (!VFS || Object.keys(VFS).length === 0) {
                     loadLiveRepo();
                 }
-                setInterval(pollPendingPairRequests, 1500);
+
+                // Item 54: The pairing poll runs only when LAN mode is active
+                if (IS_LAN_MODE) {
+                    setInterval(pollPendingPairRequests, 2000);
+                }
+
                 document.addEventListener('visibilitychange', () => {
                     if (!document.hidden && IS_SERVER_MODE) {
                         refreshRepositorySnapshot(true);
                     }
                 });
+
+                // Item 51 & 27: Poll every 2.5s sending If-None-Match ETag and skipping re-renders on 304
                 setInterval(async () => {
-                    if (!document.hidden) {
-                        try {
-                            const res = await fetch('/api/snapshot');
-                            if (res.ok) {
-                                const live = await res.json();
-                                if (live) {
-                                    const changed = hasRepositorySnapshotChanged(window.MINIGIT_LIVE, live);
-                                    window.MINIGIT_LIVE = live;
-                                    if (changed) {
-                                        loadLiveRepo();
-                                    }
-                                }
-                            }
-                        } catch (e) {}
+                    if (!document.hidden && IS_SERVER_MODE) {
+                        await refreshRepositorySnapshot(true);
                     }
-                }, 1200);
+                }, 2500);
             } else if (!window.MINIGIT_LIVE || typeof window.MINIGIT_LIVE !== 'object') {
                 await executeGitInit();
             }
 
+            // Item 44: An empty repo does not open a nonexistent index.html
+            const allFiles = VFS ? Object.keys(VFS) : [];
             const targetFile = (ACTIVE_FILE && VFS && VFS[ACTIVE_FILE] !== undefined)
                 ? ACTIVE_FILE
-                : (VFS ? Object.keys(VFS)[0] : null) || 'index.html';
-            openFileInEditor(targetFile);
+                : (allFiles.length > 0 ? allFiles[0] : null);
+            if (targetFile) {
+                openFileInEditor(targetFile);
+            } else {
+                ACTIVE_FILE = null;
+                syncEditorWithActiveFile(null);
+            }
             switchViewTab('dashboard');
         };
     </script>

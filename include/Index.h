@@ -9,6 +9,8 @@ class Index {
     std::map<std::string, Hash> entries_;
     void load();
 public:
+    void reload() { load(); }
+public:
     explicit Index(fs::path file) : file_(std::move(file)) { load(); }
     void save() const;
 

@@ -7,6 +7,6 @@
 class HtmlExporter {
 public:
     static std::string toJson(const Snapshot& snap, const std::string& repoName, bool isSyncBundle = false);
-    static std::string render(const Snapshot& snap, const std::string& repoName);
+    static std::string render(const Snapshot& snap, const std::string& repoName, bool isStaticExport = false);
     static std::string computeVersion(const Snapshot& snap);
 };

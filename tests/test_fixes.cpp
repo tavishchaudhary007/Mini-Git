@@ -1,5 +1,14 @@
 #include <iostream>
-#include <cassert>
+#include <cstdlib>
+
+#ifndef CHECK
+#define CHECK(cond) do { \
+    if (!(cond)) { \
+        std::cerr << "Check failed: (" #cond ") at " << __FILE__ << ":" << __LINE__ << std::endl; \
+        std::exit(1); \
+    } \
+} while (0)
+#endif
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -44,33 +53,33 @@ void test1_discard_safety() {
     // 1. Calling discard with empty, ".", "..", absolute paths must throw
     bool threwEmpty = false;
     try { repo.discard("", true); } catch (const MiniGitException&) { threwEmpty = true; }
-    assert(threwEmpty);
+    CHECK(threwEmpty);
 
     bool threwDot = false;
     try { repo.discard(".", true); } catch (const MiniGitException&) { threwDot = true; }
-    assert(threwDot);
+    CHECK(threwDot);
 
     bool threwDotDot = false;
     try { repo.discard("..", true); } catch (const MiniGitException&) { threwDotDot = true; }
-    assert(threwDotDot);
+    CHECK(threwDotDot);
 
     bool threwAbs = false;
     try { repo.discard((dir / "a.txt").string(), true); } catch (const MiniGitException&) { threwAbs = true; }
-    assert(threwAbs);
+    CHECK(threwAbs);
 
     // Repo root and .minigit must still exist and files intact
-    assert(fs::exists(dir));
-    assert(fs::exists(dir / ".minigit"));
-    assert(fs::exists(dir / "a.txt"));
-    assert(fs::exists(dir / "b.txt"));
-    assert(readFile(dir / "a.txt") == "hello a");
+    CHECK(fs::exists(dir));
+    CHECK(fs::exists(dir / ".minigit"));
+    CHECK(fs::exists(dir / "a.txt"));
+    CHECK(fs::exists(dir / "b.txt"));
+    CHECK(readFile(dir / "a.txt") == "hello a");
 
     // Untracked file discard works and deletes file
     writeFile(dir / "untracked.txt", "remove me");
-    assert(fs::exists(dir / "untracked.txt"));
+    CHECK(fs::exists(dir / "untracked.txt"));
     repo.discard("untracked.txt", true);
-    assert(!fs::exists(dir / "untracked.txt"));
-    assert(fs::exists(dir / ".minigit"));
+    CHECK(!fs::exists(dir / "untracked.txt"));
+    CHECK(fs::exists(dir / ".minigit"));
 
     removeDir(dir);
     std::cout << "PASSED\n";
@@ -100,9 +109,9 @@ void test2_revert_delta_and_conflict() {
 
     // Reverting B: restores only g.txt, and f.txt stays "2"
     Hash revB = repo.revert(hashB);
-    assert(!revB.empty());
-    assert(readFile(dir / "f.txt") == "2");
-    assert(!fs::exists(dir / "g.txt")); // g was added in B, so revert removes it
+    CHECK(!revB.empty());
+    CHECK(readFile(dir / "f.txt") == "2");
+    CHECK(!fs::exists(dir / "g.txt")); // g was added in B, so revert removes it
 
     // Reverting A while C changed f.txt must report a conflict!
     bool conflictDetected = false;
@@ -114,7 +123,7 @@ void test2_revert_delta_and_conflict() {
             conflictDetected = true;
         }
     }
-    assert(conflictDetected);
+    CHECK(conflictDetected);
 
     removeDir(dir);
     std::cout << "PASSED\n";
@@ -140,7 +149,7 @@ void test3_untracked_overwrite_protection() {
 
     // Switch back to main
     repo.checkout("main");
-    assert(!fs::exists(dir / "target.txt"));
+    CHECK(!fs::exists(dir / "target.txt"));
 
     // Create local untracked target.txt
     writeFile(dir / "target.txt", "local untracked");
@@ -155,8 +164,8 @@ void test3_untracked_overwrite_protection() {
             checkoutBlocked = true;
         }
     }
-    assert(checkoutBlocked);
-    assert(readFile(dir / "target.txt") == "local untracked");
+    CHECK(checkoutBlocked);
+    CHECK(readFile(dir / "target.txt") == "local untracked");
 
     // 2. Fast-forward merge must be blocked
     bool mergeBlocked = false;
@@ -168,8 +177,8 @@ void test3_untracked_overwrite_protection() {
             mergeBlocked = true;
         }
     }
-    assert(mergeBlocked);
-    assert(readFile(dir / "target.txt") == "local untracked");
+    CHECK(mergeBlocked);
+    CHECK(readFile(dir / "target.txt") == "local untracked");
 
     // 3. Stash pop must be blocked if untracked file would be overwritten
     fs::remove(dir / "target.txt");
@@ -177,7 +186,7 @@ void test3_untracked_overwrite_protection() {
     writeFile(dir / "stashed_file.txt", "stashed content");
     repo.add("stashed_file.txt", true);
     repo.stashSave("save stash with stashed_file");
-    assert(!fs::exists(dir / "stashed_file.txt"));
+    CHECK(!fs::exists(dir / "stashed_file.txt"));
 
     // Create untracked stashed_file.txt
     writeFile(dir / "stashed_file.txt", "untracked blocker");
@@ -190,8 +199,8 @@ void test3_untracked_overwrite_protection() {
             stashPopBlocked = true;
         }
     }
-    assert(stashPopBlocked);
-    assert(readFile(dir / "stashed_file.txt") == "untracked blocker");
+    CHECK(stashPopBlocked);
+    CHECK(readFile(dir / "stashed_file.txt") == "untracked blocker");
 
     removeDir(dir);
     std::cout << "PASSED\n";
@@ -215,7 +224,7 @@ void test4_stash_stack_and_dirty_refusal() {
             refusedBeforeCommit = true;
         }
     }
-    assert(refusedBeforeCommit);
+    CHECK(refusedBeforeCommit);
 
     repo.add("f.txt", true);
     repo.commit("initial");
@@ -223,18 +232,18 @@ void test4_stash_stack_and_dirty_refusal() {
     // 1st stash
     writeFile(dir / "f.txt", "stash 1 content");
     repo.stashSave("Stash One");
-    assert(readFile(dir / "f.txt") == "draft"); // restored to HEAD
+    CHECK(readFile(dir / "f.txt") == "draft"); // restored to HEAD
 
     // 2nd stash
     writeFile(dir / "f.txt", "stash 2 content");
     repo.stashSave("Stash Two");
-    assert(readFile(dir / "f.txt") == "draft");
+    CHECK(readFile(dir / "f.txt") == "draft");
 
     // Check stash stack has 2 entries, newest first
     auto list = repo.stashList();
-    assert(list.size() == 2);
-    assert(list[0].message == "Stash Two");
-    assert(list[1].message == "Stash One");
+    CHECK(list.size() == 2);
+    CHECK(list[0].message == "Stash Two");
+    CHECK(list[1].message == "Stash One");
 
     // Stash pop on dirty tree must be refused
     writeFile(dir / "f.txt", "dirty uncommitted changes");
@@ -244,22 +253,22 @@ void test4_stash_stack_and_dirty_refusal() {
     } catch (const MiniGitException& e) {
         popRefusedDirty = true;
     }
-    assert(popRefusedDirty);
-    assert(readFile(dir / "f.txt") == "dirty uncommitted changes");
+    CHECK(popRefusedDirty);
+    CHECK(readFile(dir / "f.txt") == "dirty uncommitted changes");
 
     // Discard dirty change, then pop newest (Stash Two)
     repo.discard("f.txt", true);
     std::string popRes1 = repo.stashPop();
-    assert(readFile(dir / "f.txt") == "stash 2 content");
-    assert(repo.stashList().size() == 1);
-    assert(repo.stashList()[0].message == "Stash One");
+    CHECK(readFile(dir / "f.txt") == "stash 2 content");
+    CHECK(repo.stashList().size() == 1);
+    CHECK(repo.stashList()[0].message == "Stash One");
 
     // Pop next (Stash One)
     repo.discard("f.txt", true);
     std::string popRes2 = repo.stashPop();
-    assert(readFile(dir / "f.txt") == "stash 1 content");
-    assert(repo.stashList().empty());
-    assert(!repo.hasStash());
+    CHECK(readFile(dir / "f.txt") == "stash 1 content");
+    CHECK(repo.stashList().empty());
+    CHECK(!repo.hasStash());
 
     removeDir(dir);
     std::cout << "PASSED\n";
@@ -279,14 +288,14 @@ void test5_xss_prevention() {
 
     // Snapshot JSON must have < and > escaped as \\u003c and \\u003e
     std::string snapJson = HtmlExporter::toJson(repo.snapshot(), "test");
-    assert(snapJson.find("<img") == std::string::npos);
-    assert(snapJson.find("\\u003cimg") != std::string::npos);
+    CHECK(snapJson.find("<img") == std::string::npos);
+    CHECK(snapJson.find("\\u003cimg") != std::string::npos);
 
     // JsonValue::parse parses it back to literal string
     std::string parseErr;
     JsonValue parsed = JsonValue::parse(snapJson, &parseErr);
-    assert(parseErr.empty());
-    assert(parsed.is_object());
+    CHECK(parseErr.empty());
+    CHECK(parsed.is_object());
 
     removeDir(dir);
     std::cout << "PASSED\n";
@@ -308,8 +317,8 @@ void test6_git_export_command_injection() {
     try {
         repo.exportToGit();
         // If git is installed, no pwned.txt should be created!
-        assert(!fs::exists(dir / "pwned.txt"));
-        assert(!fs::exists(fs::current_path() / "pwned.txt"));
+        CHECK(!fs::exists(dir / "pwned.txt"));
+        CHECK(!fs::exists(fs::current_path() / "pwned.txt"));
     } catch (const MiniGitException& e) {
         // If git is not installed, that's fine too
     }
@@ -331,16 +340,16 @@ void test7_subfolder_path_resolution() {
 
     // API uses isRepoRelative=true
     repo.add("subfolder/file.txt", true);
-    assert(repo.status().staged.size() == 1);
-    assert(repo.status().staged[0] == "subfolder/file.txt");
+    CHECK(repo.status().staged.size() == 1);
+    CHECK(repo.status().staged[0] == "subfolder/file.txt");
 
     repo.commit("commit subfolder file");
     writeFile(sub / "file.txt", "modified sub content");
-    assert(repo.status().modified.size() == 1);
+    CHECK(repo.status().modified.size() == 1);
 
     repo.discard("subfolder/file.txt", true);
-    assert(repo.status().clean());
-    assert(readFile(sub / "file.txt") == "sub content");
+    CHECK(repo.status().clean());
+    CHECK(readFile(sub / "file.txt") == "sub content");
 
     removeDir(dir);
     std::cout << "PASSED\n";
@@ -373,10 +382,11 @@ void test8_import_git_ignores_dotgit() {
     // Verify snapshot does NOT contain any .git files
     Snapshot snap = repo.snapshot();
     for (const auto& [f, content] : snap.files) {
-        assert(f.find(".git") == std::string::npos);
+        (void)content;
+        CHECK(f.find(".git") == std::string::npos);
     }
     for (const auto& f : repo.status().staged) {
-        assert(f.find(".git") == std::string::npos);
+        CHECK(f.find(".git") == std::string::npos);
     }
 
     removeDir(dir);
@@ -404,14 +414,14 @@ void test9_reflog_json_and_roundtrip() {
     repo.revert(h2);
 
     auto entries = repo.reflog();
-    assert(entries.size() >= 3);
+    CHECK(entries.size() >= 3);
 
     // Verify specialMsg roundtripped accurately
     bool foundSpecial = false;
     for (const auto& r : entries) {
         if (r.description == specialMsg) foundSpecial = true;
     }
-    assert(foundSpecial);
+    CHECK(foundSpecial);
 
     // Verify reflog JSON output parses cleanly as valid JSON
     std::ostringstream jsonOss;
@@ -428,9 +438,9 @@ void test9_reflog_json_and_roundtrip() {
 
     std::string err;
     JsonValue parsedReflog = JsonValue::parse(jsonOss.str(), &err);
-    assert(err.empty());
-    assert(parsedReflog.is_object());
-    assert(parsedReflog["reflog"].as_array().size() == entries.size());
+    CHECK(err.empty());
+    CHECK(parsedReflog.is_object());
+    CHECK(parsedReflog["reflog"].as_array().size() == entries.size());
 
     removeDir(dir);
     std::cout << "PASSED\n";
@@ -446,9 +456,9 @@ void test10_multiline_commit_message() {
     std::string incomingJson = "{\"message\":\"Feature: implement P2P sync\\n\\n* Added PairingManager\\n* Added tests\"}";
     std::string err;
     JsonValue parsed = JsonValue::parse(incomingJson, &err);
-    assert(err.empty());
+    CHECK(err.empty());
     std::string msg = parsed["message"].as_string();
-    assert(msg.find('\n') != std::string::npos);
+    CHECK(msg.find('\n') != std::string::npos);
 
     writeFile(dir / "feature.cpp", "code");
     repo.add("feature.cpp", true);
@@ -456,9 +466,9 @@ void test10_multiline_commit_message() {
 
     // Read back log
     auto commits = repo.log();
-    assert(!commits.empty());
-    assert(commits.front().message() == msg);
-    assert(commits.front().message().find("\n\n* Added PairingManager\n") != std::string::npos);
+    CHECK(!commits.empty());
+    CHECK(commits.front().message() == msg);
+    CHECK(commits.front().message().find("\n\n* Added PairingManager\n") != std::string::npos);
 
     removeDir(dir);
     std::cout << "PASSED\n";
@@ -496,28 +506,28 @@ void test11_merge_conflict_markers_and_abort() {
     } catch (const MergeException& e) {
         conflictThrew = true;
         std::string err = e.what();
-        assert(err.find("conflict") != std::string::npos || err.find("Conflict") != std::string::npos);
+        CHECK(err.find("conflict") != std::string::npos || err.find("Conflict") != std::string::npos);
     }
-    assert(conflictThrew);
+    CHECK(conflictThrew);
 
     // Assert conflict markers written
     std::string conflictedContent = readFile(dir / "f.txt");
-    assert(conflictedContent.find("<<<<<<< ours\n") != std::string::npos);
-    assert(conflictedContent.find("line 2 ours") != std::string::npos);
-    assert(conflictedContent.find("=======\n") != std::string::npos);
-    assert(conflictedContent.find("line 2 theirs") != std::string::npos);
-    assert(conflictedContent.find(">>>>>>> feat\n") != std::string::npos);
+    CHECK(conflictedContent.find("<<<<<<< ours\n") != std::string::npos);
+    CHECK(conflictedContent.find("line 2 ours") != std::string::npos);
+    CHECK(conflictedContent.find("=======\n") != std::string::npos);
+    CHECK(conflictedContent.find("line 2 theirs") != std::string::npos);
+    CHECK(conflictedContent.find(">>>>>>> feat\n") != std::string::npos);
 
     // Assert nothing committed
-    assert(repo.head() == oursCommit);
-    assert(fs::exists(dir / ".minigit" / "MERGE_HEAD"));
+    CHECK(repo.head() == oursCommit);
+    CHECK(fs::exists(dir / ".minigit" / "MERGE_HEAD"));
 
     // Merge abort restores file to HEAD
     std::string abortRes = repo.merge("--abort");
-    assert(abortRes.find("Merge aborted") != std::string::npos);
-    assert(!fs::exists(dir / ".minigit" / "MERGE_HEAD"));
-    assert(readFile(dir / "f.txt") == "line 1\nline 2 ours\nline 3\n");
-    assert(repo.head() == oursCommit);
+    CHECK(abortRes.find("Merge aborted") != std::string::npos);
+    CHECK(!fs::exists(dir / ".minigit" / "MERGE_HEAD"));
+    CHECK(readFile(dir / "f.txt") == "line 1\nline 2 ours\nline 3\n");
+    CHECK(repo.head() == oursCommit);
 
     removeDir(dir);
     std::cout << "PASSED\n";
@@ -526,10 +536,10 @@ void test11_merge_conflict_markers_and_abort() {
 void test12_commit_hash_preservation() {
     std::cout << "[Test 12] Commit hash without parent2 preservation... ";
     Commit c(Hash("0123456789012345678901234567890123456789"), Hash(), "User <user@test.com>", "Initial commit", 1700000000);
-    assert(c.hash().str() == "767a84561230db7e4e9cc8c8967cfd6a2aad1035");
+    CHECK(c.hash().str() == "767a84561230db7e4e9cc8c8967cfd6a2aad1035");
 
     Commit c2(Hash("0123456789012345678901234567890123456789"), Hash("1111111111111111111111111111111111111111"), "User <user@test.com>", "Initial commit", 1700000000);
-    assert(c2.hash().str() == "216b583c3249da911e56f984e717c242073cbe84");
+    CHECK(c2.hash().str() == "216b583c3249da911e56f984e717c242073cbe84");
 
     std::cout << "PASSED\n";
 }

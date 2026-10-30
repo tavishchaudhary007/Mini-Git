@@ -16,6 +16,10 @@ Repository::Repository(const fs::path& root)
     : root_(root), gitDir_(root / ".minigit"), store_(gitDir_ / "objects"),
       index_(gitDir_ / "index"), refs_(gitDir_) {}
 
+void Repository::reload() {
+    index_.reload();
+}
+
 void Repository::init(const fs::path& dir) {
     fs::path g = dir / ".minigit";
     if (fs::exists(g)) throw MiniGitException("repository already initialized");
@@ -49,6 +53,13 @@ std::string Repository::relPath(const fs::path& p) const {
 }
 
 std::string Repository::resolveRepoPath(const std::string& pathArg, bool isRepoRelative) const {
+    for (char c : pathArg) {
+        if (static_cast<unsigned char>(c) < 32 || c == 127 ||
+            c == '\\' || c == ':' || c == '*' || c == '?' ||
+            c == '"' || c == '<' || c == '>' || c == '|') {
+            throw MiniGitException("invalid path: contains illegal character: " + pathArg);
+        }
+    }
     if (pathArg.empty() || pathArg == "." || pathArg == "..") {
         throw MiniGitException("invalid path: cannot be empty, '.', or '..'");
     }
@@ -963,13 +974,36 @@ Snapshot Repository::snapshot() const {
     for (const auto& b : refs_.listBranches()) s.branches[b] = refs_.branchTip(b);
     for (const auto& h : store_.listAll()) s.objects.push_back(store_.load(h));
 
+    std::set<std::string> binFiles;
     for (const auto& f : workingFiles()) {
         std::string content = readFile(root_ / f);
-        if (content.find('\0') != std::string::npos) continue;  // skip binary files
+        if (content.find('\0') != std::string::npos) {
+            binFiles.insert(f);
+            continue;  // skip binary files
+        }
         s.files[f] = std::move(content);
     }
 
     auto head = headTree();
+    for (const auto& [path, h] : index_.entries()) {
+        if (binFiles.count(path)) continue;
+        if (store_.exists(h)) {
+            auto b = store_.loadAs<Blob>(h);
+            if (b && b->content().find('\0') != std::string::npos) {
+                binFiles.insert(path);
+            }
+        }
+    }
+    for (const auto& [path, h] : head) {
+        if (binFiles.count(path)) continue;
+        if (store_.exists(h)) {
+            auto b = store_.loadAs<Blob>(h);
+            if (b && b->content().find('\0') != std::string::npos) {
+                binFiles.insert(path);
+            }
+        }
+    }
+    s.binaryFiles.assign(binFiles.begin(), binFiles.end());
     for (const auto& [path, h] : index_.entries()) {
         auto it = head.find(path);
         if (it == head.end() || it->second != h) s.staged[path] = h;
@@ -1116,7 +1150,7 @@ std::string Repository::stashSave(const std::string& message, bool includeUntrac
     Status s = status();
     bool hasTrackedChanges = !(s.staged.empty() && s.modified.empty() && s.deleted.empty());
     if (!hasTrackedChanges && (!includeUntracked || s.untracked.empty())) {
-        throw MiniGitException("no uncommitted changes to stash");
+        return "no local changes to save";
     }
 
     Tree t;
@@ -1652,6 +1686,24 @@ std::string Repository::gitStatus() const {
 }
 
 std::string Repository::exportToGit() {
+#if defined(_WIN32)
+    int retCheck = std::system("git --version >nul 2>&1");
+#else
+    int retCheck = std::system("git --version >/dev/null 2>&1");
+#endif
+    if (processExitCode(retCheck) != 0) {
+        throw MiniGitException("git is not installed or not available in PATH");
+    }
+
+#if defined(_WIN32)
+    int retIdent = std::system("git var GIT_AUTHOR_IDENT >nul 2>&1");
+#else
+    int retIdent = std::system("git var GIT_AUTHOR_IDENT >/dev/null 2>&1");
+#endif
+    if (processExitCode(retIdent) != 0) {
+        throw MiniGitException("git user.name and user.email are not configured");
+    }
+
     std::string headMsg = "MiniGit snapshot sync";
     if (!head().empty()) {
         try {
@@ -1690,16 +1742,6 @@ std::string Repository::exportToGit() {
     std::string rootArg = quotePath(root_);
     std::string msgFileArg = quotePath(tmpMsgFile);
 
-#if defined(_WIN32)
-    int retCheck = std::system("git --version >nul 2>&1");
-#else
-    int retCheck = std::system("git --version >/dev/null 2>&1");
-#endif
-    if (processExitCode(retCheck) != 0) {
-        fs::remove(tmpMsgFile, ec);
-        throw MiniGitException("git is not installed or not available in PATH");
-    }
-
     if (!fs::exists(root_ / ".git")) {
         std::string cmdInit = "git -C " + rootArg + " init";
         int retInit = std::system(cmdInit.c_str());
@@ -1734,7 +1776,7 @@ std::string Repository::exportToGit() {
     if (commitExitCode != 0) {
         if (commitOutput.find("nothing to commit") != std::string::npos ||
             commitOutput.find("working tree clean") != std::string::npos) {
-            throw MiniGitException("nothing to commit");
+            return "already up to date";
         }
         if (commitOutput.find("Please tell me who you are") != std::string::npos ||
             commitOutput.find("user.name") != std::string::npos ||

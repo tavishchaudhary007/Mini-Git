@@ -1,5 +1,14 @@
 #include <iostream>
-#include <cassert>
+#include <cstdlib>
+
+#ifndef CHECK
+#define CHECK(cond) do { \
+    if (!(cond)) { \
+        std::cerr << "Check failed: (" #cond ") at " << __FILE__ << ":" << __LINE__ << std::endl; \
+        std::exit(1); \
+    } \
+} while (0)
+#endif
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -60,12 +69,12 @@ void test_fix6_merge_conflicts_tracking_and_refusal() {
     } catch (const MergeException&) {
         mergeThrew = true;
     }
-    assert(mergeThrew);
-    assert(repo.isMerging());
-    assert(fs::exists(dir / ".minigit" / "MERGE_CONFLICTS"));
+    CHECK(mergeThrew);
+    CHECK(repo.isMerging());
+    CHECK(fs::exists(dir / ".minigit" / "MERGE_CONFLICTS"));
 
     std::vector<std::string> cPaths = repo.conflictedPaths();
-    assert(cPaths.size() == 1 && cPaths[0] == "f.txt");
+    CHECK(cPaths.size() == 1 && cPaths[0] == "f.txt");
 
     // Commit while unmerged paths remain in MERGE_CONFLICTS must be refused
     bool commitRefused = false;
@@ -74,15 +83,15 @@ void test_fix6_merge_conflicts_tracking_and_refusal() {
     } catch (const MergeException&) {
         commitRefused = true;
     }
-    assert(commitRefused);
+    CHECK(commitRefused);
 
     // Re-add f.txt while it still has conflict markers
     std::string conflictedText = readFile(dir / "f.txt");
-    assert(conflictedText.find("<<<<<<<") != std::string::npos);
+    CHECK(conflictedText.find("<<<<<<<") != std::string::npos);
     repo.add("f.txt", true);
 
     // Path is removed from MERGE_CONFLICTS when re-added
-    assert(repo.conflictedPaths().empty());
+    CHECK(repo.conflictedPaths().empty());
 
     // But commit must STILL be refused because staged content contains conflict markers
     bool commitWithMarkersRefused = false;
@@ -91,7 +100,7 @@ void test_fix6_merge_conflicts_tracking_and_refusal() {
     } catch (const MergeException&) {
         commitWithMarkersRefused = true;
     }
-    assert(commitWithMarkersRefused);
+    CHECK(commitWithMarkersRefused);
 
     // Now resolve conflict cleanly and re-add
     writeFile(dir / "f.txt", "line 1\nresolved change\nline 3\n");
@@ -99,11 +108,11 @@ void test_fix6_merge_conflicts_tracking_and_refusal() {
 
     // Commit succeeds!
     Hash mergeCommit = repo.commit("Resolve merge conflict");
-    assert(!mergeCommit.empty());
-    assert(!repo.isMerging());
-    assert(!fs::exists(dir / ".minigit" / "MERGE_HEAD"));
-    assert(!fs::exists(dir / ".minigit" / "MERGE_CONFLICTS"));
-    assert(repo.conflictedPaths().empty());
+    CHECK(!mergeCommit.empty());
+    CHECK(!repo.isMerging());
+    CHECK(!fs::exists(dir / ".minigit" / "MERGE_HEAD"));
+    CHECK(!fs::exists(dir / ".minigit" / "MERGE_CONFLICTS"));
+    CHECK(repo.conflictedPaths().empty());
 
     // Verify merge --abort clears MERGE_CONFLICTS
     repo.checkout("feature");
@@ -117,14 +126,14 @@ void test_fix6_merge_conflicts_tracking_and_refusal() {
     repo.commit("main g");
 
     try { repo.merge("feature"); } catch (...) {}
-    assert(repo.isMerging());
-    assert(fs::exists(dir / ".minigit" / "MERGE_CONFLICTS"));
+    CHECK(repo.isMerging());
+    CHECK(fs::exists(dir / ".minigit" / "MERGE_CONFLICTS"));
 
     repo.merge("--abort");
-    assert(!repo.isMerging());
-    assert(!fs::exists(dir / ".minigit" / "MERGE_CONFLICTS"));
-    assert(!fs::exists(dir / ".minigit" / "MERGE_HEAD"));
-    assert(repo.conflictedPaths().empty());
+    CHECK(!repo.isMerging());
+    CHECK(!fs::exists(dir / ".minigit" / "MERGE_CONFLICTS"));
+    CHECK(!fs::exists(dir / ".minigit" / "MERGE_HEAD"));
+    CHECK(repo.conflictedPaths().empty());
 
     removeDir(dir);
     std::cout << "PASSED\n";
@@ -154,7 +163,7 @@ void test_fix7_operations_blocked_during_merge() {
     repo.commit("main commit");
 
     try { repo.merge("br"); } catch (...) {}
-    assert(repo.isMerging());
+    CHECK(repo.isMerging());
 
     // 1. undo
     bool undoBlocked = false;
@@ -162,7 +171,7 @@ void test_fix7_operations_blocked_during_merge() {
     catch (const MergeException& e) {
         if (std::string(e.what()).find("merge in progress; commit or abort it first") != std::string::npos) undoBlocked = true;
     }
-    assert(undoBlocked);
+    CHECK(undoBlocked);
 
     // 2. stashSave
     bool stashSaveBlocked = false;
@@ -170,7 +179,7 @@ void test_fix7_operations_blocked_during_merge() {
     catch (const MergeException& e) {
         if (std::string(e.what()).find("merge in progress; commit or abort it first") != std::string::npos) stashSaveBlocked = true;
     }
-    assert(stashSaveBlocked);
+    CHECK(stashSaveBlocked);
 
     // 3. stashPop
     bool stashPopBlocked = false;
@@ -178,7 +187,7 @@ void test_fix7_operations_blocked_during_merge() {
     catch (const MergeException& e) {
         if (std::string(e.what()).find("merge in progress; commit or abort it first") != std::string::npos) stashPopBlocked = true;
     }
-    assert(stashPopBlocked);
+    CHECK(stashPopBlocked);
 
     // 4. revert
     bool revertBlocked = false;
@@ -186,7 +195,7 @@ void test_fix7_operations_blocked_during_merge() {
     catch (const MergeException& e) {
         if (std::string(e.what()).find("merge in progress; commit or abort it first") != std::string::npos) revertBlocked = true;
     }
-    assert(revertBlocked);
+    CHECK(revertBlocked);
 
     // 5. checkout
     bool checkoutBlocked = false;
@@ -194,7 +203,7 @@ void test_fix7_operations_blocked_during_merge() {
     catch (const MergeException& e) {
         if (std::string(e.what()).find("merge in progress; commit or abort it first") != std::string::npos) checkoutBlocked = true;
     }
-    assert(checkoutBlocked);
+    CHECK(checkoutBlocked);
 
     // 6. createBranch
     bool createBranchBlocked = false;
@@ -202,7 +211,7 @@ void test_fix7_operations_blocked_during_merge() {
     catch (const MergeException& e) {
         if (std::string(e.what()).find("merge in progress; commit or abort it first") != std::string::npos) createBranchBlocked = true;
     }
-    assert(createBranchBlocked);
+    CHECK(createBranchBlocked);
 
     repo.merge("--abort");
     removeDir(dir);
@@ -225,16 +234,16 @@ void test_fix8_merge_state_and_snapshot_fields() {
 
     // Clean snapshot
     Snapshot snap1 = repo.snapshot();
-    assert(!snap1.detached);
-    assert(!snap1.merging);
-    assert(snap1.conflicts.empty());
-    assert(snap1.stagedStatus.empty());
+    CHECK(!snap1.detached);
+    CHECK(!snap1.merging);
+    CHECK(snap1.conflicts.empty());
+    CHECK(snap1.stagedStatus.empty());
 
     // Detached checkout
     repo.checkout(c1.str());
     Snapshot snapDetached = repo.snapshot();
-    assert(snapDetached.detached);
-    assert(snapDetached.currentBranch.empty());
+    CHECK(snapDetached.detached);
+    CHECK(snapDetached.currentBranch.empty());
 
     // Switch back to branch
     repo.checkout("main");
@@ -246,20 +255,21 @@ void test_fix8_merge_state_and_snapshot_fields() {
     repo.add(".", true);
 
     Snapshot snapStaged = repo.snapshot();
-    assert(snapStaged.stagedStatus.count("new_file.txt"));
-    assert(snapStaged.stagedStatus["new_file.txt"] == 'A');
-    assert(snapStaged.stagedStatus.count("f.txt"));
-    assert(snapStaged.stagedStatus["f.txt"] == 'M');
-    assert(snapStaged.stagedStatus.count("del.txt"));
-    assert(snapStaged.stagedStatus["del.txt"] == 'D');
+    CHECK(snapStaged.stagedStatus.count("new_file.txt"));
+    CHECK(snapStaged.stagedStatus["new_file.txt"] == 'A');
+    CHECK(snapStaged.stagedStatus.count("f.txt"));
+    CHECK(snapStaged.stagedStatus["f.txt"] == 'M');
+    CHECK(snapStaged.stagedStatus.count("del.txt"));
+    CHECK(snapStaged.stagedStatus["del.txt"] == 'D');
     // Ensure no key has " (deleted)"
     for (const auto& [k, v] : snapStaged.stagedStatus) {
-        assert(k.find(" (deleted)") == std::string::npos);
+        (void)v;
+        CHECK(k.find(" (deleted)") == std::string::npos);
     }
 
     // Existing fields still intact
-    assert(snapStaged.head == c1);
-    assert(!snapStaged.staged.empty());
+    CHECK(snapStaged.head == c1);
+    CHECK(!snapStaged.staged.empty());
 
     removeDir(dir);
     std::cout << "PASSED\n";
@@ -293,20 +303,20 @@ void test_fix9_stash_pop_different_branch_and_conflict() {
 
     // Switch to feature branch
     repo.checkout("feature");
-    assert(fs::exists(dir / "feature_only.txt"));
+    CHECK(fs::exists(dir / "feature_only.txt"));
 
     // Pop stash on feature branch:
     // It must NOT delete feature_only.txt!
     repo.stashPop();
-    assert(fs::exists(dir / "feature_only.txt"));
-    assert(readFile(dir / "feature_only.txt") == "stay alive\n");
-    assert(readFile(dir / "common.txt") == "stashed common update\n");
-    assert(readFile(dir / "added_in_stash.txt") == "stash new file\n");
+    CHECK(fs::exists(dir / "feature_only.txt"));
+    CHECK(readFile(dir / "feature_only.txt") == "stay alive\n");
+    CHECK(readFile(dir / "common.txt") == "stashed common update\n");
+    CHECK(readFile(dir / "added_in_stash.txt") == "stash new file\n");
 
     // Clean up working tree
     repo.discard("common.txt", true);
     repo.discard("added_in_stash.txt", true);
-    assert(repo.status().clean());
+    CHECK(repo.status().clean());
 
     // Test conflict detection before touching disk
     // 1. On main: save stash modifying conflict.txt
@@ -336,9 +346,9 @@ void test_fix9_stash_pop_different_branch_and_conflict() {
             popConflictDetected = true;
         }
     }
-    assert(popConflictDetected);
+    CHECK(popConflictDetected);
     // Disk must not be overwritten or touched
-    assert(readFile(dir / "conflict.txt") == "feature version of conflict\n");
+    CHECK(readFile(dir / "conflict.txt") == "feature version of conflict\n");
 
     removeDir(dir);
     std::cout << "PASSED\n";
@@ -366,11 +376,11 @@ void test_fix10_atomic_revert_initial_and_empty() {
             rootRevertRefused = true;
         }
     }
-    assert(rootRevertRefused);
+    CHECK(rootRevertRefused);
     // Files on disk and index must be completely untouched
-    assert(fs::exists(dir / "root.txt"));
-    assert(readFile(dir / "root.txt") == "root content\n");
-    assert(repo.status().clean());
+    CHECK(fs::exists(dir / "root.txt"));
+    CHECK(readFile(dir / "root.txt") == "root content\n");
+    CHECK(repo.status().clean());
 
     // Commit 2
     writeFile(dir / "c2.txt", "c2\n");
@@ -379,9 +389,9 @@ void test_fix10_atomic_revert_initial_and_empty() {
 
     // Revert commit 2 cleanly
     Hash revC2 = repo.revert(c2);
-    assert(!revC2.empty());
-    assert(!fs::exists(dir / "c2.txt"));
-    assert(repo.status().clean());
+    CHECK(!revC2.empty());
+    CHECK(!fs::exists(dir / "c2.txt"));
+    CHECK(repo.status().clean());
 
     // Attempting to revert commit 2 again must detect conflict/nothing to revert
     bool secondRevertRefused = false;
@@ -390,8 +400,8 @@ void test_fix10_atomic_revert_initial_and_empty() {
     } catch (const MiniGitException&) {
         secondRevertRefused = true;
     }
-    assert(secondRevertRefused);
-    assert(repo.status().clean());
+    CHECK(secondRevertRefused);
+    CHECK(repo.status().clean());
 
     removeDir(dir);
     std::cout << "PASSED\n";
@@ -412,7 +422,7 @@ void test_fix11_empty_tree_commit() {
     } catch (const NothingToCommitException&) {
         emptyStagingRefused = true;
     }
-    assert(emptyStagingRefused);
+    CHECK(emptyStagingRefused);
 
     // Commit a file
     writeFile(dir / "file.txt", "content\n");
@@ -422,13 +432,13 @@ void test_fix11_empty_tree_commit() {
     // Delete all tracked files
     fs::remove(dir / "file.txt");
     repo.add(".", true);
-    assert(repo.status().staged.size() == 1); // staged deletion
-    assert(repo.status().staged[0] == "file.txt (deleted)");
+    CHECK(repo.status().staged.size() == 1); // staged deletion
+    CHECK(repo.status().staged[0] == "file.txt (deleted)");
 
     // Commit empty index (all tracked files deleted) -> must SUCCEED!
     Hash emptyTreeCommit = repo.commit("delete all tracked files");
-    assert(!emptyTreeCommit.empty());
-    assert(repo.status().clean());
+    CHECK(!emptyTreeCommit.empty());
+    CHECK(repo.status().clean());
 
     // Now HEAD tree is empty; committing again with empty index must be rejected
     bool commitAgainRefused = false;
@@ -437,7 +447,7 @@ void test_fix11_empty_tree_commit() {
     } catch (const NothingToCommitException&) {
         commitAgainRefused = true;
     }
-    assert(commitAgainRefused);
+    CHECK(commitAgainRefused);
 
     removeDir(dir);
     std::cout << "PASSED\n";
@@ -468,15 +478,15 @@ void test_fix13_14_minigit_ignore_and_caching() {
 
     // Snapshot files check
     Snapshot snap = repo.snapshot();
-    assert(snap.files.count("minigit/real.txt"));
-    assert(snap.files.count("app.cpp"));
-    assert(snap.files.count("sub/minigit"));
-    assert(!snap.files.count("minigit.exe"));
+    CHECK(snap.files.count("minigit/real.txt"));
+    CHECK(snap.files.count("app.cpp"));
+    CHECK(snap.files.count("sub/minigit"));
+    CHECK(!snap.files.count("minigit.exe"));
 
     // Add and commit
     repo.add(".", true);
     Hash c = repo.commit("add minigit/real.txt and app.cpp");
-    assert(!c.empty());
+    CHECK(!c.empty());
 
     // Test root binary named 'minigit' in a separate repo without folder 'minigit'
     fs::path dir2 = fs::current_path() / "test_core_repo_13_file";
@@ -486,8 +496,8 @@ void test_fix13_14_minigit_ignore_and_caching() {
     writeFile(dir2 / "minigit", "binary at root\n");
     writeFile(dir2 / "normal.txt", "normal file\n");
     Snapshot snap2 = repo2.snapshot();
-    assert(snap2.files.count("normal.txt"));
-    assert(!snap2.files.count("minigit"));
+    CHECK(snap2.files.count("normal.txt"));
+    CHECK(!snap2.files.count("minigit"));
     removeDir(dir2);
 
     // .minigitignore caching test
@@ -497,8 +507,8 @@ void test_fix13_14_minigit_ignore_and_caching() {
     writeFile(dir / "build" / "temp.o", "object\n");
 
     Snapshot snapIgn = repo.snapshot();
-    assert(!snapIgn.files.count("test.log"));
-    assert(!snapIgn.files.count("build/temp.o"));
+    CHECK(!snapIgn.files.count("test.log"));
+    CHECK(!snapIgn.files.count("build/temp.o"));
 
     removeDir(dir);
     std::cout << "PASSED\n";
@@ -526,8 +536,8 @@ void test_fix15_export_to_git_no_nul_file() {
     };
 
     // Check before running export
-    assert(!hasNulEntry(dir));
-    assert(!hasNulEntry(fs::current_path()));
+    CHECK(!hasNulEntry(dir));
+    CHECK(!hasNulEntry(fs::current_path()));
 
     try {
         repo.exportToGit();
@@ -536,11 +546,11 @@ void test_fix15_export_to_git_no_nul_file() {
     }
 
     // Verify no file named 'nul' is created on disk
-    assert(!hasNulEntry(dir));
-    assert(!hasNulEntry(fs::current_path()));
+    CHECK(!hasNulEntry(dir));
+    CHECK(!hasNulEntry(fs::current_path()));
 #ifndef _WIN32
-    assert(!fs::exists("nul"));
-    assert(!fs::exists(dir / "nul"));
+    CHECK(!fs::exists("nul"));
+    CHECK(!fs::exists(dir / "nul"));
 #endif
 
     removeDir(dir);
@@ -564,11 +574,11 @@ void test_fix16_import_from_git_already_up_to_date() {
 
     // First import: snapshots current working tree
     std::string res1 = repo.importFromGit();
-    assert(res1.find("current working tree") != std::string::npos);
+    CHECK(res1.find("current working tree") != std::string::npos);
 
     // Second import without changes: returns "already up to date" instead of throwing
     std::string res2 = repo.importFromGit();
-    assert(res2.find("already up to date") != std::string::npos);
+    CHECK(res2.find("already up to date") != std::string::npos);
 
     removeDir(dir);
     std::cout << "PASSED\n";
@@ -594,15 +604,15 @@ void test_fix31_create_branch_at_commit() {
 
     // Create branch at specific commit (full hash)
     repo.createBranch("br_c1", c1);
-    assert(repo.branchTip("br_c1") == c1);
+    CHECK(repo.branchTip("br_c1") == c1);
 
     // Create branch using short prefix
     repo.createBranch("br_c2_short", Hash(c2.shortStr()));
-    assert(repo.branchTip("br_c2_short") == c2);
+    CHECK(repo.branchTip("br_c2_short") == c2);
 
     // Create branch with empty 'at' defaults to HEAD (c2)
     repo.createBranch("br_head");
-    assert(repo.branchTip("br_head") == c2);
+    CHECK(repo.branchTip("br_head") == c2);
 
     // Invalid non-existent commit throws InvalidObjectException
     bool invalidThrew = false;
@@ -611,7 +621,7 @@ void test_fix31_create_branch_at_commit() {
     } catch (const InvalidObjectException&) {
         invalidThrew = true;
     }
-    assert(invalidThrew);
+    CHECK(invalidThrew);
 
     // 'at' resolving to a Blob (not a commit) throws InvalidObjectException
     Hash blobHash = Blob("not a commit").hash();
@@ -621,7 +631,7 @@ void test_fix31_create_branch_at_commit() {
     } catch (const InvalidObjectException&) {
         blobThrew = true;
     }
-    assert(blobThrew);
+    CHECK(blobThrew);
 
     removeDir(dir);
     std::cout << "PASSED\n";

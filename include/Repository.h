@@ -58,6 +58,8 @@ struct Snapshot {
     bool merging{false};
     std::vector<std::string> conflicts;
     std::map<std::string, char> stagedStatus;
+    bool lan{false};
+    std::vector<std::string> binaryFiles;
 };
 
 // Backend facade. Composes ObjectStore + Index + RefManager; contains no I/O to cout/cin.
@@ -88,6 +90,7 @@ public:
     static void init(const fs::path& dir);
     static fs::path findRoot(fs::path start);
     const fs::path& root() const { return root_; }
+    void reload();
     std::string resolveRepoPath(const std::string& p, bool isRepoRelative = false) const;
 
     void add(const std::string& path, bool isRepoRelative = false);

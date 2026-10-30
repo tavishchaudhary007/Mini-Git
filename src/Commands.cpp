@@ -78,9 +78,8 @@ void LogCmd::execute(Repository* repo, const Args& args) {
                     } else {
                         size_t total = item.added + item.removed;
                         std::string bar;
-                        size_t barMax = 30;
-                        size_t plusCount = total > barMax ? (item.added * barMax / total) : item.added;
-                        size_t minusCount = total > barMax ? (item.removed * barMax / total) : item.removed;
+                        size_t plusCount = total > 0 ? (item.added * 20 / (stats.totalAdded + stats.totalRemoved + 1)) : 0;
+                        size_t minusCount = total > 0 ? (item.removed * 20 / (stats.totalAdded + stats.totalRemoved + 1)) : 0;
                         if (plusCount == 0 && item.added > 0) plusCount = 1;
                         if (minusCount == 0 && item.removed > 0) minusCount = 1;
                         bar.append(plusCount, '+');
@@ -105,7 +104,12 @@ void StatusCmd::execute(Repository* repo, const Args& args) {
     if (!args.empty()) usageError(*this);
     Status s = repo->status();
     std::string b = repo->currentBranch();
-    cout << "On branch " << (b.empty() ? "(detached)" : b) << "\n";
+    if (b.empty()) {
+        Hash h = repo->head();
+        cout << "HEAD detached at " << (h.empty() ? "" : h.shortStr()) << "\n";
+    } else {
+        cout << "On branch " << b << "\n";
+    }
     if (repo->isMerging()) {
         cout << "You are in the middle of a merge.\n";
         auto conflicts = repo->conflictedPaths();
@@ -139,13 +143,19 @@ void DiffCmd::execute(Repository* repo, const Args& args) {
 void BranchCmd::execute(Repository* repo, const Args& args) {
     if (args.empty()) {
         auto branchList = repo->branches();
+        std::string cur = repo->currentBranch();
+        if (cur.empty()) {
+            Hash h = repo->head();
+            cout << "* (HEAD detached at " << (h.empty() ? "" : h.shortStr()) << ")\n";
+            for (const auto& b : branchList) {
+                cout << "  " << b << "\n";
+            }
+            return;
+        }
         if (branchList.empty()) {
-            std::string cur = repo->currentBranch();
-            if (cur.empty()) cur = "main";
             cout << "* " << cur << "\n";
             return;
         }
-        std::string cur = repo->currentBranch();
         for (const auto& b : branchList) {
             if (b == cur) cout << "* " << b << "\n";
             else          cout << "  " << b << "\n";
@@ -194,11 +204,20 @@ void UndoCmd::execute(Repository* repo, const Args& args) {
 
 void RevertCmd::execute(Repository* repo, const Args& args) {
     if (args.size() != 1) usageError(*this);
+    Hash targetHash;
+    if (args[0] == "HEAD") {
+        targetHash = repo->head();
+        if (targetHash.empty()) throw MiniGitException("HEAD has no commits");
+    } else {
+        ObjectStore store(repo->root() / ".minigit" / "objects");
+        targetHash = store.resolvePrefix(args[0]);
+    }
     ObjectStore store(repo->root() / ".minigit" / "objects");
-    Hash targetHash = store.resolvePrefix(args[0]);
+    auto targetCommit = store.loadAs<Commit>(targetHash);
+    std::string commitMsg = targetCommit ? targetCommit->message() : targetHash.shortStr();
     Hash h = repo->revert(targetHash);
     std::string b = repo->currentBranch();
-    cout << "[" << (b.empty() ? "detached" : b) << " " << h.shortStr() << "] Revert \"" << targetHash.shortStr() << "\"\n";
+    cout << "[" << (b.empty() ? "detached" : b) << " " << h.shortStr() << "] Revert \"" << commitMsg << "\"\n";
 }
 
 void StashCmd::execute(Repository* repo, const Args& args) {
@@ -266,7 +285,7 @@ void HtmlCmd::execute(Repository* repo, const Args& args) {
     }
     // Written inside .minigit/ so the report never shows up as an untracked file.
     fs::path out = repo->root() / ".minigit" / "report.html";
-    writeFile(out, HtmlExporter::render(repo->snapshot(), repo->root().filename().string()));
+    writeFile(out, HtmlExporter::render(repo->snapshot(), repo->root().filename().string(), true));
     cout << "Report written to " << out.generic_string() << "\n";
     if (open) {
         if (openInBrowser(out)) cout << "Opened in your default browser.\n";

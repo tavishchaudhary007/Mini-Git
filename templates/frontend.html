@@ -1059,9 +1059,19 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
          * MINIGIT ENGINE & DATA STRUCTURES
          * --------------------------------------------------------------------- */
         let IS_SERVER_MODE = window.location.protocol.startsWith('http');
-        let IS_STATIC_EXPORT = (window.location.protocol === 'file:') || (window.MINIGIT_LIVE && window.MINIGIT_LIVE.__staticExport);
+        let IS_STATIC_EXPORT = (window.location.protocol === 'file:') || (window.MINIGIT_LIVE && window.MINIGIT_LIVE.__staticExport) || (!!window.__staticExport);
         let LATEST_SNAPSHOT_ETAG = null;
-        let IS_LAN_MODE = false;
+        let IS_LAN_MODE = !!(window.MINIGIT_LIVE && window.MINIGIT_LIVE.lan);
+        let _lanPollTimer = null;
+        function updateLanMode(lan) {
+            IS_LAN_MODE = !!lan;
+            if (IS_LAN_MODE && !_lanPollTimer && IS_SERVER_MODE) {
+                _lanPollTimer = setInterval(pollPendingPairRequests, 2000);
+            } else if (!IS_LAN_MODE && _lanPollTimer) {
+                clearInterval(_lanPollTimer);
+                _lanPollTimer = null;
+            }
+        }
         let SERVER_REFLOG_COUNT = 0;
         const DIRTY_BUFFERS = {};
 
@@ -1186,23 +1196,23 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                     body: JSON.stringify(payload || {})
                 });
                 const data = await res.json();
-                if (!data.ok) {
-                    const peerRefs = data.peerRefs || (data.result && data.result.peerRefs);
-                    if (peerRefs && peerRefs.length > 0) {
-                        const peerBranch = peerRefs[0];
-                        showToast(data.error || data.message || `Diverged: peer tip saved as ${peerBranch}`, 'warning', {
-                            label: `Merge ${peerBranch}`,
-                            onClick: async () => {
-                                showToast(`Merging ${peerBranch}...`);
-                                const mRes = await apiPost('merge', { branch: peerBranch });
-                                if (mRes && mRes.ok) {
-                                    showToast(mRes.result || `Merged ${peerBranch} successfully!`);
-                                }
+                const peerRefs = data.peerRefs || (data.result && data.result.peerRefs);
+                if (peerRefs && peerRefs.length > 0) {
+                    const peerBranch = peerRefs[0];
+                    showToast(data.message || data.error || `Peer tip saved as ${peerBranch}`, 'info', {
+                        label: `Merge ${peerBranch}`,
+                        onClick: async () => {
+                            showToast(`Merging ${peerBranch}...`);
+                            const mRes = await apiPost('merge', { branch: peerBranch });
+                            if (mRes && mRes.ok) {
+                                showToast(mRes.result || `Merged ${peerBranch} successfully!`);
                             }
-                        });
-                    } else {
-                        showToast(data.error || "Operation failed", 'error');
-                    }
+                        }
+                    });
+                } else if (!data.ok) {
+                    showToast(data.error || "Operation failed", 'error');
+                }
+                if (!data.ok) {
                     if (data.snapshot) {
                         window.MINIGIT_LIVE = data.snapshot;
                         loadLiveRepo();
@@ -1383,7 +1393,13 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         }
 
         function getHeadBlobText(filepath) {
-            const headCommitHash = BRANCHES[CURRENT_BRANCH];
+            let headCommitHash = BRANCHES[CURRENT_BRANCH];
+            if (!headCommitHash && (window.MINIGIT_LIVE?.detached || CURRENT_BRANCH === "")) {
+                headCommitHash = window.MINIGIT_LIVE?.head;
+            }
+            if (!headCommitHash && window.MINIGIT_LIVE?.head) {
+                headCommitHash = window.MINIGIT_LIVE.head;
+            }
             if (!headCommitHash || !OBJECTS[headCommitHash]) return "";
             const treeHash = OBJECTS[headCommitHash].data?.tree;
             if (!treeHash || !OBJECTS[treeHash]) return "";
@@ -1557,12 +1573,13 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         }
 
         function recordDemoReflog(action, oldHash, newHash, description) {
+            const fallbackOld = (CURRENT_BRANCH && BRANCHES[CURRENT_BRANCH]) ? BRANCHES[CURRENT_BRANCH] : (DEMO_REFLOG[0]?.newHash || "0000000");
             DEMO_REFLOG.unshift({
                 timestamp: new Date().toISOString(),
-                action,
-                oldHash: oldHash || "0000000",
-                newHash: newHash || "0000000",
-                description
+                action: action || "action",
+                oldHash: (oldHash && oldHash !== "undefined") ? oldHash : fallbackOld,
+                newHash: (newHash && newHash !== "undefined") ? newHash : "0000000",
+                description: description || ""
             });
         }
 
@@ -1615,23 +1632,20 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
 
         function isFileDeleted(filepath) {
             if (!filepath) return false;
-            return !!(window.MINIGIT_LIVE?.status?.deleted && window.MINIGIT_LIVE.status.deleted.includes(filepath));
+            if (window.MINIGIT_LIVE?.status?.deleted && window.MINIGIT_LIVE.status.deleted.includes(filepath)) return true;
+            if (window.MINIGIT_LIVE?.stagedDeleted && window.MINIGIT_LIVE.stagedDeleted.includes(filepath)) return true;
+            if (window.MINIGIT_LIVE?.stagedStatus && window.MINIGIT_LIVE.stagedStatus[filepath] === 'D') return true;
+            if (window.MINIGIT_LIVE?.status?.staged && window.MINIGIT_LIVE.status.staged.some(x => x.replace(' (deleted)', '') === filepath && x.includes('(deleted)'))) return true;
+            return false;
         }
 
         function isBinaryFile(filepath) {
             if (!filepath) return false;
+            if (isFileDeleted(filepath)) return false; // Staged or working deletions are never binary
+            if (window.MINIGIT_LIVE?.binaryFiles && window.MINIGIT_LIVE.binaryFiles.includes(filepath)) return true;
             const content = VFS[filepath];
             if (content === '[binary file]') return true;
             if (typeof content === 'string' && content.includes('\0')) return true;
-            const inFiles = window.MINIGIT_LIVE?.files && (filepath in window.MINIGIT_LIVE.files);
-            const inDeleted = isFileDeleted(filepath);
-            if (!inFiles && !inDeleted && window.MINIGIT_LIVE?.status) {
-                const s = window.MINIGIT_LIVE.status;
-                const inStatus = (s.modified && s.modified.includes(filepath)) ||
-                                 (s.staged && s.staged.some(x => x.replace(' (deleted)', '') === filepath)) ||
-                                 (s.untracked && s.untracked.includes(filepath));
-                if (inStatus) return true;
-            }
             const ext = filepath.split('.').pop().toLowerCase();
             const binExts = ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'pdf', 'zip', 'tar', 'gz', 'exe', 'bin', 'o', 'obj', 'so', 'dylib', 'dll'];
             if (binExts.includes(ext) && (content === undefined || content === '')) return true;
@@ -1740,6 +1754,10 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         }
 
         async function abortMerge() {
+            if (!IS_SERVER_MODE) {
+                showToast("Abort merge is only available in server mode", "warning");
+                return;
+            }
             if (IS_SERVER_MODE) {
                 const res = await apiPost('merge', { abort: true });
                 if (res && res.ok) {
@@ -1754,6 +1772,9 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         function loadLiveRepo() {
             if (!window.MINIGIT_LIVE) return;
             const live = window.MINIGIT_LIVE;
+            if (live.lan !== undefined) {
+                updateLanMode(live.lan);
+            }
             const serverFiles = live.files || {};
 
             // Preserve dirty buffers
@@ -1838,7 +1859,35 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             switchViewTab('editor');
             renderFileTree();
             renderSourceControlLists();
+            if (!IS_SERVER_MODE) {
+                const btnLanPull = document.getElementById('btnLanPull');
+                if (btnLanPull) {
+                    btnLanPull.disabled = true;
+                    btnLanPull.title = "LAN pull is only available in server mode";
+                    btnLanPull.classList.add('opacity-50', 'cursor-not-allowed');
+                }
+                const btnAbort = document.querySelector('#mergeConflictBanner button');
+                if (btnAbort) {
+                    btnAbort.disabled = true;
+                    btnAbort.title = "Abort merge is only available in server mode";
+                    btnAbort.classList.add('opacity-50', 'cursor-not-allowed');
+                }
+                const btnConfirmMerge = document.querySelector('#mergeModal button[onclick="submitMergeModal()"]');
+                if (btnConfirmMerge) {
+                    btnConfirmMerge.disabled = true;
+                    btnConfirmMerge.title = "Merge is only available in server mode";
+                    btnConfirmMerge.classList.add('opacity-50', 'cursor-not-allowed');
+                }
+            }
             populateDiffFileSelect(filepath);
+        }
+
+        let _scDebounceTimer = null;
+        function debouncedRenderSourceControlLists() {
+            if (_scDebounceTimer) clearTimeout(_scDebounceTimer);
+            _scDebounceTimer = setTimeout(() => {
+                renderSourceControlLists();
+            }, 100);
         }
 
         function markFileAsModified() {
@@ -1901,7 +1950,30 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             const cleanPath = path.trim().replace(/^\/+/, '');
             if (!cleanPath) return;
 
-            if (VFS[cleanPath] !== undefined || (window.MINIGIT_LIVE?.files && window.MINIGIT_LIVE.files[cleanPath] !== undefined)) {
+            // Reject control characters and illegal characters (\ : * ? " < > |)
+            for (let i = 0; i < cleanPath.length; i++) {
+                const code = cleanPath.charCodeAt(i);
+                const ch = cleanPath[i];
+                if (code < 32 || code === 127 || ['\\', ':', '*', '?', '"', '<', '>', '|'].includes(ch)) {
+                    showToast("Invalid path: contains illegal character", 'error');
+                    return;
+                }
+            }
+
+            // Check VFS, live files, live binaryFiles, status deleted, and other status entries
+            if (isFileDeleted(cleanPath)) {
+                showToast(`File '${cleanPath}' is deleted; restore it instead`, 'error');
+                return;
+            }
+            if (window.MINIGIT_LIVE?.binaryFiles && window.MINIGIT_LIVE.binaryFiles.includes(cleanPath)) {
+                showToast(`File '${cleanPath}' already exists as a binary file`, 'error');
+                return;
+            }
+            if (VFS[cleanPath] !== undefined ||
+                (window.MINIGIT_LIVE?.files && window.MINIGIT_LIVE.files[cleanPath] !== undefined) ||
+                (window.MINIGIT_LIVE?.status?.modified && window.MINIGIT_LIVE.status.modified.includes(cleanPath)) ||
+                (window.MINIGIT_LIVE?.status?.staged && window.MINIGIT_LIVE.status.staged.some(x => x.replace(' (deleted)', '') === cleanPath)) ||
+                (window.MINIGIT_LIVE?.status?.untracked && window.MINIGIT_LIVE.status.untracked.includes(cleanPath))) {
                 showToast(`File '${cleanPath}' already exists`, 'error');
                 return;
             }
@@ -1956,14 +2028,38 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         /* ---------------------------------------------------------------------
          * GIT STAGING & COMMIT OPERATIONS
          * --------------------------------------------------------------------- */
+        async function saveFileBuffer(filepath) {
+            if (DIRTY_BUFFERS[filepath] === undefined) return true;
+            const content = DIRTY_BUFFERS[filepath];
+            if (IS_SERVER_MODE) {
+                const res = await apiPost('file/save', { path: filepath, content });
+                if (res && res.ok) {
+                    delete DIRTY_BUFFERS[filepath];
+                    VFS[filepath] = content;
+                    if (ACTIVE_FILE === filepath) syncEditorWithActiveFile();
+                    return true;
+                }
+                return false;
+            } else {
+                delete DIRTY_BUFFERS[filepath];
+                VFS[filepath] = content;
+                if (ACTIVE_FILE === filepath) syncEditorWithActiveFile();
+                return true;
+            }
+        }
+
         async function stageFile(filepath) {
             if (IS_STATIC_EXPORT || window.location.protocol === 'file:') {
                 showToast("Static export is read-only", "warning");
                 return;
             }
-            if (hasUnsavedEdits(filepath)) {
-                if (!confirm(`File '${filepath}' has unsaved edits in editor. Save before staging?`)) return;
-                await saveActiveFileFromEditor();
+            if (DIRTY_BUFFERS[filepath] !== undefined) {
+                if (!confirm(`File '${filepath}' has unsaved edits. Save before staging?`)) return;
+                const saved = await saveFileBuffer(filepath);
+                if (!saved) {
+                    showToast(`Failed to save '${filepath}'. Staging aborted.`, "error");
+                    return;
+                }
             }
             if (IS_SERVER_MODE) {
                 const res = await apiPost('stage', { path: filepath });
@@ -2131,7 +2227,15 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 if (VFS[f] === undefined) delete combinedTree[f];
             }
             for (const [filepath, blobHash] of Object.entries(STAGING_INDEX)) {
-                combinedTree[filepath] = blobHash;
+                if (blobHash === null || blobHash === undefined) {
+                    delete combinedTree[filepath];
+                } else {
+                    combinedTree[filepath] = blobHash;
+                }
+            }
+            // Ensure no null or empty entries in combinedTree
+            for (const [fp, bh] of Object.entries(combinedTree)) {
+                if (!bh) delete combinedTree[fp];
             }
 
             const treeContent = JSON.stringify(combinedTree);
@@ -2782,8 +2886,9 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 for (const [fp, bHash] of Object.entries(treeObj.data)) {
                     if (OBJECTS[bHash]) VFS[fp] = getBlobText(bHash);
                 }
+                const oldHash = (CURRENT_BRANCH && BRANCHES[CURRENT_BRANCH]) ? BRANCHES[CURRENT_BRANCH] : (DEMO_REFLOG[0]?.newHash || "0000000");
                 CURRENT_BRANCH = "";
-                recordDemoReflog("restore", BRANCHES[CURRENT_BRANCH], c.hash, `Checked out commit ${short} (detached HEAD)`);
+                recordDemoReflog("restore", oldHash, c.hash, `Checked out commit ${short} (detached HEAD)`);
                 showToast(`Checked out commit [${short}] (detached HEAD)`);
                 updateUI();
             }
@@ -2793,7 +2898,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             const c = TIME_TRAVEL_COMMITS[TIME_TRAVEL_INDEX];
             if (!c) return;
             SELECTED_COMMIT_HASH = c.hash;
-            openNewBranchModal();
+            openNewBranchModal(c.hash);
         }
 
         async function actionTimeTravelCheckout() {
@@ -2865,10 +2970,18 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         async function generateNewPairCode() {
             if (!IS_SERVER_MODE) return;
             try {
-                const res = await fetch('/api/pair/generate-code', { method: 'POST' });
-                if (res.ok) {
+                const res = await fetch('/api/pair/generate-code', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: '{}'
+                });
+                const data = await res.json().catch(() => null);
+                if (res.ok && data && data.ok) {
                     showToast("Generated new 6-digit pair code");
                     await openLanSyncModal();
+                } else {
+                    const err = (data && data.error) ? data.error : ("Failed to generate code (HTTP " + res.status + ")");
+                    showToast(err, "error");
                 }
             } catch (e) {
                 showToast("Failed to generate code: " + e.message, "error");
@@ -3111,7 +3224,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                                     statusBadge.className = "px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800 text-[10px] font-bold";
                                 }
                                 if (hintText) {
-                                    hintText.innerHTML = `<i class="fa-solid fa-circle-info text-[10px] mr-1"></i>LAN active! Share your LAN URL (${data.lanUrl || 'see terminal'}) and 6-digit code with peers.`;
+                                    hintText.innerHTML = '<i class="fa-solid fa-circle-info text-[10px] mr-1"></i>LAN active! Share your LAN URL (' + escapeHtml(data.lanUrl || 'see terminal') + ') and 6-digit code with peers.';
                                 }
 
                                 if (LOCAL_PAIR_TIMER) clearInterval(LOCAL_PAIR_TIMER);
@@ -3197,6 +3310,10 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         let IS_SYNCING_LAN = false;
 
         async function executeLanPull() {
+            if (!IS_SERVER_MODE) {
+                showToast("LAN pull is only available in server mode", "warning");
+                return;
+            }
             if (IS_SYNCING_LAN) return;
             const input = document.getElementById('lanPeerUrlInput');
             let peerUrl = cleanPeerUrl(input ? input.value : '');
@@ -3936,6 +4053,10 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         }
 
         async function mergeBranchUI(targetBranch) {
+            if (!IS_SERVER_MODE) {
+                showToast("Merge is only available in server mode", "warning");
+                return;
+            }
             if (IS_SERVER_MODE) {
                 const res = await apiPost('merge', { branch: targetBranch });
                 if (res && res.ok) {
@@ -3952,11 +4073,22 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
         async function switchBranchUI(targetBranch) {
             if (!targetBranch || targetBranch === CURRENT_BRANCH) return;
 
-            // Item 27: Warn before switch while edits are unsaved
+            // Item N9: On branch switch, ask to save or discard dirty buffers. Never carry them over.
             if (hasUnsavedEdits()) {
-                if (!confirm("You have unsaved changes in the editor. Switch branch and keep changes in memory?")) {
-                    updateBranchDropdown();
-                    return;
+                const doSave = confirm("You have unsaved changes. Click OK to save them before switching, or Cancel to discard them.");
+                if (doSave) {
+                    for (const fp of Object.keys(DIRTY_BUFFERS)) {
+                        const ok = await saveFileBuffer(fp);
+                        if (!ok) {
+                            showToast(`Failed to save '${fp}'. Branch switch aborted.`, "error");
+                            updateBranchDropdown();
+                            return;
+                        }
+                    }
+                } else {
+                    for (const fp of Object.keys(DIRTY_BUFFERS)) {
+                        delete DIRTY_BUFFERS[fp];
+                    }
                 }
             }
 
@@ -4128,8 +4260,9 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                     await refreshRepositorySnapshot(true);
                 }
             } else {
+                const oldHash = (CURRENT_BRANCH && BRANCHES[CURRENT_BRANCH]) ? BRANCHES[CURRENT_BRANCH] : (DEMO_REFLOG[0]?.newHash || "0000000");
                 CURRENT_BRANCH = "";
-                recordDemoReflog("checkout", BRANCHES[CURRENT_BRANCH], hashToCheckout, `Detached HEAD at ${hashToCheckout.substring(0, 7)}`);
+                recordDemoReflog("checkout", oldHash, hashToCheckout, `Detached HEAD at ${hashToCheckout.substring(0, 7)}`);
                 showToast(`Checked out [${hashToCheckout.substring(0, 7)}] (detached HEAD)`);
                 updateUI();
             }
@@ -4459,7 +4592,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 for (const [filepath, blobHash] of Object.entries(STAGING_INDEX)) {
                     stagedCount++;
                     const isSelected = (filepath === ACTIVE_FILE);
-                    const isDeleted = (blobHash === null || !VFS[filepath]);
+                    const isDeleted = (blobHash === null || VFS[filepath] === undefined);
                     const item = document.createElement('div');
                     item.className = `flex items-center justify-between p-2.5 ${isSelected ? 'bg-zinc-200 dark:bg-zinc-800 ring-1 ring-black dark:ring-white' : 'bg-zinc-50 dark:bg-zinc-900'} border border-theme-border rounded-2xl text-xs transition`;
 
@@ -4608,10 +4741,22 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             if (!select) return;
             const target = preferredFile || ACTIVE_FILE || select.value;
             select.innerHTML = '';
-            for (const fp of Object.keys(VFS).sort()) {
+            const allFiles = new Set(Object.keys(VFS));
+            if (window.MINIGIT_LIVE?.status?.deleted) {
+                for (const d of window.MINIGIT_LIVE.status.deleted) allFiles.add(d);
+            }
+            if (window.MINIGIT_LIVE?.stagedDeleted) {
+                for (const d of window.MINIGIT_LIVE.stagedDeleted) allFiles.add(d);
+            }
+            if (window.MINIGIT_LIVE?.status?.staged) {
+                for (const s of window.MINIGIT_LIVE.status.staged) {
+                    allFiles.add(s.replace(' (deleted)', ''));
+                }
+            }
+            for (const fp of Array.from(allFiles).sort()) {
                 const opt = document.createElement('option');
                 opt.value = fp;
-                opt.textContent = fp;
+                opt.textContent = isFileDeleted(fp) ? `${fp} (deleted)` : fp;
                 if (fp === target) opt.selected = true;
                 select.appendChild(opt);
             }
@@ -4619,18 +4764,8 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
 
         function onDiffFileSelectChange(filepath) {
             if (!filepath) return;
-            // Item 26: Diff view file picker sets ACTIVE_FILE without reloading editor,
-            // so Ctrl+S writes file A's text into B. Keep editor and diff view in sync.
-            if (ACTIVE_FILE && ACTIVE_FILE !== filepath) {
-                const editorArea = document.getElementById('fileEditorTextarea');
-                if (editorArea && !editorArea.readOnly) {
-                    if (DIRTY_BUFFERS[ACTIVE_FILE] !== undefined) {
-                        DIRTY_BUFFERS[ACTIVE_FILE] = editorArea.value;
-                    }
-                }
-            }
             ACTIVE_FILE = filepath;
-            syncEditorWithActiveFile(filepath);
+            syncEditorWithActiveFile();
             populateDiffFileSelect(filepath);
             renderDiffView();
         }
@@ -5359,6 +5494,15 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
 
             const activeClass = "px-4 py-2 rounded-full font-semibold bg-black dark:bg-white text-white dark:text-black shadow-sm transition flex items-center space-x-2 cursor-pointer";
 
+            if (view !== 'timeline' && TIME_TRAVEL_PLAY_TIMER) {
+                clearInterval(TIME_TRAVEL_PLAY_TIMER);
+                TIME_TRAVEL_PLAY_TIMER = null;
+                const label = document.getElementById('timeTravelPlayLabel');
+                const icon = document.getElementById('timeTravelPlayIcon');
+                if (label) label.textContent = "Play";
+                if (icon) icon.className = "fa-solid fa-play text-[10px]";
+            }
+
             if (view === 'dashboard') {
                 dashboardView?.classList.remove('hidden');
                 if (tabDashboard) tabDashboard.className = activeClass;
@@ -5419,7 +5563,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             initTheme();
 
             // Item 37: Detect server mode with a GET /api/snapshot probe, and in file:// export mode be read-only
-            if (window.location.protocol === 'file:') {
+            if (window.location.protocol === 'file:' || window.__staticExport || (window.MINIGIT_LIVE && window.MINIGIT_LIVE.__staticExport)) {
                 IS_SERVER_MODE = false;
                 IS_STATIC_EXPORT = true;
             } else if (window.location.protocol.startsWith('http')) {

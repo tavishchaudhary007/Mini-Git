@@ -48,6 +48,9 @@ std::string HtmlExporter::computeVersion(const Snapshot& snap) {
     for (const auto& [p, content] : snap.files) {
         ss << "f:" << p << "=" << content << "\n";
     }
+    for (const auto& bf : snap.binaryFiles) {
+        ss << "bf:" << bf << "\n";
+    }
     return Hasher::sha1(ss.str());
 }
 
@@ -85,6 +88,15 @@ std::string HtmlExporter::toJson(const Snapshot& snap, const std::string& repoNa
         o << ":\"" << st << "\"";
     }
     o << "},\"version\":"; jsonString(o, version);
+    o << ",\"lan\":" << (snap.lan ? "true" : "false");
+    o << ",\"binaryFiles\":[";
+    bool firstBin = true;
+    for (const auto& bf : snap.binaryFiles) {
+        if (!firstBin) o << ',';
+        firstBin = false;
+        jsonString(o, bf);
+    }
+    o << "]";
 
     o << ",\"branches\":{";
     bool first = true;
@@ -204,8 +216,15 @@ std::string HtmlExporter::toJson(const Snapshot& snap, const std::string& repoNa
     return o.str();
 }
 
-std::string HtmlExporter::render(const Snapshot& snap, const std::string& repoName) {
+std::string HtmlExporter::render(const Snapshot& snap, const std::string& repoName, bool isStaticExport) {
     std::string html = kFrontendTemplate;
+    if (isStaticExport) {
+        const std::string scriptTag = "<script>";
+        size_t sPos = html.find(scriptTag);
+        if (sPos != std::string::npos) {
+            html.insert(sPos + scriptTag.size(), "\nwindow.__staticExport = true;\n");
+        }
+    }
     const std::string marker = "/*__MINIGIT_DATA__*/null";
     size_t pos = html.find(marker);
     if (pos == std::string::npos) throw MiniGitException("frontend template is missing its data placeholder");

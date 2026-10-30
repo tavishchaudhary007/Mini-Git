@@ -1,5 +1,14 @@
 #include <iostream>
-#include <cassert>
+#include <cstdlib>
+
+#ifndef CHECK
+#define CHECK(cond) do { \
+    if (!(cond)) { \
+        std::cerr << "Check failed: (" #cond ") at " << __FILE__ << ":" << __LINE__ << std::endl; \
+        std::exit(1); \
+    } \
+} while (0)
+#endif
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -125,7 +134,7 @@ void test12_log_readable_time() {
         output = capture.str();
     }
 
-    assert(output.find("Date:   ") != std::string::npos);
+    CHECK(output.find("Date:   ") != std::string::npos);
     size_t datePos = output.find("Date:   ") + 8;
     std::string dateLine = output.substr(datePos, output.find('\n', datePos) - datePos);
 
@@ -133,8 +142,8 @@ void test12_log_readable_time() {
     for (char c : dateLine) {
         if (std::isalpha(static_cast<unsigned char>(c))) hasNonDigit = true;
     }
-    assert(hasNonDigit);
-    assert(dateLine.find('+') != std::string::npos || dateLine.find('-') != std::string::npos);
+    CHECK(hasNonDigit);
+    CHECK(dateLine.find('+') != std::string::npos || dateLine.find('-') != std::string::npos);
 
     removeDir(dir);
     std::cout << "PASSED" << std::endl;
@@ -159,9 +168,9 @@ void test17_port_validation() {
             uiCmd.execute(&repo, {"--port", p, "--no-open"});
         } catch (const MiniGitException& e) {
             threw = true;
-            assert(std::string(e.what()).find("usage:") != std::string::npos);
+            CHECK(std::string(e.what()).find("usage:") != std::string::npos);
         }
-        assert(threw);
+        CHECK(threw);
     };
 
     testInvalidPort("abc");
@@ -176,18 +185,18 @@ void test17_port_validation() {
         uiCmd.execute(&repo, {"--port"});
     } catch (const MiniGitException& e) {
         threwMissing = true;
-        assert(std::string(e.what()).find("usage:") != std::string::npos);
+        CHECK(std::string(e.what()).find("usage:") != std::string::npos);
     }
-    assert(threwMissing);
+    CHECK(threwMissing);
 
     bool threwServe = false;
     try {
         serveCmd.execute(&repo, {"--port", "invalid"});
     } catch (const MiniGitException& e) {
         threwServe = true;
-        assert(std::string(e.what()).find("usage:") != std::string::npos);
+        CHECK(std::string(e.what()).find("usage:") != std::string::npos);
     }
-    assert(threwServe);
+    CHECK(threwServe);
 
     removeDir(dir);
     std::cout << "PASSED" << std::endl;
@@ -208,7 +217,7 @@ void test18_empty_repo_branch_and_checkout() {
         BranchCmd branchCmd;
         branchCmd.execute(&repo, {});
         std::string out = capture.str();
-        assert(out == "* main\n");
+        CHECK(out == "* main\n");
     }
 
     {
@@ -216,7 +225,7 @@ void test18_empty_repo_branch_and_checkout() {
         CheckoutCmd checkoutCmd;
         checkoutCmd.execute(&repo, {"main"});
         std::string out = capture.str();
-        assert(out.find("branch 'main' has no commits yet") != std::string::npos);
+        CHECK(out.find("branch 'main' has no commits yet") != std::string::npos);
     }
 
     removeDir(dir);
@@ -254,8 +263,8 @@ void test8_status_merging() {
     } catch (const MergeException&) {
         threwMerge = true;
     }
-    assert(threwMerge);
-    assert(repo.isMerging());
+    CHECK(threwMerge);
+    CHECK(repo.isMerging());
 
     std::string out;
     {
@@ -265,12 +274,12 @@ void test8_status_merging() {
         out = capture.str();
     }
 
-    assert(out.find("You are in the middle of a merge.") != std::string::npos);
-    assert(out.find("Unmerged paths:") != std::string::npos);
-    assert(out.find("f.txt") != std::string::npos);
+    CHECK(out.find("You are in the middle of a merge.") != std::string::npos);
+    CHECK(out.find("Unmerged paths:") != std::string::npos);
+    CHECK(out.find("f.txt") != std::string::npos);
 
     repo.mergeAbort();
-    assert(!repo.isMerging());
+    CHECK(!repo.isMerging());
 
     removeDir(dir);
     std::cout << "PASSED" << std::endl;
@@ -291,16 +300,16 @@ void test21_snapshot_json_contract() {
         std::string jsonStr = HtmlExporter::toJson(s, "test_repo");
         std::string err;
         JsonValue j = JsonValue::parse(jsonStr, &err);
-        assert(err.empty());
-        assert(j.is_object());
+        CHECK(err.empty());
+        CHECK(j.is_object());
 
-        assert(j["head"].is_null());
-        assert(j["detached"].as_bool() == false);
-        assert(j["merging"].as_bool() == false);
-        assert(j["conflicts"].is_array() && j["conflicts"].as_array().empty());
-        assert(j["stagedStatus"].is_object());
-        assert(j["version"].is_string() && !j["version"].as_string().empty());
-        assert(j["currentBranch"].as_string() == "main");
+        CHECK(j["head"].is_null());
+        CHECK(j["detached"].as_bool() == false);
+        CHECK(j["merging"].as_bool() == false);
+        CHECK(j["conflicts"].is_array() && j["conflicts"].as_array().empty());
+        CHECK(j["stagedStatus"].is_object());
+        CHECK(j["version"].is_string() && !j["version"].as_string().empty());
+        CHECK(j["currentBranch"].as_string() == "main");
     }
 
     writeFile(dir / "file1.txt", "content1");
@@ -313,27 +322,28 @@ void test21_snapshot_json_contract() {
         Snapshot s = repo.snapshot();
         std::string jsonStr = HtmlExporter::toJson(s, "test_repo");
         JsonValue j = JsonValue::parse(jsonStr);
-        assert(j["head"].as_string() == h1.str());
-        assert(j["stagedStatus"].is_object());
-        assert(j["stagedStatus"]["file2.txt"].as_string() == "A");
+        CHECK(j["head"].as_string() == h1.str());
+        CHECK(j["stagedStatus"].is_object());
+        CHECK(j["stagedStatus"]["file2.txt"].as_string() == "A");
     }
     Hash h2 = repo.commit("c2");
 
     repo.checkout(h1.str());
     {
         Snapshot s = repo.snapshot();
-        assert(s.detached);
-        assert(s.currentBranch.empty());
+        CHECK(s.detached);
+        CHECK(s.currentBranch.empty());
 
         std::string jsonStr = HtmlExporter::toJson(s, "test_repo");
         JsonValue j = JsonValue::parse(jsonStr);
 
-        assert(j["detached"].as_bool() == true);
-        assert(j["currentBranch"].as_string() == "");
+        CHECK(j["detached"].as_bool() == true);
+        CHECK(j["currentBranch"].as_string() == "");
 
         const auto& branchesObj = j["branches"].as_object();
         for (const auto& [name, tip] : branchesObj) {
-            assert(name.find("(detached") == std::string::npos);
+            (void)tip;
+            CHECK(name.find("(detached") == std::string::npos);
         }
     }
 
@@ -341,11 +351,11 @@ void test21_snapshot_json_contract() {
     std::string vA = HtmlExporter::computeVersion(repo.snapshot());
     writeFile(dir / "file1.txt", "modified content");
     std::string vB = HtmlExporter::computeVersion(repo.snapshot());
-    assert(vA != vB);
+    CHECK(vA != vB);
 
     repo.add("file1.txt", true);
     std::string vC = HtmlExporter::computeVersion(repo.snapshot());
-    assert(vB != vC);
+    CHECK(vB != vC);
 
     removeDir(dir);
     std::cout << "PASSED" << std::endl;
@@ -366,26 +376,26 @@ void test22_new_cli_commands() {
     repo.commit("initial");
 
     repo.createBranch("feat");
-    assert(repo.branchExists("feat"));
+    CHECK(repo.branchExists("feat"));
     {
         CoutCapture cap;
         BranchCmd cmd;
         cmd.execute(&repo, {"-d", "feat"});
-        assert(cap.str().find("Deleted branch feat") != std::string::npos);
-        assert(!repo.branchExists("feat"));
+        CHECK(cap.str().find("Deleted branch feat") != std::string::npos);
+        CHECK(!repo.branchExists("feat"));
     }
 
     writeFile(dir / "f.txt", "v2");
     repo.add("f.txt", true);
     Hash h2 = repo.commit("commit 2");
-    assert(repo.head() == h2);
+    CHECK(repo.head() == h2);
     {
         CoutCapture cap;
         UndoCmd cmd;
         cmd.execute(&repo, {});
-        assert(cap.str().find("Undid commit") != std::string::npos);
-        assert(repo.head() != h2);
-        assert(readFile(dir / "f.txt") == "v2");
+        CHECK(cap.str().find("Undid commit") != std::string::npos);
+        CHECK(repo.head() != h2);
+        CHECK(readFile(dir / "f.txt") == "v2");
     }
 
     repo.add("f.txt", true);
@@ -394,8 +404,8 @@ void test22_new_cli_commands() {
         CoutCapture cap;
         RevertCmd cmd;
         cmd.execute(&repo, {hRecommit.shortStr()});
-        assert(cap.str().find("Revert") != std::string::npos);
-        assert(readFile(dir / "f.txt") == "v1");
+        CHECK(cap.str().find("Revert") != std::string::npos);
+        CHECK(readFile(dir / "f.txt") == "v1");
     }
 
     writeFile(dir / "f.txt", "stash-modification");
@@ -404,24 +414,24 @@ void test22_new_cli_commands() {
         CoutCapture capSave;
         StashCmd cmd;
         cmd.execute(&repo, {"save", "-u", "-m", "my-stash"});
-        assert(capSave.str().find("Saved stash") != std::string::npos);
-        assert(readFile(dir / "f.txt") == "v1");
-        assert(!fs::exists(dir / "untracked.txt"));
+        CHECK(capSave.str().find("Saved stash") != std::string::npos);
+        CHECK(readFile(dir / "f.txt") == "v1");
+        CHECK(!fs::exists(dir / "untracked.txt"));
     }
     {
         CoutCapture capList;
         StashCmd cmd;
         cmd.execute(&repo, {"list"});
-        assert(capList.str().find("stash@{0}: my-stash") != std::string::npos);
+        CHECK(capList.str().find("stash@{0}: my-stash") != std::string::npos);
     }
     {
         CoutCapture capPop;
         StashCmd cmd;
         cmd.execute(&repo, {"pop"});
-        assert(capPop.str().find("Restored and applied stash") != std::string::npos);
-        assert(readFile(dir / "f.txt") == "stash-modification");
-        assert(fs::exists(dir / "untracked.txt"));
-        assert(readFile(dir / "untracked.txt") == "untracked-stuff");
+        CHECK(capPop.str().find("Restored and applied stash") != std::string::npos);
+        CHECK(readFile(dir / "f.txt") == "stash-modification");
+        CHECK(fs::exists(dir / "untracked.txt"));
+        CHECK(readFile(dir / "untracked.txt") == "untracked-stuff");
     }
 
     {
@@ -429,8 +439,8 @@ void test22_new_cli_commands() {
         ReflogCmd cmd;
         cmd.execute(&repo, {});
         std::string reflogOut = capReflog.str();
-        assert(reflogOut.find("HEAD@{") != std::string::npos);
-        assert(reflogOut.find("commit") != std::string::npos || reflogOut.find("revert") != std::string::npos);
+        CHECK(reflogOut.find("HEAD@{") != std::string::npos);
+        CHECK(reflogOut.find("commit") != std::string::npos || reflogOut.find("revert") != std::string::npos);
     }
 
     removeDir(dir);
@@ -440,6 +450,179 @@ void test22_new_cli_commands() {
 // =========================================================================
 // Test 7: HTTP Server: Fix 19, branch/create with "at", ETag/304, peerRefs, snapshot on fail
 // =========================================================================
+
+// Backend item 2: Path validation rejects control chars and Windows forbidden chars; index stays intact
+void test_path_validation_and_index_intact() {
+    std::cout << "[Test Backend 2] Path validation rejects control chars & \\:*?\"<>| (index intact)... " << std::flush;
+    fs::path dir = fs::current_path() / "test_path_val_repo";
+    cleanDir(dir);
+    Repository::init(dir);
+    Repository repo(dir);
+
+    writeFile(dir / "valid.txt", "valid file content\n");
+    repo.add("valid.txt", true);
+    repo.commit("initial commit");
+
+    Snapshot snapInit = repo.snapshot();
+    CHECK(snapInit.files.count("valid.txt") == 1);
+
+    // Control characters: \n, \r, \t, \0
+    std::vector<std::string> invalidControlPaths = {
+        "file\nname.txt",
+        "file\rname.txt",
+        "file\tname.txt",
+        std::string("file\0name.txt", 13)
+    };
+    for (const auto& p : invalidControlPaths) {
+        bool threw = false;
+        try {
+            repo.add(p, true);
+        } catch (const MiniGitException&) {
+            threw = true;
+        }
+        CHECK(threw);
+    }
+
+    // Windows reserved / dangerous characters: \ : * ? " < > |
+    std::vector<std::string> invalidCharPaths = {
+        "file\\name.txt",
+        "file:name.txt",
+        "file*name.txt",
+        "file?name.txt",
+        "file\"name.txt",
+        "file<name.txt",
+        "file>name.txt",
+        "file|name.txt"
+    };
+    for (const auto& p : invalidCharPaths) {
+        bool threw = false;
+        try {
+            repo.add(p, true);
+        } catch (const MiniGitException&) {
+            threw = true;
+        }
+        CHECK(threw);
+
+        // Also test unstage & discard
+        threw = false;
+        try {
+            repo.unstage(p, true);
+        } catch (const MiniGitException&) {
+            threw = true;
+        }
+        CHECK(threw);
+
+        threw = false;
+        try {
+            repo.discard(p, true);
+        } catch (const MiniGitException&) {
+            threw = true;
+        }
+        CHECK(threw);
+    }
+
+    // Crucially verify that index and snapshot stay intact after all rejected attempts
+    Snapshot snapAfter = repo.snapshot();
+    CHECK(snapAfter.files.count("valid.txt") == 1);
+    Status st = repo.status();
+    CHECK(st.clean());
+
+    removeDir(dir);
+    std::cout << "PASSED\n";
+}
+
+// Backend item 7: CLI polish: revert commit msg, HEAD revision, detached format, stash save
+void test_cli_polish_and_stash() {
+    std::cout << "[Test Backend 7] CLI polish: revert commit msg, HEAD revision, detached format, stash save... " << std::flush;
+    fs::path dir = fs::current_path() / "test_cli_polish_repo";
+    cleanDir(dir);
+    Repository::init(dir);
+    Repository repo(dir);
+
+    writeFile(dir / "initial.txt", "initial text\n");
+    repo.add("initial.txt", true);
+    Hash h1 = repo.commit("Initial commit");
+
+    // 1. Detached branch prints "* (HEAD detached at abc1234)" and status prints "HEAD detached at abc1234"
+    repo.checkout(h1.str()); // checkout commit detaches HEAD
+    CHECK(repo.currentBranch().empty());
+
+    // Capture StatusCmd output
+    std::stringstream ssStatus;
+    std::streambuf* oldCout = std::cout.rdbuf(ssStatus.rdbuf());
+    StatusCmd statusCmd;
+    statusCmd.execute(&repo, {});
+    std::cout.rdbuf(oldCout);
+    std::string statusOut = ssStatus.str();
+    CHECK(statusOut.find("HEAD detached at " + h1.shortStr()) != std::string::npos);
+
+    // Capture BranchCmd output
+    std::stringstream ssBranch;
+    oldCout = std::cout.rdbuf(ssBranch.rdbuf());
+    BranchCmd branchCmd;
+    branchCmd.execute(&repo, {});
+    std::cout.rdbuf(oldCout);
+    std::string branchOut = ssBranch.str();
+    CHECK(branchOut.find("* (HEAD detached at " + h1.shortStr() + ")") != std::string::npos);
+
+    // 2. Revert prints commit message, not hash; supports HEAD as revision
+    repo.checkout("main");
+    writeFile(dir / "feature.txt", "feature text\n");
+    repo.add("feature.txt", true);
+    repo.commit("Add cool feature");
+
+    std::stringstream ssRevert;
+    oldCout = std::cout.rdbuf(ssRevert.rdbuf());
+    RevertCmd revertCmd;
+    revertCmd.execute(&repo, {"HEAD"});
+    std::cout.rdbuf(oldCout);
+    std::string revertOut = ssRevert.str();
+    CHECK(revertOut.find("Revert \"Add cool feature\"") != std::string::npos);
+
+    // 3. Stash save with no tracked changes and no -u says "no local changes to save" and creates no stash
+    Status sClean = repo.status();
+    CHECK(sClean.clean());
+    std::string resNoChanges = repo.stashSave("", false);
+    CHECK(resNoChanges == "no local changes to save");
+    CHECK(repo.stashList().empty());
+
+    // Add untracked file, stash without -u should still say "no local changes to save"
+    writeFile(dir / "untracked.txt", "untracked");
+    std::string resUntracked = repo.stashSave("", false);
+    CHECK(resUntracked == "no local changes to save");
+    CHECK(repo.stashList().empty());
+
+    removeDir(dir);
+    std::cout << "PASSED\n";
+}
+
+// Backend item 6: Git export checks identity before init/gitignore, returns 'already up to date'
+void test_git_export_identity_and_up_to_date() {
+    std::cout << "[Test Backend 6] Git export: identity check & 'already up to date'... " << std::flush;
+    fs::path dir = fs::current_path() / "test_git_exp_repo";
+    cleanDir(dir);
+    Repository::init(dir);
+    Repository repo(dir);
+
+    writeFile(dir / "f.txt", "content\n");
+    repo.add("f.txt", true);
+    repo.commit("initial");
+
+    try {
+        std::string res1 = repo.exportToGit();
+        (void)res1;
+        std::string res2 = repo.exportToGit();
+        CHECK(res2 == "already up to date");
+    } catch (const MiniGitException& e) {
+        std::string err = e.what();
+        CHECK(err.find("git is not installed") != std::string::npos ||
+              err.find("git user.name and user.email are not configured") != std::string::npos);
+    }
+
+    removeDir(dir);
+    std::cout << "PASSED\n";
+}
+
 void test_http_server_endpoints() {
     std::cout << "[Test Server] ETag/304, branch create at, backslash JSON, failure snapshot, peerRefs... " << std::flush;
     fs::path dir = fs::current_path() / "test_repo_cli_srv";
@@ -488,27 +671,27 @@ void test_http_server_endpoints() {
 
     // 1. ETag & 304 Not Modified
     size_t etagPos = probeResp.find("ETag: ");
-    assert(etagPos != std::string::npos);
+    CHECK(etagPos != std::string::npos);
     size_t etagEnd = probeResp.find("\r\n", etagPos);
     std::string etagVal = probeResp.substr(etagPos + 6, etagEnd - (etagPos + 6));
-    assert(!etagVal.empty());
+    CHECK(!etagVal.empty());
 
     std::string req304 = "GET /api/snapshot HTTP/1.1\r\nHost: 127.0.0.1\r\nIf-None-Match: " + etagVal + "\r\nConnection: close\r\n\r\n";
     std::string resp304 = httpExchange("127.0.0.1", testPort, req304);
-    assert(resp304.find("304 Not Modified") != std::string::npos);
+    CHECK(resp304.find("304 Not Modified") != std::string::npos);
     size_t bodySep = resp304.find("\r\n\r\n");
-    assert(bodySep != std::string::npos);
+    CHECK(bodySep != std::string::npos);
     std::string body304 = resp304.substr(bodySep + 4);
-    assert(body304.empty());
+    CHECK(body304.empty());
 
     // 2. POST /api/branch/create with "at" (hash or prefix)
     std::string createAtBody = "{\"name\":\"branch_at_c1\",\"at\":\"" + hBase.shortStr() + "\"}";
     std::string createAtReq = "POST /api/branch/create HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: " +
         std::to_string(createAtBody.size()) + "\r\nConnection: close\r\n\r\n" + createAtBody;
     std::string createAtResp = httpExchange("127.0.0.1", testPort, createAtReq);
-    assert(createAtResp.find("200 OK") != std::string::npos);
-    assert(repo.branchExists("branch_at_c1"));
-    assert(repo.branchTip("branch_at_c1") == hBase);
+    CHECK(createAtResp.find("200 OK") != std::string::npos);
+    CHECK(repo.branchExists("branch_at_c1"));
+    CHECK(repo.branchTip("branch_at_c1") == hBase);
 
     // 3. POST /api/stash/save with includeUntracked: true (item 49)
     writeFile(dir / "untracked_api.txt", "untracked api text");
@@ -516,54 +699,177 @@ void test_http_server_endpoints() {
     std::string stashReq = "POST /api/stash/save HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: " +
         std::to_string(stashBody.size()) + "\r\nConnection: close\r\n\r\n" + stashBody;
     std::string stashResp = httpExchange("127.0.0.1", testPort, stashReq);
-    assert(stashResp.find("200 OK") != std::string::npos);
-    assert(!fs::exists(dir / "untracked_api.txt"));
+    CHECK(stashResp.find("200 OK") != std::string::npos);
+    CHECK(!fs::exists(dir / "untracked_api.txt"));
 
-    std::string popReq = "POST /api/stash/pop HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
+    std::string popReq = "POST /api/stash/pop HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
     std::string popResp = httpExchange("127.0.0.1", testPort, popReq);
-    assert(popResp.find("200 OK") != std::string::npos);
-    assert(fs::exists(dir / "untracked_api.txt"));
+    CHECK(popResp.find("200 OK") != std::string::npos);
+    CHECK(fs::exists(dir / "untracked_api.txt"));
 
     // 4. Fix 19: Error with a backslash still returns valid JSON
     std::string bsBodyIn = "{\"path\":\"..\\\\invalid\\\\path.txt\",\"content\":\"\"}";
     std::string backslashReq = "POST /api/file/save HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: " +
         std::to_string(bsBodyIn.size()) + "\r\nConnection: close\r\n\r\n" + bsBodyIn;
     std::string backslashResp = httpExchange("127.0.0.1", testPort, backslashReq);
-    assert(backslashResp.find("400 Bad Request") != std::string::npos);
+    CHECK(backslashResp.find("400 Bad Request") != std::string::npos);
     size_t bsBodyPos = backslashResp.find("\r\n\r\n");
-    assert(bsBodyPos != std::string::npos);
+    CHECK(bsBodyPos != std::string::npos);
     std::string bsBody = backslashResp.substr(bsBodyPos + 4);
     std::string parseErr;
     JsonValue bsJson = JsonValue::parse(bsBody, &parseErr);
-    assert(parseErr.empty());
-    assert(bsJson.is_object());
-    assert(bsJson["ok"].as_bool() == false);
-    assert(bsJson.contains("error"));
+    CHECK(parseErr.empty());
+    CHECK(bsJson.is_object());
+    CHECK(bsJson["ok"].as_bool() == false);
+    CHECK(bsJson.contains("error"));
 
     // 5. Checkout failure includes "snapshot"
     std::string coBody = "{\"target\":\"nonexistent_target\"}";
     std::string badCheckoutReq = "POST /api/checkout HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: " +
         std::to_string(coBody.size()) + "\r\nConnection: close\r\n\r\n" + coBody;
     std::string badCheckoutResp = httpExchange("127.0.0.1", testPort, badCheckoutReq);
-    assert(badCheckoutResp.find("400 Bad Request") != std::string::npos);
+    CHECK(badCheckoutResp.find("400 Bad Request") != std::string::npos);
     size_t coBodyPos = badCheckoutResp.find("\r\n\r\n");
-    assert(coBodyPos != std::string::npos);
+    CHECK(coBodyPos != std::string::npos);
     JsonValue coJson = JsonValue::parse(badCheckoutResp.substr(coBodyPos + 4));
-    assert(coJson["ok"].as_bool() == false);
-    assert(coJson.contains("snapshot") && coJson["snapshot"].is_object());
+    CHECK(coJson["ok"].as_bool() == false);
+    CHECK(coJson.contains("snapshot") && coJson["snapshot"].is_object());
 
     // 6. import-bundle failure includes "snapshot" and top-level "peerRefs" (item 35)
     std::string bundleBody = "{\"objects\":\"not_an_object\"}";
     std::string badBundleReq = "POST /api/sync/import-bundle HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: " +
         std::to_string(bundleBody.size()) + "\r\nConnection: close\r\n\r\n" + bundleBody;
     std::string badBundleResp = httpExchange("127.0.0.1", testPort, badBundleReq);
-    assert(badBundleResp.find("400 Bad Request") != std::string::npos);
+    CHECK(badBundleResp.find("400 Bad Request") != std::string::npos);
     size_t bundleBodyPos = badBundleResp.find("\r\n\r\n");
-    assert(bundleBodyPos != std::string::npos);
+    CHECK(bundleBodyPos != std::string::npos);
     JsonValue bundleJson = JsonValue::parse(badBundleResp.substr(bundleBodyPos + 4));
-    assert(bundleJson["ok"].as_bool() == false);
-    assert(bundleJson.contains("peerRefs") && bundleJson["peerRefs"].is_array());
-    assert(bundleJson.contains("snapshot") && bundleJson["snapshot"].is_object());
+    CHECK(bundleJson["ok"].as_bool() == false);
+    CHECK(bundleJson.contains("peerRefs") && bundleJson["peerRefs"].is_array());
+    CHECK(bundleJson.contains("snapshot") && bundleJson["snapshot"].is_object());
+
+    // 7. CSRF and CORS security checks (Backend item 1)
+    {
+        // 7a. Non-GET loopback with foreign Origin -> 403 Forbidden
+        std::string csrfBody = "{\"name\":\"csrf_branch\"}";
+        std::string csrfReq = "POST /api/branch/create HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: http://evil.com\r\nContent-Type: application/json\r\nContent-Length: " +
+            std::to_string(csrfBody.size()) + "\r\nConnection: close\r\n\r\n" + csrfBody;
+        std::string csrfResp = httpExchange("127.0.0.1", testPort, csrfReq);
+        CHECK(csrfResp.find("403 Forbidden") != std::string::npos);
+        CHECK(csrfResp.find("Access-Control-Allow-Origin: http://evil.com") == std::string::npos);
+
+        // 7b. Non-GET loopback missing Content-Type: application/json -> 400 Bad Request
+        std::string noCtReq = "POST /api/branch/create HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: " +
+            std::to_string(csrfBody.size()) + "\r\nConnection: close\r\n\r\n" + csrfBody;
+        std::string noCtResp = httpExchange("127.0.0.1", testPort, noCtReq);
+        CHECK(noCtResp.find("400 Bad Request") != std::string::npos);
+
+        // 7c. Non-GET loopback with valid local Origin -> 200 OK
+        std::string legitReq = "POST /api/branch/create HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: http://127.0.0.1:" + std::to_string(testPort) + "\r\nContent-Type: application/json\r\nContent-Length: " +
+            std::to_string(csrfBody.size()) + "\r\nConnection: close\r\n\r\n" + csrfBody;
+        std::string legitResp = httpExchange("127.0.0.1", testPort, legitReq);
+        CHECK(legitResp.find("200 OK") != std::string::npos);
+
+        // 7d. GET /api/sync/bundle with foreign Origin -> 403 Forbidden
+        std::string foreignBundleReq = "GET /api/sync/bundle HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: http://evil.com\r\nConnection: close\r\n\r\n";
+        std::string foreignBundleResp = httpExchange("127.0.0.1", testPort, foreignBundleReq);
+        CHECK(foreignBundleResp.find("403 Forbidden") != std::string::npos);
+    }
+
+    // 8. Live CLI changes seen by server & merge works (Backend item 3)
+    {
+        std::error_code ec;
+        fs::remove(dir / "untracked_api.txt", ec);
+        writeFile(dir / "cli_live.txt", "cli live content\n");
+        repo.add("cli_live.txt", true);
+        repo.commit("commit from cli");
+
+        std::string liveSnapReq = "GET /api/snapshot HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
+        std::string liveSnapResp = httpExchange("127.0.0.1", testPort, liveSnapReq);
+        CHECK(liveSnapResp.find("200 OK") != std::string::npos);
+        size_t lsBodyPos = liveSnapResp.find("\r\n\r\n");
+        CHECK(lsBodyPos != std::string::npos);
+        JsonValue lsJson = JsonValue::parse(liveSnapResp.substr(lsBodyPos + 4));
+        CHECK(lsJson["status"]["staged"].as_array().empty());
+        CHECK(lsJson["status"]["modified"].as_array().empty());
+        CHECK(lsJson["status"]["deleted"].as_array().empty());
+        CHECK(lsJson["status"]["untracked"].as_array().empty());
+        CHECK(lsJson["files"].contains("cli_live.txt"));
+
+        // CLI creates feature branch and commits, then switches to main
+        repo.createBranch("feat_cli_merge");
+        repo.checkout("feat_cli_merge");
+        writeFile(dir / "feat_file.txt", "feat content\n");
+        repo.add("feat_file.txt", true);
+        repo.commit("commit on feat branch");
+        repo.checkout("main");
+
+        // Merge via server API
+        std::string mergeBody = "{\"branch\":\"feat_cli_merge\"}";
+        std::string mergeReq = "POST /api/merge HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: " +
+            std::to_string(mergeBody.size()) + "\r\nConnection: close\r\n\r\n" + mergeBody;
+        std::string mergeResp = httpExchange("127.0.0.1", testPort, mergeReq);
+        CHECK(mergeResp.find("200 OK") != std::string::npos);
+        size_t mBodyPos = mergeResp.find("\r\n\r\n");
+        CHECK(mBodyPos != std::string::npos);
+        JsonValue mJson = JsonValue::parse(mergeResp.substr(mBodyPos + 4));
+        CHECK(mJson["ok"].as_bool() == true);
+        std::string mMsg = mJson.contains("result") ? mJson["result"].as_string() : mJson["message"].as_string();
+        CHECK(mMsg.find("Merged") != std::string::npos || mMsg.find("Fast-forward") != std::string::npos);
+    }
+
+    // 9. Snapshot JSON contains "lan": bool and "binaryFiles": [paths] (Backend item 4)
+    {
+        std::string binContent = "bin";
+        binContent.push_back('\0');
+        binContent += "ary";
+        writeFile(dir / "sample.bin", binContent);
+        repo.add("sample.bin", true);
+        repo.commit("add binary file");
+
+        std::string binSnapReq = "GET /api/snapshot HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
+        std::string binSnapResp = httpExchange("127.0.0.1", testPort, binSnapReq);
+        CHECK(binSnapResp.find("200 OK") != std::string::npos);
+        size_t bsSnapPos = binSnapResp.find("\r\n\r\n");
+        CHECK(bsSnapPos != std::string::npos);
+        JsonValue bsSnapJson = JsonValue::parse(binSnapResp.substr(bsSnapPos + 4));
+        CHECK(bsSnapJson.contains("lan") && bsSnapJson["lan"].is_bool());
+        CHECK(bsSnapJson.contains("binaryFiles") && bsSnapJson["binaryFiles"].is_array());
+        bool foundBin = false;
+        for (const auto& bf : bsSnapJson["binaryFiles"].as_array()) {
+            if (bf.as_string() == "sample.bin") foundBin = true;
+        }
+        CHECK(foundBin);
+    }
+
+    // 10. Failure replies include "snapshot" (Backend item 5)
+    {
+        auto postCheckFailureSnapshot = [&](const std::string& path, const std::string& body) {
+            std::string req = "POST " + path + " HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: " +
+                std::to_string(body.size()) + "\r\nConnection: close\r\n\r\n" + body;
+            std::string resp = httpExchange("127.0.0.1", testPort, req);
+            size_t bPos = resp.find("\r\n\r\n");
+            CHECK(bPos != std::string::npos);
+            JsonValue j = JsonValue::parse(resp.substr(bPos + 4));
+            CHECK(j["ok"].as_bool() == false);
+            CHECK(j.contains("snapshot") && j["snapshot"].is_object());
+        };
+
+        // commit failure (nothing staged)
+        postCheckFailureSnapshot("/api/commit", "{\"message\":\"empty stage\"}");
+        // revert failure (invalid hash)
+        postCheckFailureSnapshot("/api/revert", "{\"hash\":\"deadbeef00\"}");
+        // stash/save failure (no changes to save)
+        postCheckFailureSnapshot("/api/stash/save", "{\"message\":\"no changes\"}");
+        // stash/pop failure (empty stash)
+        postCheckFailureSnapshot("/api/stash/pop", "{}");
+        // branch/create failure (duplicate name)
+        postCheckFailureSnapshot("/api/branch/create", "{\"name\":\"main\"}");
+        // branch/delete failure (delete current branch)
+        postCheckFailureSnapshot("/api/branch/delete", "{\"name\":\"main\"}");
+        // reflog/restore failure (invalid hash)
+        postCheckFailureSnapshot("/api/reflog/restore", "{\"hash\":\"deadbeef00\"}");
+    }
 
     removeDir(dir);
     std::cout << "PASSED" << std::endl;
@@ -585,6 +891,9 @@ int main() {
     test8_status_merging();
     test21_snapshot_json_contract();
     test22_new_cli_commands();
+    test_path_validation_and_index_intact();
+    test_cli_polish_and_stash();
+    test_git_export_identity_and_up_to_date();
     test_http_server_endpoints();
 
     std::cout << "\nALL CLI & SERVER TESTS PASSED SUCCESSFULLY!\n";
