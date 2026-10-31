@@ -156,14 +156,15 @@ classDiagram
         +run(repo, port, open, lan)$
     }
     class HtmlExporter {
-        +toJson(snap, name, isSyncBundle)$ string
-        +render(snap, name)$ string
+        +toJson(snap, name, isSyncBundle, isStaticExport)$ string
+        +render(snap, name, isStaticExport)$ string
     }
     class PairingManager {
         -string currentCode_
         -time_point codeCreatedAt_
         -int failedAttempts_
         -map~string, int~ failedAttemptsByClient_
+        -map~string, time_point~ clientLockoutUntil_
         -vector~time_point~ failedAttemptTimestamps_
         -bool isLocked_
         -bool isUsed_

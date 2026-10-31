@@ -746,8 +746,8 @@ Every API endpoint enforces strict access levels:
 | `GET` | `/api/token` | Loopback only | Returns current pair code, remaining countdown, lockout state, and LAN URL. |
 | `GET` | `/api/pair/code` | Loopback only | Returns pair code status, remaining seconds, lockout flags, and failure counts. |
 | `POST` | `/api/pair/generate-code` | Loopback only | Generates a new 6-digit CSPRNG pair code; resets failed attempt counters. |
-| `POST` | `/api/pair` | LAN (public) | Submits 6-digit pair code for host approval (`code`, `peerName`). Returns `requestId`. Locked after 5 bad attempts (403); rate limited at 10 fails/min across clients (429); code invalidated after 10 failures. |
-| `GET` | `/api/pair/status` | LAN (public) | Polled by peer (`?requestId=...`) to retrieve approval decision and session token. |
+| `POST` | `/api/pair` | LAN (public) | Submits 6-digit pair code for host approval (`code`, `peerName`). Returns `requestId`. Locked after 5 bad attempts with exponential backoff (403); rate limited at 10 fails/min across clients (429); unauthenticated bodies capped at 4 KB. |
+| `GET` | `/api/pair/status` | LAN (public) | Polled by peer (`?requestId=...`) to retrieve approval decision and session token (delivered once to requesting IP, then deleted). |
 | `GET` | `/api/pair/pending` | Loopback only | Polled by host every 1.5 s to display pending pairing requests (< 120s old). |
 | `POST` | `/api/pair/decide` | Loopback only | Host allows or denies pairing (`requestId`, `allow`, optional custom label). Issues 32-byte session token on approval. |
 | `GET` | `/api/pair/peers` | Loopback only | Lists all currently paired peers (IDs, IPs, labels, timestamps). |
@@ -784,7 +784,12 @@ The Web Studio implements defense-in-depth security hardening against common web
 - **Origin / CSRF validation**: All state-changing HTTP requests (`POST`, `PUT`, `DELETE`) arriving over loopback verify that the `Origin` header matches `http://127.0.0.1:<port>` or `http://localhost:<port>`. Malicious cross-origin requests from external web pages are blocked with `403 Forbidden`. Cross-origin pairing over loopback is strictly prohibited.
 - **JSON Content-Type requirement**: State-changing loopback endpoints require `Content-Type: application/json` (returning `400 Bad Request` if omitted). This prevents simple cross-site HTML form submissions (`application/x-www-form-urlencoded` or `multipart/form-data`) from triggering repository mutations.
 - **Token-protected sync endpoints**: Non-loopback access to sync endpoints (`/api/sync/bundle` and `/api/sync/import-bundle`) requires a valid 32-byte cryptographic session token in the `X-MiniGit-Token` header. Missing, invalid, or revoked tokens return `401 Unauthorized`. All non-sync, non-pairing endpoints return `403 Forbidden` to external clients.
+- **Slowloris & timeout protection**: Enforces a strict 10-second per-request deadline using polling against a wall-clock deadline. Inbound connections are served via `HttpServerThreadPool`, with mutex protection (`repoMutex`, `pairingMutex`) safeguarding shared backend state.
+- **Unauthenticated endpoint body limit (4 KB)**: Inbound request bodies on unauthenticated endpoints (`/api/pair`, `/api/pair/status`) are capped at 4 KB prior to JSON parsing.
 - **Payload size limit (50 MB)**: Request bodies are capped at 50 MB via `Content-Length` enforcement (`> 50 * 1024 * 1024`). Excessive payloads are rejected immediately with `413 Payload Too Large`.
+- **JSON nesting depth limit**: JSON parser enforces a maximum nesting depth of 64 levels, preventing stack exhaustion on adversarial inputs.
+- **Process execution security**: Removed all `std::system()` calls; browser opening and Git bridge commands invoke executable binaries using explicit argv arrays (`CreateProcess` on Windows, `fork`/`execvp` on POSIX).
+- **Symlink and path traversal protection**: Working tree scans skip symlinks via `symlink_status`, and all path writes/deletions verify `ensureNoSymlinkComponents` to prevent traversal through symlinked parent components.
 - **Path traversal and input validation**: All repository paths are canonicalized through `Repository::resolveRepoPath`:
   - Paths cannot be empty, `.`, or `..`.
   - Absolute paths are strictly rejected.
@@ -817,10 +822,10 @@ The Web Studio implements defense-in-depth security hardening against common web
 - **Pairing security**:
   - 6-digit pair code generated using CSPRNG (`std::random_device`), valid for **300 seconds** (5 minutes), single-use upon host approval.
   - Host approval modal displays the requester's **IP address**, **Origin**, **claimed name**, and the **code entered**.
-  - **Per-client lockout**: 5 failed code attempts lock out that client IP (`403 Forbidden`) until a new code is generated on the host.
+  - **Per-client lockout**: 5 failed code attempts lock out that client IP (`403 Forbidden`) with exponential backoff (starting at 5 seconds) until a new code is generated on the host. Other clients remain unaffected.
   - **Global rate limit**: 10 failed attempts across all clients within 60 seconds triggers `429 Too Many Requests`.
-  - **Code invalidation**: 10 total failed attempts permanently invalidate the code, requiring the host to generate a new one.
-  - Approving a request generates a 32-byte CSPRNG session token (64 hex characters).
+  - **DoS resilience without global code invalidation**: Malicious wrong attempts cannot lock out other legitimate clients globally. The host can manually click **Generate New Code** at any time.
+  - Approving a request generates a 32-byte CSPRNG session token (64 hex characters) delivered once to the requesting client IP and then deleted from pending requests.
   - Host can view paired peers and revoke any token at any time.
 - **Static vs live**: `minigit html` writes a standalone snapshot to `.minigit/report.html`; `minigit ui` is interactive and all operations execute through `Repository`.
 - **Hashing**: Real repositories use C++ SHA-1 `Hasher`. Offline browser-only demo mode simulates hashing via the Web Crypto API.

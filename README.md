@@ -356,9 +356,10 @@ Security rules (enforced in `HttpServer` and `PairingManager`):
 
 - **CSPRNG codes and tokens**: Pair codes are generated via `std::random_device` with rejection sampling (100000–999999). Session tokens are 32 cryptographically random bytes (64 hexadecimal characters).
 - **Code expiration & single use**: A pair code is valid for **300 seconds** (5 minutes) and is single-use: once approved, it is marked used. Pending requests expire after 120 seconds.
-- **Per-client lockout**: Keyed on client IP. A client that fails **5 attempts** is locked out (`403 Forbidden`) until the host generates a new code. Other clients are not locked out.
+- **Per-client lockout**: Keyed on client IP. A client that fails **5 attempts** is locked out (`403 Forbidden`) with exponential backoff (starting at 5 seconds) until the host generates a new code. Other clients remain unaffected.
 - **Global rate limit (429)**: The server tracks failed attempts across all clients in a sliding 60-second window. If **10 failed attempts** occur within 60 seconds, all submissions return `429 Too Many Requests`.
-- **Code invalidation**: After **10 total failed attempts** on the current code, the code is permanently invalidated. Clients cannot attempt it further; the host must click **Generate New Code**.
+- **DoS resilience without global code invalidation**: Repeated wrong attempts from malicious clients do not invalidate the code globally for legitimate peers. The host can manually click **Generate New Code** at any time.
+- **Single-use session token delivery**: Approved session tokens (32 cryptographically random bytes / 64 hex characters) are handed out once to the requesting client IP and then deleted from pending requests.
 - **Non-LAN & cross-origin refusal**: If `--lan` is not passed on startup, pairing requests return `403 Forbidden`. Cross-origin pairing over loopback returns `403 Forbidden`. Non-loopback clients can only access `/api/pair`, `/api/pair/status`, `/api/sync/bundle`, and `/api/sync/import-bundle` (`403 Forbidden` for all others).
 - **Token authentication**: Sync endpoints require the `X-MiniGit-Token` header containing a valid session token; missing or revoked tokens return `401 Unauthorized`. The host can view paired peers and revoke any token at any time via `/api/pair/revoke`.
 
@@ -375,7 +376,12 @@ Mini-Git's Web Studio incorporates multi-layered security controls to protect lo
 - **Origin / CSRF checks**: On loopback, all state-changing requests (`POST`, `PUT`, `DELETE`) verify that the `Origin` header matches `http://127.0.0.1:<port>` or `http://localhost:<port>`. Cross-origin requests from external web pages return `403 Forbidden`. Cross-origin pairing over loopback is rejected.
 - **JSON Content-Type requirement**: State-changing loopback endpoints require `Content-Type: application/json` (`400 Bad Request` otherwise), preventing browser form submission attacks (`application/x-www-form-urlencoded` or `multipart/form-data`).
 - **Token-protected sync endpoints**: Non-loopback access to `/api/sync/bundle` and `/api/sync/import-bundle` requires a valid 32-byte session token via `X-MiniGit-Token` (`401 Unauthorized` otherwise). All other endpoints return `403 Forbidden` to external clients.
+- **Slowloris & timeout protection**: Enforces a strict 10-second per-request wall-clock deadline; connections are served from a thread pool (`HttpServerThreadPool`) with mutex synchronization protecting `Repository` and `PairingManager`.
+- **Unauthenticated endpoint body limit (4 KB)**: Inbound request bodies on unauthenticated endpoints (`/api/pair`, `/api/pair/status`) are capped at 4 KB before JSON parsing.
 - **50 MB payload limit**: Inbound request bodies are capped at 50 MB via `Content-Length` enforcement (`> 50 * 1024 * 1024`). Over-sized requests immediately receive `413 Payload Too Large`.
+- **JSON nesting depth limit**: JSON parsing enforces a recursion depth limit of 64 levels, preventing stack overflow on maliciously crafted payloads.
+- **Safe process execution without shell interpolation**: Browser opening and Git bridge operations use structured argv arrays via `CreateProcess` / `fork+execvp`, eliminating command injection vulnerabilities.
+- **Symlink and path traversal protection**: Working tree traversal skips symlinks, and all operations verify paths with `ensureNoSymlinkComponents` to prevent traversal through symlinked parent directories.
 - **Path traversal and input validation**: All repository paths are validated and normalized by `Repository::resolveRepoPath`:
   - Paths cannot be empty, `.`, or `..`.
   - Absolute paths are forbidden.

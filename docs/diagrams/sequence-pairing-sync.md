@@ -23,9 +23,7 @@ sequenceDiagram
     else Global rate limit exceeded (>= 10 fails in 60s across clients)
         HS-->>T: 429 Too Many Requests (rate limited)
     else Client locked (>= 5 failed attempts for this client IP)
-        HS-->>T: 403 Forbidden (pairing locked)
-    else Code invalidated (>= 10 total code failures)
-        HS-->>T: 401 Unauthorized (code invalidated, new code needed)
+        HS-->>T: 403 Forbidden (pairing locked with exponential backoff)
     else Code expired or already used
         HS-->>T: 401 Unauthorized (expired / used)
     else Wrong code (< 5 attempts)
@@ -49,6 +47,7 @@ sequenceDiagram
         T->>HS: GET /api/pair/status?requestId=...
     end
     HS-->>T: 200 OK {status: "approved", token: "64-hex"}
+    Note over HS,PM: Session token returned once to requesting IP, then deleted
     T->>T: Store token in localStorage
 
     Note over T,TR: Pull
