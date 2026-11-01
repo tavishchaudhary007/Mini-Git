@@ -15,6 +15,8 @@
 #include <thread>
 #include <mutex>
 #include <queue>
+#include <deque>
+#include <map>
 #include <condition_variable>
 #include <atomic>
 #include <chrono>
@@ -84,6 +86,28 @@ std::string getLocalLanIp() {
     return "127.0.0.1";
 }
 
+static void drainAndClose(socket_t sock) {
+#ifdef _WIN32
+    shutdown(sock, SD_SEND);
+    DWORD to = 200;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&to, sizeof(to));
+#else
+    shutdown(sock, SHUT_WR);
+    struct timeval to;
+    to.tv_sec = 0;
+    to.tv_usec = 200000;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const void*)&to, sizeof(to));
+#endif
+    char discardBuf[8192];
+    auto drainStart = std::chrono::steady_clock::now();
+    while (recv(sock, discardBuf, sizeof(discardBuf), 0) > 0) {
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - drainStart).count() > 1000) {
+            break;
+        }
+    }
+    CLOSESOCKET(sock);
+}
+
 std::string getHeaderValue(const std::string& request, const std::string& headerName) {
     std::string target = "\n" + headerName + ":";
     auto it = std::search(request.begin(), request.end(), target.begin(), target.end(),
@@ -108,8 +132,7 @@ std::string getHeaderValue(const std::string& request, const std::string& header
     if (it == request.end()) return "";
 
     size_t pos = (it - request.begin()) + 1 + headerName.size() + 1;
-    size_t lineEnd = request.find("\r\n", pos);
-    if (lineEnd == std::string::npos) lineEnd = request.find("\n", pos);
+    size_t lineEnd = request.find("\n", pos);
     if (lineEnd == std::string::npos) lineEnd = request.size();
 
     std::string val = request.substr(pos, lineEnd - pos);
@@ -184,13 +207,40 @@ static bool isIPv4Literal(const std::string& s) {
     return parts == 4;
 }
 
+static bool etagMatches(const std::string& headerVal, const std::string& currentEtag) {
+    if (headerVal.empty()) return false;
+    std::string unquoted = currentEtag;
+    if (unquoted.size() >= 2 && unquoted.front() == '"' && unquoted.back() == '"') {
+        unquoted = unquoted.substr(1, unquoted.size() - 2);
+    }
+
+    std::stringstream ss(headerVal);
+    std::string token;
+    while (std::getline(ss, token, ',')) {
+        size_t start = token.find_first_not_of(" \t\r\n");
+        if (start == std::string::npos) continue;
+        size_t end = token.find_last_not_of(" \t\r\n");
+        std::string tag = token.substr(start, end - start + 1);
+
+        if (tag == "*") return true;
+        if (tag == currentEtag || tag == unquoted) return true;
+        if (tag.rfind("W/", 0) == 0) {
+            std::string weakTag = tag.substr(2);
+            if (weakTag == currentEtag || weakTag == unquoted) return true;
+        }
+    }
+    return false;
+}
+
 void sendHttpResponse(socket_t sock, int statusCode, const std::string& statusText,
                       const std::string& contentType, const std::string& body,
                       const std::string& corsOrigin = "", const std::string& extraHeaders = "") {
     std::ostringstream oss;
-    oss << "HTTP/1.1 " << statusCode << " " << statusText << "\r\n"
-        << "Content-Type: " << contentType << "\r\n"
-        << "Content-Length: " << body.size() << "\r\n";
+    oss << "HTTP/1.1 " << statusCode << " " << statusText << "\r\n";
+    if (!contentType.empty()) {
+        oss << "Content-Type: " << contentType << "\r\n";
+    }
+    oss << "Content-Length: " << body.size() << "\r\n";
     if (!extraHeaders.empty()) {
         oss << extraHeaders;
     }
@@ -210,31 +260,58 @@ void sendHttpResponse(socket_t sock, int statusCode, const std::string& statusTe
 
 class HttpServerThreadPool {
 public:
-    explicit HttpServerThreadPool(size_t threads) : stop_(false) {
+    explicit HttpServerThreadPool(size_t threads, size_t reservedForLoopback = 2)
+        : stop_(false), totalThreads_(threads), reservedSlots_(reservedForLoopback), activeNonLoopback_(0) {
         for (size_t i = 0; i < threads; ++i) {
             workers_.emplace_back([this]() {
                 while (true) {
                     std::function<void()> task;
+                    bool isLoopback = false;
                     {
                         std::unique_lock<std::mutex> lock(queueMutex_);
-                        cv_.wait(lock, [this]() { return stop_ || !tasks_.empty(); });
-                        if (stop_ && tasks_.empty()) return;
-                        task = std::move(tasks_.front());
-                        tasks_.pop();
+                        cv_.wait(lock, [this]() {
+                            if (stop_) return true;
+                            if (!loopbackTasks_.empty()) return true;
+                            if (!normalTasks_.empty() && activeNonLoopback_ < (totalThreads_ - reservedSlots_)) return true;
+                            return false;
+                        });
+                        if (stop_ && loopbackTasks_.empty() && normalTasks_.empty()) return;
+
+                        if (!loopbackTasks_.empty()) {
+                            task = std::move(loopbackTasks_.front());
+                            loopbackTasks_.pop_front();
+                            isLoopback = true;
+                        } else if (!normalTasks_.empty() && activeNonLoopback_ < (totalThreads_ - reservedSlots_)) {
+                            task = std::move(normalTasks_.front());
+                            normalTasks_.pop_front();
+                            activeNonLoopback_++;
+                            isLoopback = false;
+                        } else {
+                            continue;
+                        }
                     }
                     task();
+                    if (!isLoopback) {
+                        std::unique_lock<std::mutex> lock(queueMutex_);
+                        activeNonLoopback_--;
+                        cv_.notify_all();
+                    }
                 }
             });
         }
     }
 
-    bool enqueue(std::function<void()> task) {
+    bool enqueue(std::function<void()> task, bool isLoopback = false) {
         {
             std::unique_lock<std::mutex> lock(queueMutex_);
             if (stop_) return false;
-            tasks_.push(std::move(task));
+            if (isLoopback) {
+                loopbackTasks_.push_back(std::move(task));
+            } else {
+                normalTasks_.push_back(std::move(task));
+            }
         }
-        cv_.notify_one();
+        cv_.notify_all();
         return true;
     }
 
@@ -251,16 +328,21 @@ public:
 
 private:
     std::vector<std::thread> workers_;
-    std::queue<std::function<void()>> tasks_;
+    std::deque<std::function<void()>> loopbackTasks_;
+    std::deque<std::function<void()>> normalTasks_;
     std::mutex queueMutex_;
     std::condition_variable cv_;
     bool stop_;
+    size_t totalThreads_;
+    size_t reservedSlots_;
+    size_t activeNonLoopback_;
 };
 
 static void handleClientConnection(socket_t clientSock, sockaddr_in clientAddr, int boundPort, bool lan,
                                    PairingManager& pairingMgr, Repository* repo,
                                    std::recursive_mutex& repoMutex, std::recursive_mutex& pairingMutex,
-                                   const std::string& repoName, const std::string& lanUrl) {
+                                   const std::string& repoName, const std::string& lanUrl,
+                                   std::chrono::steady_clock::time_point acceptTime) {
 
 #ifdef _WIN32
         DWORD sockTimeout = 5000;
@@ -287,8 +369,7 @@ static void handleClientConnection(socket_t clientSock, sockaddr_in clientAddr, 
         bool headersTooLarge = false;
         bool requestComplete = false;
 
-        auto reqStart = std::chrono::steady_clock::now();
-        const auto reqDeadline = reqStart + std::chrono::seconds(10);
+        const auto reqDeadline = acceptTime + std::chrono::seconds(5);
 
         while (true) {
             auto now = std::chrono::steady_clock::now();
@@ -319,7 +400,18 @@ static void handleClientConnection(socket_t clientSock, sockaddr_in clientAddr, 
             buf[bytesRead] = '\0';
             request.append(buf, bytesRead);
 
-            size_t headerEnd = request.find("\r\n\r\n");
+            size_t rnrn = request.find("\r\n\r\n");
+            size_t nn = request.find("\n\n");
+            size_t headerEnd = std::string::npos;
+            size_t bodyOffset = 0;
+            if (rnrn != std::string::npos && (nn == std::string::npos || rnrn <= nn)) {
+                headerEnd = rnrn;
+                bodyOffset = 4;
+            } else if (nn != std::string::npos) {
+                headerEnd = nn;
+                bodyOffset = 2;
+            }
+
             if (headerEnd == std::string::npos) {
                 if (request.size() > 64 * 1024) {
                     headersTooLarge = true;
@@ -335,9 +427,21 @@ static void handleClientConnection(socket_t clientSock, sockaddr_in clientAddr, 
                 if (!teStr.empty()) {
                     sendHttpResponse(clientSock, 501, "Not Implemented", "application/json",
                                      "{\"ok\":false,\"error\":\"Transfer-Encoding not supported\"}");
-                    CLOSESOCKET(clientSock);
+                    drainAndClose(clientSock);
                     return;
                 }
+
+                // Parse method and path from first line to check endpoint-specific limits BEFORE reading body
+                std::string firstLine;
+                size_t flEnd = request.find('\n');
+                if (flEnd != std::string::npos) firstLine = request.substr(0, flEnd);
+                else firstLine = request.substr(0, headerEnd);
+                std::istringstream flStream(firstLine);
+                std::string reqMethod, reqUri;
+                flStream >> reqMethod >> reqUri;
+                size_t qIdx = reqUri.find('?');
+                std::string reqPath = (qIdx != std::string::npos) ? reqUri.substr(0, qIdx) : reqUri;
+
                 // Check Content-Length case-insensitively
                 std::string clStr = getHeaderValue(request, "Content-Length");
                 size_t cl = 0;
@@ -347,12 +451,19 @@ static void handleClientConnection(socket_t clientSock, sockaddr_in clientAddr, 
                     } catch (...) {
                         cl = 0;
                     }
+                    // Check endpoint limit BEFORE reading body
+                    if ((reqPath == "/api/pair" || reqPath == "/api/pair/status") && cl > 4096) {
+                        sendHttpResponse(clientSock, 413, "Payload Too Large", "application/json; charset=utf-8",
+                                         "{\"ok\":false,\"error\":\"Payload Too Large (max 4KB)\"}");
+                        drainAndClose(clientSock);
+                        return;
+                    }
                     if (cl > 50 * 1024 * 1024) { // 50 MB limit
                         payloadTooLarge = true;
                         break;
                     }
                 }
-                size_t bodyStart = headerEnd + 4;
+                size_t bodyStart = headerEnd + bodyOffset;
                 if (request.size() - bodyStart >= cl) {
                     requestComplete = true;
                     break;
@@ -363,14 +474,14 @@ static void handleClientConnection(socket_t clientSock, sockaddr_in clientAddr, 
         if (headersTooLarge) {
             sendHttpResponse(clientSock, 431, "Request Header Fields Too Large", "application/json",
                              "{\"ok\":false,\"error\":\"Request Header Fields Too Large (max 64KB)\"}");
-            CLOSESOCKET(clientSock);
+            drainAndClose(clientSock);
             return;
         }
 
         if (payloadTooLarge) {
             sendHttpResponse(clientSock, 413, "Payload Too Large", "application/json",
                              "{\"ok\":false,\"error\":\"Payload Too Large (max 50MB)\"}");
-            CLOSESOCKET(clientSock);
+            drainAndClose(clientSock);
             return;
         }
 
@@ -399,9 +510,19 @@ static void handleClientConnection(socket_t clientSock, sockaddr_in clientAddr, 
 
         // Extract body
         std::string body;
-        size_t bodyPos = request.find("\r\n\r\n");
-        if (bodyPos != std::string::npos) {
-            body = request.substr(bodyPos + 4);
+        size_t rnrnBody = request.find("\r\n\r\n");
+        size_t nnBody = request.find("\n\n");
+        size_t bEnd = std::string::npos;
+        size_t bOffset = 0;
+        if (rnrnBody != std::string::npos && (nnBody == std::string::npos || rnrnBody <= nnBody)) {
+            bEnd = rnrnBody;
+            bOffset = 4;
+        } else if (nnBody != std::string::npos) {
+            bEnd = nnBody;
+            bOffset = 2;
+        }
+        if (bEnd != std::string::npos) {
+            body = request.substr(bEnd + bOffset);
         }
 
         // Host header validation (DNS rebinding protection)
@@ -455,7 +576,8 @@ static void handleClientConnection(socket_t clientSock, sockaddr_in clientAddr, 
         std::string corsOrigin = "";
         if (!origin.empty() && origin != "null") {
             if (origin == ("http://127.0.0.1:" + std::to_string(boundPort)) ||
-                origin == ("http://localhost:" + std::to_string(boundPort))) {
+                origin == ("http://localhost:" + std::to_string(boundPort)) ||
+                (isLoopback && (origin.rfind("http://127.0.0.1:", 0) == 0 || origin.rfind("http://localhost:", 0) == 0))) {
                 corsOrigin = origin;
             } else if (isSyncOrPairEndpoint) {
                 corsOrigin = origin;
@@ -805,7 +927,7 @@ static void handleClientConnection(socket_t clientSock, sockaddr_in clientAddr, 
                 std::string ver = HtmlExporter::computeVersion(snap);
                 std::string quotedEtag = "\"" + ver + "\"";
                 std::string ifNoneMatch = getHeaderValue(request, "If-None-Match");
-                if (!ifNoneMatch.empty() && (ifNoneMatch == quotedEtag || ifNoneMatch == ver || ifNoneMatch == "W/" + quotedEtag || ifNoneMatch == "*")) {
+                if (etagMatches(ifNoneMatch, quotedEtag)) {
                     sendHttpResponse(clientSock, 304, "Not Modified", "", "", corsOrigin, "ETag: " + quotedEtag + "\r\n");
                 } else {
                     std::string json = HtmlExporter::toJson(snap, repoName);
@@ -1264,7 +1386,8 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
     socket_t serverSock = INVALID_SOCKET;
     int boundPort = -1;
 
-    for (int port = preferredPort; port < preferredPort + 30; ++port) {
+    int maxPort = std::min(preferredPort + 30 - 1, 65535);
+    for (int port = preferredPort; port <= maxPort; ++port) {
         socket_t s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         if (!ISVALIDSOCKET(s)) continue;
 
@@ -1297,7 +1420,7 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
         WSACleanup();
 #endif
         throw MiniGitException("failed to bind server to a local port in range " +
-                               std::to_string(preferredPort) + "-" + std::to_string(preferredPort + 30));
+                               std::to_string(preferredPort) + "-" + std::to_string(maxPort));
     }
 
     std::string repoName = repo->root().filename().string();
@@ -1333,7 +1456,10 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
     std::atomic<int> activeConns{0};
     static constexpr int MAX_CONCURRENT_CONNS = 32;
 
-    HttpServerThreadPool pool(8);
+    std::mutex ipConnMutex;
+    std::map<std::string, int> connsPerIp;
+
+    HttpServerThreadPool pool(8, 2);
 
     while (true) {
         sockaddr_in clientAddr{};
@@ -1345,18 +1471,50 @@ void HttpServer::run(Repository* repo, int preferredPort, bool openBrowser, bool
         socket_t clientSock = accept(serverSock, (struct sockaddr*)&clientAddr, &clientLen);
         if (!ISVALIDSOCKET(clientSock)) break;
 
+        auto acceptTime = std::chrono::steady_clock::now();
+        uint32_t clientIpNum = ntohl(clientAddr.sin_addr.s_addr);
+        bool isLoopback = ((clientIpNum >> 24) == 127) || (clientIpNum == 0);
+
+        char clientIpStr[INET_ADDRSTRLEN] = "127.0.0.1";
+        inet_ntop(AF_INET, &clientAddr.sin_addr, clientIpStr, sizeof(clientIpStr));
+        std::string ipKey(clientIpStr);
+
+        {
+            std::lock_guard<std::mutex> lock(ipConnMutex);
+            int maxForIp = (ipKey == "127.0.0.1" || ipKey == "localhost") ? 24 : 4;
+            if (connsPerIp[ipKey] >= maxForIp) {
+                sendHttpResponse(clientSock, 503, "Service Unavailable", "application/json",
+                                 "{\"ok\":false,\"error\":\"Too many connections from this IP (max 4)\"}");
+                CLOSESOCKET(clientSock);
+                continue;
+            }
+            connsPerIp[ipKey]++;
+        }
+
         if (activeConns.load() >= MAX_CONCURRENT_CONNS) {
             sendHttpResponse(clientSock, 503, "Service Unavailable", "application/json",
                              "{\"ok\":false,\"error\":\"Server busy, maximum connections reached\"}");
+            {
+                std::lock_guard<std::mutex> lock(ipConnMutex);
+                connsPerIp[ipKey]--;
+                if (connsPerIp[ipKey] <= 0) connsPerIp.erase(ipKey);
+            }
             CLOSESOCKET(clientSock);
             continue;
         }
 
         activeConns++;
-        pool.enqueue([clientSock, clientAddr, boundPort, lan, &pairingMgr, repo, &repoMutex, &pairingMutex, repoName, lanUrl, &activeConns]() {
-            handleClientConnection(clientSock, clientAddr, boundPort, lan, pairingMgr, repo, repoMutex, pairingMutex, repoName, lanUrl);
+        pool.enqueue([clientSock, clientAddr, boundPort, lan, &pairingMgr, repo, &repoMutex, &pairingMutex,
+                      repoName, lanUrl, &activeConns, &ipConnMutex, &connsPerIp, ipKey, acceptTime]() {
+            handleClientConnection(clientSock, clientAddr, boundPort, lan, pairingMgr, repo, repoMutex, pairingMutex,
+                                   repoName, lanUrl, acceptTime);
+            {
+                std::lock_guard<std::mutex> lock(ipConnMutex);
+                connsPerIp[ipKey]--;
+                if (connsPerIp[ipKey] <= 0) connsPerIp.erase(ipKey);
+            }
             activeConns--;
-        });
+        }, isLoopback);
     }
 
     CLOSESOCKET(serverSock);

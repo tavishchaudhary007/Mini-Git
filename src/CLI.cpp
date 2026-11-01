@@ -20,14 +20,23 @@ CLI::CLI() {
     registerCommand(std::make_unique<ServeCmd>());
 }
 
+void CLI::printUsage(std::ostream& os) const {
+    os << "Mini-Git - usage:\n";
+    for (const auto& [name, cmd] : commands_) os << "  " << cmd->usage() << "\n";
+}
+
 void CLI::printUsage() const {
-    std::cerr << "Mini-Git - usage:\n";
-    for (const auto& [name, cmd] : commands_) std::cerr << "  " << cmd->usage() << "\n";
+    printUsage(std::cerr);
 }
 
 int CLI::run(int argc, char** argv) {
     if (argc < 2) { printUsage(); return 1; }
-    auto it = commands_.find(argv[1]);
+    std::string cmdName = argv[1];
+    if (cmdName == "help" || cmdName == "-h" || cmdName == "--help") {
+        printUsage(std::cout);
+        return 0;
+    }
+    auto it = commands_.find(cmdName);
     if (it == commands_.end()) {
         std::cerr << "error: unknown command '" << argv[1] << "'\n";
         printUsage();

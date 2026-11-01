@@ -117,6 +117,40 @@ Builds and runs four automated test suites (`TEST_TARGETS` in `Makefile`):
 - `tests/test_cli_server.cpp`: CLI interface and Web Studio HTTP server tests (readable local date in `log`, `ui`/`serve` `--port` 1–65535 validation, empty repo branch/checkout handling, `status` merge state reporting with unmerged paths, Snapshot JSON contract, CLI commands (`branch -d`, `undo`, `revert`, `stash`, `reflog`), path validation rejecting illegal characters, CLI polish, Git export identity checks, ETag/304 conditional polling, branch creation at commit, and brute-force pairing security enforcement with 429 and 403 checks).
 - `tests/test_core_fixes.cpp` (10 tests): Core repository logic and safety fixes (merge conflict tracking and commit refusal, operation locking during merge, Snapshot struct fields, non-destructive `stashPop()`, atomic `revert()`, empty-tree commit on file deletion, `.minigitignore` root scoping and caching, Git export clean teardown, Git import idempotency, and `createBranch` revision validation).
 
+### Full Verification Pipeline (`scripts/verify.sh` and `verify.bat`)
+
+To run the complete verification suite from a clean state:
+```bash
+# Linux / macOS / MSYS2:
+./scripts/verify.sh
+
+# Windows (Command Prompt / PowerShell):
+scripts\verify.bat
+```
+
+The verification pipeline executes the following checks and prints a unified summary table:
+1. **Clean build with `-Werror`**: Builds Mini-Git and all test suites with `-Wall -Wextra -Wpedantic -Werror` to ensure zero compiler warnings.
+2. **C++ test suites**: Executes all 4 suites (`test_fixes`, `test_p2p`, `test_cli_server`, `test_core_fixes`).
+3. **End-to-end integration demo**: Runs `tests/demo.sh` in an isolated temporary directory.
+4. **Frontend Node.js tests**: Runs headless VM regression tests (`tests/frontend/*.test.js`) verifying unsaved-change dialog staging, pairing decision flags, topological commit ordering, multi-lane DAG routing, and XSS sanitization.
+5. **Script block syntax validation**: Extracts every inline `<script>` block from `templates/frontend.html` and validates syntax with `node --check`.
+6. **Frontend template freshness check**: Confirms that `include/FrontendTemplate.h` is byte-identical to a freshly generated template from `tools/embed_frontend.py`.
+7. **Source audit**: Scans `src/` for forbidden patterns (`system(`, `popen(`, `argv[0]`, `getenv("TEST`) to prevent test-detection hacks.
+
+### Git Pre-Push Hook
+
+To ensure tests and verification checks run automatically before pushing to remote repositories:
+```bash
+bash tools/install-hooks.sh
+```
+This configures `.git/hooks/pre-push` to run `scripts/verify.sh` and block any push if verification fails.
+
+### Continuous Integration (GitHub Actions)
+
+Continuous integration is configured in `.github/workflows/ci.yml`:
+- **Multi-platform matrix**: Runs full verification on `ubuntu-latest` (GCC and Clang) and `windows-latest` (MSYS2 MinGW-w64) on every push and pull request to `main` and `web-studio`.
+- **Sanitizers**: An automated AddressSanitizer (ASan) and UndefinedBehaviorSanitizer (UBSan) job builds and executes all test suites on Linux with memory and undefined behavior instrumentation.
+
 Scripted end-to-end demo (init, add, commit, branch, checkout, merge, error cases) in a temporary folder:
 ```bash
 bash tests/demo.sh
@@ -356,8 +390,8 @@ Security rules (enforced in `HttpServer` and `PairingManager`):
 
 - **CSPRNG codes and tokens**: Pair codes are generated via `std::random_device` with rejection sampling (100000–999999). Session tokens are 32 cryptographically random bytes (64 hexadecimal characters).
 - **Code expiration & single use**: A pair code is valid for **300 seconds** (5 minutes) and is single-use: once approved, it is marked used. Pending requests expire after 120 seconds.
-- **Per-client lockout**: Keyed on client IP. A client that fails **5 attempts** is locked out (`403 Forbidden`) with exponential backoff (starting at 5 seconds) until the host generates a new code. Other clients remain unaffected.
-- **Global rate limit (429)**: The server tracks failed attempts across all clients in a sliding 60-second window. If **10 failed attempts** occur within 60 seconds, all submissions return `429 Too Many Requests`.
+- **Per-client lockout & exponential backoff**: Keyed on client IP. Each failed attempt applies exponential backoff (1s, 2s, 4s, 8s, up to 16s delay). The lockout response returns `429 Too Many Requests` or `403 Forbidden` with the message `"Try again in N seconds"`, informing the client of the remaining backoff duration without permanently invalidating active codes.
+- **Global brute-force ceiling & Host Alert**: The server tracks failed attempts across all external LAN clients. To keep the mathematical probability of guessing a 6-digit code below 0.1% across its 5-minute lifespan, global failures are bounded (at most 100 failed attempts per 5 minutes, yielding a success chance of $\le 100 / 1{,}000{,}000 = 0.01\%$). The host UI displays a real-time safety alert with the total failure count. Legitimate peers with zero failures are never blocked by an attacker on a different IP.
 - **DoS resilience without global code invalidation**: Repeated wrong attempts from malicious clients do not invalidate the code globally for legitimate peers. The host can manually click **Generate New Code** at any time.
 - **Single-use session token delivery**: Approved session tokens (32 cryptographically random bytes / 64 hex characters) are handed out once to the requesting client IP and then deleted from pending requests.
 - **Non-LAN & cross-origin refusal**: If `--lan` is not passed on startup, pairing requests return `403 Forbidden`. Cross-origin pairing over loopback returns `403 Forbidden`. Non-loopback clients can only access `/api/pair`, `/api/pair/status`, `/api/sync/bundle`, and `/api/sync/import-bundle` (`403 Forbidden` for all others).
@@ -374,9 +408,11 @@ Mini-Git's Web Studio incorporates multi-layered security controls to protect lo
 - **Loopback binding by default**: Without `--lan`, `HttpServer` binds strictly to `127.0.0.1`. Network connections from other machines cannot reach the socket.
 - **Host-header validation (DNS rebinding defense)**: Every HTTP request validates the `Host` header against the bound port and permitted hostnames (`127.0.0.1`, `localhost`, or IPv4 literal when `--lan` is active). External host headers return `403 Forbidden`, preventing malicious websites from exploiting DNS rebinding.
 - **Origin / CSRF checks**: On loopback, all state-changing requests (`POST`, `PUT`, `DELETE`) verify that the `Origin` header matches `http://127.0.0.1:<port>` or `http://localhost:<port>`. Cross-origin requests from external web pages return `403 Forbidden`. Cross-origin pairing over loopback is rejected.
+- **Per-IP connection limits & loopback worker reservation**: External IP addresses are capped at a maximum of **4 concurrent open connections** (exceeding connections immediately receive `503 Service Unavailable`, scoped strictly to that IP). Crucially, the server **reserves 2 dedicated worker slots in the thread pool exclusively for loopback connections** (`127.0.0.1` / `localhost`), guaranteeing that connection flooding or denial-of-service attempts by external LAN clients can never lock out or starve the host's own Web Studio UI. Loopback connections also benefit from an elevated ceiling (up to 24) to support concurrent UI tasks.
+- **Header deadline (5s) & slowloris protection**: Enforces a strict 5-second deadline from socket `accept()` to receive the complete HTTP request headers. Requests whose headers are incomplete or hang after 5 seconds are closed immediately without blocking worker threads.
 - **JSON Content-Type requirement**: State-changing loopback endpoints require `Content-Type: application/json` (`400 Bad Request` otherwise), preventing browser form submission attacks (`application/x-www-form-urlencoded` or `multipart/form-data`).
 - **Token-protected sync endpoints**: Non-loopback access to `/api/sync/bundle` and `/api/sync/import-bundle` requires a valid 32-byte session token via `X-MiniGit-Token` (`401 Unauthorized` otherwise). All other endpoints return `403 Forbidden` to external clients.
-- **Slowloris & timeout protection**: Enforces a strict 10-second per-request wall-clock deadline; connections are served from a thread pool (`HttpServerThreadPool`) with mutex synchronization protecting `Repository` and `PairingManager`.
+- **Wall-clock request deadline & thread pool**: Enforces a strict per-request wall-clock deadline; connections are served from a thread pool (`HttpServerThreadPool`) with mutex synchronization protecting `Repository` and `PairingManager`.
 - **Unauthenticated endpoint body limit (4 KB)**: Inbound request bodies on unauthenticated endpoints (`/api/pair`, `/api/pair/status`) are capped at 4 KB before JSON parsing.
 - **50 MB payload limit**: Inbound request bodies are capped at 50 MB via `Content-Length` enforcement (`> 50 * 1024 * 1024`). Over-sized requests immediately receive `413 Payload Too Large`.
 - **JSON nesting depth limit**: JSON parsing enforces a recursion depth limit of 64 levels, preventing stack overflow on maliciously crafted payloads.

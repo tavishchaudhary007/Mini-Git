@@ -86,6 +86,7 @@ class Repository {
     bool isAncestor(const Hash& ancestor, const Hash& descendant) const;
     bool isDirty() const;
     static std::string author();
+    std::string importBundleInternal(const std::string& bundleData, bool throwOnError);
 
 public:
     explicit Repository(const fs::path& root);
@@ -132,6 +133,7 @@ public:
     // Serverless P2P & LAN Sync Bundle
     std::string exportBundleJson() const;
     std::string importBundleJson(const std::string& bundleJson);
+    void importBundle(const std::string& bundleData);
 
     // Git Interoperability Bridge
     std::string gitStatus() const;

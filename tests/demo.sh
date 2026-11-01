@@ -2,6 +2,13 @@
 # End-to-end demo / smoke test. Usage: bash tests/demo.sh  (run from project root after `make`)
 set -e
 MG="$(pwd)/minigit"
+if [ -f "${MG}.exe" ]; then
+    MG="${MG}.exe"
+fi
+if which g++ >/dev/null 2>&1; then
+    COMPILER_DIR="$(dirname "$(which g++ 2>/dev/null)")"
+    export PATH="$COMPILER_DIR:$PATH"
+fi
 T=$(mktemp -d); cd "$T"
 export MINIGIT_AUTHOR="Demo User"
 run() { echo; echo "\$ minigit $*"; "$MG" "$@"; }

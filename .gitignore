@@ -5,3 +5,5 @@ minigit.exe.*
 minigit_*.exe
 *.tmp
 .minigit/
+__pycache__/
+*.pyc

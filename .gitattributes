@@ -1,5 +1,6 @@
 # Generated from templates/frontend.html by tools/embed_frontend.py
-include/FrontendTemplate.h linguist-generated
+include/FrontendTemplate.h linguist-generated text eol=lf
+templates/frontend.html text eol=lf
 # Headers are C++, not C
 *.h linguist-language=C++
 # Keep line endings stable across Windows/Linux

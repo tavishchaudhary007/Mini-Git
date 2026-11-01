@@ -5,7 +5,7 @@ set -e
 cd "$(dirname "$0")"
 
 echo "Building..."
-g++ -std=c++17 -Iinclude src/*.cpp -o minigit
+g++ -std=c++17 -Iinclude -pthread src/*.cpp -o minigit -pthread
 MG="$(pwd)/minigit"
 
 DEMO="$(pwd)/../minigit-demo"

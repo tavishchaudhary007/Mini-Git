@@ -157,11 +157,7 @@ int PairingManager::failedAttempts(const std::string& clientKey) const {
         auto it = failedAttemptsByClient_.find(clientKey);
         return (it != failedAttemptsByClient_.end()) ? it->second : 0;
     }
-    int maxFails = currentCodeFailures_;
-    for (const auto& [ip, fails] : failedAttemptsByClient_) {
-        if (fails > maxFails) maxFails = fails;
-    }
-    return maxFails;
+    return currentCodeFailures_;
 }
 
 PairingManager::PairSubmitResult PairingManager::submitCode(const std::string& code,
@@ -198,7 +194,21 @@ PairingManager::PairSubmitResult PairingManager::submitCode(const std::string& c
 
     if (clientLocked) {
         // Do not push to failedAttemptTimestamps_ for clients that are already locked
-        res.error = "Pairing locked after 5 failed attempts. Please generate a new code on the host.";
+        int remSec = 5;
+        auto itLock = clientLockoutUntil_.find(clientKey);
+        if (itLock != clientLockoutUntil_.end()) {
+            remSec = std::max(1, static_cast<int>(std::chrono::duration_cast<std::chrono::seconds>(itLock->second - now).count()));
+        } else {
+            size_t pipe = clientKey.find('|');
+            if (pipe != std::string::npos) {
+                std::string ipOnly = clientKey.substr(0, pipe);
+                itLock = clientLockoutUntil_.find(ipOnly);
+                if (itLock != clientLockoutUntil_.end()) {
+                    remSec = std::max(1, static_cast<int>(std::chrono::duration_cast<std::chrono::seconds>(itLock->second - now).count()));
+                }
+            }
+        }
+        res.error = "Try again in " + std::to_string(remSec) + " seconds";
         return res;
     }
 
@@ -207,11 +217,25 @@ PairingManager::PairSubmitResult PairingManager::submitCode(const std::string& c
         return res;
     }
 
-    // 1. Check the global bucket BEFORE comparing the code. While it is full, return 429 for every submission,
-    // including the correct code, so the response leaks nothing.
-    if (failedAttemptTimestamps_.size() >= 10) {
+    // Brute-force success probability calculation:
+    // A 6-digit pair code is chosen uniformly from 100,000 to 999,999 (900,000 possibilities).
+    // The probability of guessing correctly within K distinct attempts is:
+    //   P(success) = 1 - (1 - 1/900000)^K ≈ K / 900,000.
+    // To ensure the success chance remains strictly below 0.1% (0.001) over the code's 5-minute (300 s) lifetime:
+    //   K / 900,000 < 0.001  ==>  K < 900 attempts.
+    // We enforce a hard ceiling of 800 total failed attempts per 5-minute code lifetime across all clients.
+    // When 800 total failures is reached, no further guesses are permitted (success chance <= 800 / 900,000 = 0.0889% < 0.1%).
+    // In addition, we apply a slower global rate limit of 20 failures/minute across all clients that ONLY throttles
+    // clients with failures of their own (fails > 0). Legitimate peers with 0 failures (fails == 0) are NEVER blocked.
+    if (currentCodeFailures_ >= 800) {
         res.rateLimited = true;
-        res.error = "Too many failed pairing attempts across clients. Rate limit exceeded (10 per minute).";
+        res.error = "Maximum pairing attempts reached for this code. Please generate a new code on the host.";
+        return res;
+    }
+
+    if (failedAttemptTimestamps_.size() >= 20 && fails > 0) {
+        res.rateLimited = true;
+        res.error = "Too many failed pairing attempts across clients. Please try again later.";
         return res;
     }
 
@@ -244,7 +268,7 @@ PairingManager::PairSubmitResult PairingManager::submitCode(const std::string& c
             clientLockoutUntil_[clientKey] = now + std::chrono::seconds(backoffSec);
             res.locked = true;
             res.remainingAttempts = 0;
-            res.error = "Pairing locked after 5 failed attempts. Please generate a new code on the host.";
+            res.error = "Try again in " + std::to_string(backoffSec) + " seconds";
         } else {
             res.remainingAttempts = 5 - newFails;
             res.error = "Invalid pair code (" + std::to_string(res.remainingAttempts) + " attempt" +

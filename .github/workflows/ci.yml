@@ -1,0 +1,119 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, web-studio ]
+  pull_request:
+    branches: [ main, web-studio ]
+
+jobs:
+  verify:
+    name: Verify (${{ matrix.os }} - ${{ matrix.compiler }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            compiler: gcc
+            cxx: g++
+          - os: ubuntu-latest
+            compiler: clang
+            cxx: clang++
+          - os: windows-latest
+            compiler: mingw-w64
+            cxx: g++
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # Linux dependencies
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential
+          if [ "${{ matrix.compiler }}" = "clang" ]; then
+            sudo apt-get install -y clang
+          fi
+
+      # Windows MSYS2 MinGW-w64 setup
+      - name: Set up MSYS2 on Windows
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          path-type: inherit
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-make
+            mingw-w64-ucrt-x86_64-python
+            git
+
+      # Run verification on Linux
+      - name: Run scripts/verify.sh (Linux)
+        if: runner.os == 'Linux'
+        env:
+          CXX: ${{ matrix.cxx }}
+        run: |
+          chmod +x scripts/verify.sh tests/demo.sh
+          ./scripts/verify.sh
+
+      # Run verification on Windows (MSYS2)
+      - name: Run scripts/verify.sh (Windows MSYS2)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          chmod +x scripts/verify.sh tests/demo.sh
+          ./scripts/verify.sh
+
+  sanitizers:
+    name: ASan + UBSan (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential
+
+      - name: Clean build with AddressSanitizer and UndefinedBehaviorSanitizer
+        run: |
+          make clean
+          make all test-build CXXFLAGS="-std=c++17 -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -g -O1 -Iinclude -pthread" LDFLAGS="-fsanitize=address,undefined -pthread"
+
+      - name: Run test_fixes with ASan/UBSan
+        run: ./build/test_fixes
+
+      - name: Run test_p2p with ASan/UBSan
+        run: ./build/test_p2p
+
+      - name: Run test_cli_server with ASan/UBSan
+        run: ./build/test_cli_server
+
+      - name: Run test_core_fixes with ASan/UBSan
+        run: ./build/test_core_fixes
+
+      - name: Run demo.sh with ASan/UBSan
+        run: |
+          chmod +x tests/demo.sh
+          ./tests/demo.sh

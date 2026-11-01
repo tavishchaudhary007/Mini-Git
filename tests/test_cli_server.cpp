@@ -34,6 +34,9 @@ using socket_t = SOCKET;
 #include <unistd.h>
 using socket_t = int;
 #define CLOSESOCK(s) close(s)
+#ifndef INVALID_SOCKET
+#define INVALID_SOCKET ((socket_t)-1)
+#endif
 #endif
 
 #include "Repository.h"
@@ -1953,6 +1956,625 @@ void test_group1_http_unauth_body_limit_and_slowloris() {
     std::cout << "PASSED\n";
 }
 
+static std::string getMinigitBinaryPath() {
+#ifdef _WIN32
+    if (fs::exists("minigit.exe")) return "minigit.exe";
+    if (fs::exists("./build/../minigit.exe")) return "./build/../minigit.exe";
+    return "minigit.exe";
+#else
+    if (fs::exists("./minigit")) return "./minigit";
+    if (fs::exists("./build/../minigit")) return "./build/../minigit";
+    return "./minigit";
+#endif
+}
+
+struct ProcessResult {
+    int exitCode = -1;
+    std::string output;
+};
+
+static ProcessResult runMinigit(const std::string& args, const fs::path& workingDir = "") {
+    std::string bin = fs::absolute(getMinigitBinaryPath()).string();
+    std::string cmd;
+    if (!workingDir.empty()) {
+#ifdef _WIN32
+        cmd = "cd /d \"" + workingDir.string() + "\" && \"" + bin + "\" " + args + " 2>&1";
+#else
+        cmd = "cd \"" + workingDir.string() + "\" && \"" + bin + "\" " + args + " 2>&1";
+#endif
+    } else {
+        cmd = "\"" + bin + "\" " + args + " 2>&1";
+    }
+#ifdef _WIN32
+    FILE* pipe = _popen(cmd.c_str(), "r");
+#else
+    FILE* pipe = popen(cmd.c_str(), "r");
+#endif
+    if (!pipe) return {-1, ""};
+    char buf[512];
+    std::string out;
+    while (fgets(buf, sizeof(buf), pipe)) {
+        out += buf;
+    }
+#ifdef _WIN32
+    int status = _pclose(pipe);
+#else
+    int status = pclose(pipe);
+    if (WIFEXITED(status)) status = WEXITSTATUS(status);
+#endif
+    return {status, out};
+}
+
+void test_a6_pairing() {
+    std::cout << "[Test A6] Pairing per-IP lockout message and global brute-force limit... " << std::flush;
+
+    // 1. Lockout message says "Try again in N seconds"
+    {
+        PairingManager pm;
+        std::string code = pm.currentCode();
+        PairingManager::PairSubmitResult r;
+        for (int i = 0; i < 5; ++i) {
+            r = pm.submitCode("000000", "192.168.1.50");
+        }
+        CHECK(r.locked);
+        CHECK(r.error.find("Try again in ") != std::string::npos);
+        CHECK(r.error.find("seconds") != std::string::npos);
+        CHECK(r.error.find("Please generate a new code") == std::string::npos);
+    }
+
+    // 2. Global failures do not block a client with 0 failures from submitting the correct code
+    {
+        PairingManager pm;
+        std::string code = pm.currentCode();
+        // 20 failed attempts from distinct IPs
+        for (int i = 1; i <= 20; ++i) {
+            std::string ip = "192.168.2." + std::to_string(i);
+            auto rFail = pm.submitCode("000000", ip);
+            CHECK(!rFail.success);
+        }
+        CHECK(pm.failedAttempts() >= 20);
+
+        // A legitimate peer with 0 failures submits the correct code
+        auto rGood = pm.submitCode(code, "192.168.2.99");
+        CHECK(rGood.success);
+        CHECK(!rGood.rateLimited);
+    }
+
+    // 3. Brute force limit ceiling: 800 attempts ensures < 0.1% chance on 900,000 code space
+    {
+        PairingManager pm;
+        std::string code = pm.currentCode();
+        for (int i = 0; i < 800; ++i) {
+            std::string ip = "10.0." + std::to_string(i / 250) + "." + std::to_string(i % 250);
+            pm.submitCode("000000", ip);
+        }
+        CHECK(pm.failedAttempts() == 800);
+        // At 800 failures, further guesses are rejected
+        auto rOver = pm.submitCode("000000", "10.0.99.99");
+        CHECK(rOver.rateLimited);
+        CHECK(rOver.error.find("Maximum pairing attempts reached") != std::string::npos);
+    }
+
+    std::cout << "PASSED\n";
+}
+
+void test_a5_connection_flooding() {
+    std::cout << "[Test A5] Connection flooding (per-IP 4 limit, loopback always served)... " << std::flush;
+    fs::path dir = fs::current_path() / "test_repo_a5_srv";
+    cleanDir(dir);
+    Repository::init(dir);
+    Repository repo(dir);
+
+    int testPort = 19948;
+    std::thread serverThread([&]() {
+        HttpServer::run(&repo, testPort, false, true);
+    });
+    serverThread.detach();
+
+    for (int i = 0; i < 40; ++i) {
+        std::string ping = httpExchange("127.0.0.1", testPort, "GET /api/status HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) + "\r\nConnection: close\r\n\r\n", 1);
+        if (ping.find("200 OK") != std::string::npos) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
+    // Open 40 idle sockets from 127.0.0.2
+    std::vector<socket_t> idleSockets;
+    for (int i = 0; i < 40; ++i) {
+        socket_t s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (s == (socket_t)-1) continue;
+
+        sockaddr_in localAddr{};
+        localAddr.sin_family = AF_INET;
+        localAddr.sin_port = 0;
+        localAddr.sin_addr.s_addr = inet_addr("127.0.0.2");
+        bind(s, (struct sockaddr*)&localAddr, sizeof(localAddr));
+
+        sockaddr_in serverAddr{};
+        serverAddr.sin_family = AF_INET;
+        serverAddr.sin_port = htons(static_cast<uint16_t>(testPort));
+        serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+        if (connect(s, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) == 0) {
+            idleSockets.push_back(s);
+        } else {
+            CLOSESOCK(s);
+        }
+    }
+
+    // Now send a request from loopback (127.0.0.1). Must get 200 within 1s
+    std::string req = "GET / HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) + "\r\nConnection: close\r\n\r\n";
+    auto t0 = std::chrono::steady_clock::now();
+    std::string loopResp = httpExchange("127.0.0.1", testPort, req, 1);
+    auto dur = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+
+    // Clean up idle sockets
+    for (socket_t s : idleSockets) {
+        CLOSESOCK(s);
+    }
+
+    CHECK(dur <= 1000);
+    CHECK(loopResp.find("200 OK") != std::string::npos);
+
+    removeDir(dir);
+    std::cout << "PASSED\n";
+}
+
+void test_a4_http_parsing() {
+    std::cout << "[Test A4] HTTP parsing (bare-LF, Content-Length early 413, 200KB header 431)... " << std::flush;
+    fs::path dir = fs::current_path() / "test_repo_a4_srv";
+    cleanDir(dir);
+    Repository::init(dir);
+    Repository repo(dir);
+
+    int testPort = 19947;
+    std::thread serverThread([&]() {
+        HttpServer::run(&repo, testPort, false, true);
+    });
+    serverThread.detach();
+
+    // Wait for server to come up
+    for (int i = 0; i < 40; ++i) {
+        std::string ping = httpExchange("127.0.0.1", testPort, "GET /api/status HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) + "\r\nConnection: close\r\n\r\n", 1);
+        if (ping.find("200 OK") != std::string::npos) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
+    // 1. Bare-LF GET returns 200 within 1 s
+    {
+        std::string bareLfReq = "GET / HTTP/1.1\nHost: 127.0.0.1:" + std::to_string(testPort) + "\nConnection: close\n\n";
+        auto t0 = std::chrono::steady_clock::now();
+        std::string bareResp = httpExchange("127.0.0.1", testPort, bareLfReq, 2);
+        auto dur = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+        CHECK(bareResp.find("200 OK") != std::string::npos);
+        CHECK(dur <= 1000);
+    }
+
+    // 2. 2 MB Content-Length to /api/pair returns 413 within 0.2 s
+    {
+        socket_t s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        CHECK(s != (socket_t)-1);
+        sockaddr_in saddr{};
+        saddr.sin_family = AF_INET;
+        saddr.sin_port = htons(static_cast<uint16_t>(testPort));
+        saddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+        int cRes = connect(s, (struct sockaddr*)&saddr, sizeof(saddr));
+        CHECK(cRes == 0);
+
+        std::string clHdr = "POST /api/pair HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) +
+            "\r\nContent-Type: application/json\r\nContent-Length: 2000000\r\nConnection: close\r\n\r\n";
+        auto t1 = std::chrono::steady_clock::now();
+        send(s, clHdr.data(), static_cast<int>(clHdr.size()), 0);
+
+        char buf[1024];
+        int n = recv(s, buf, sizeof(buf) - 1, 0);
+        auto durCl = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t1).count();
+        CLOSESOCK(s);
+
+        CHECK(n > 0);
+        buf[n] = '\0';
+        std::string clResp(buf);
+        CHECK(clResp.find("413") != std::string::npos);
+        CHECK(durCl <= 200);
+    }
+
+    // 3. 200 KB header returns 431 without connection reset
+    {
+        socket_t s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        CHECK(s != (socket_t)-1);
+        sockaddr_in saddr{};
+        saddr.sin_family = AF_INET;
+        saddr.sin_port = htons(static_cast<uint16_t>(testPort));
+        saddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+        int cRes = connect(s, (struct sockaddr*)&saddr, sizeof(saddr));
+        CHECK(cRes == 0);
+
+        std::string bigHdr = "GET / HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(testPort) + "\r\n";
+        std::string pad(1000, 'x');
+        for (int i = 0; i < 200; ++i) {
+            bigHdr += "X-Big-Header-" + std::to_string(i) + ": " + pad + "\r\n";
+        }
+        bigHdr += "\r\n";
+
+        // Send in chunks
+        size_t totalSent = 0;
+        while (totalSent < bigHdr.size()) {
+            int toSend = static_cast<int>(std::min(bigHdr.size() - totalSent, (size_t)8192));
+            int sent = send(s, bigHdr.data() + totalSent, toSend, 0);
+            if (sent <= 0) break;
+            totalSent += sent;
+        }
+
+        char buf[1024];
+        int n = recv(s, buf, sizeof(buf) - 1, 0);
+        CLOSESOCK(s);
+
+        CHECK(n > 0);
+        buf[n] = '\0';
+        std::string resp431(buf);
+        CHECK(resp431.find("431") != std::string::npos);
+    }
+
+    removeDir(dir);
+    std::cout << "PASSED\n";
+}
+
+void test_a2_cli() {
+    std::cout << "[Test A2] CLI fixes (help flags, empty checkout, commit args/-m, log indent, log --stat, serve/ui usage)... " << std::flush;
+    fs::path dir = fs::current_path() / "test_repo_a2_cli";
+    cleanDir(dir);
+
+    // 1. \"minigit help\", \"-h\", \"--help\" print usage and exit 0
+    {
+        auto r1 = runMinigit("help");
+        CHECK(r1.exitCode == 0);
+        CHECK(r1.output.find("usage:") != std::string::npos || r1.output.find("Mini-Git") != std::string::npos);
+
+        auto r2 = runMinigit("-h");
+        CHECK(r2.exitCode == 0);
+        CHECK(r2.output.find("usage:") != std::string::npos || r2.output.find("Mini-Git") != std::string::npos);
+
+        auto r3 = runMinigit("--help");
+        CHECK(r3.exitCode == 0);
+        CHECK(r3.output.find("usage:") != std::string::npos || r3.output.find("Mini-Git") != std::string::npos);
+    }
+
+    // 2. \"minigit checkout <missing-branch>\" in a repo with no commits prints an error and exits 1
+    {
+        auto rInit = runMinigit("init", dir);
+        CHECK(rInit.exitCode == 0);
+
+        auto rCheckMissing = runMinigit("checkout missing_branch", dir);
+        CHECK(rCheckMissing.exitCode == 1);
+        CHECK(rCheckMissing.output.find("error") != std::string::npos);
+    }
+
+    // 3. \"commit\" rejects unknown arguments (e.g. --wat) with usage and exit 1. Several -m flags are joined with a blank line between them
+    {
+        writeFile(dir / "f1.txt", "line1\n");
+        auto rAdd = runMinigit("add f1.txt", dir);
+        CHECK(rAdd.exitCode == 0);
+
+        auto rUnknown = runMinigit("commit -m \"msg\" --wat", dir);
+        CHECK(rUnknown.exitCode == 1);
+        CHECK(rUnknown.output.find("usage:") != std::string::npos);
+
+        auto rCommit = runMinigit("commit -m \"Header line\" -m \"Body line\"", dir);
+        CHECK(rCommit.exitCode == 0);
+
+        auto rLog = runMinigit("log", dir);
+        CHECK(rLog.exitCode == 0);
+        CHECK(rLog.output.find("Header line") != std::string::npos &&
+              rLog.output.find("Body line") != std::string::npos);
+    }
+
+    // 4. \"log\" indents EVERY line of a multi-line message by 4 spaces
+    {
+        writeFile(dir / "f2.txt", "line2\n");
+        runMinigit("add f2.txt", dir);
+        {
+            Repository repo(dir);
+            repo.commit("Title line\nSecond paragraph line A\nSecond paragraph line B");
+        }
+
+        auto rLog2 = runMinigit("log", dir);
+        CHECK(rLog2.exitCode == 0);
+        CHECK(rLog2.output.find("    Title line") != std::string::npos);
+        CHECK(rLog2.output.find("    Second paragraph line A") != std::string::npos);
+        CHECK(rLog2.output.find("    Second paragraph line B") != std::string::npos);
+    }
+
+    // 5. \"log --stat\" scales its bars only when a change is over 20 lines
+    {
+        writeFile(dir / "f3.txt", "1\n2\n3\n");
+        runMinigit("add f3.txt", dir);
+        runMinigit("commit -m \"Three lines\"", dir);
+
+        auto rLogStat = runMinigit("log --stat", dir);
+        CHECK(rLogStat.exitCode == 0);
+        CHECK(rLogStat.output.find("f3.txt | 3 +++\n") != std::string::npos ||
+              rLogStat.output.find("f3.txt | 3 +++\r\n") != std::string::npos ||
+              rLogStat.output.find(" | 3 +++") != std::string::npos);
+        CHECK(rLogStat.output.find(" | 3 ++++++++++") == std::string::npos);
+    }
+
+    // 6. \"serve\"/\"ui\" with a bad flag prints the usage for that command and exits 1
+    {
+        auto rServeBad = runMinigit("serve --badflag", dir);
+        CHECK(rServeBad.exitCode == 1);
+        CHECK(rServeBad.output.find("usage: minigit serve") != std::string::npos);
+        CHECK(rServeBad.output.find("usage: minigit ui") == std::string::npos);
+
+        auto rUiBad = runMinigit("ui --badflag", dir);
+        CHECK(rUiBad.exitCode == 1);
+        CHECK(rUiBad.output.find("usage: minigit ui") != std::string::npos);
+    }
+
+    removeDir(dir);
+    std::cout << "PASSED\n";
+}
+
+void test_b4_snapshot_etag_cors() {
+    std::cout << "[Test B4] Snapshot lanUrl, comma-separated ETag 304, and CORS on 304... " << std::flush;
+    fs::path dir = fs::current_path() / "test_repo_cli_b4";
+    cleanDir(dir);
+    Repository::init(dir);
+    Repository repo(dir);
+
+    writeFile(dir / "hello.txt", "world");
+    repo.add("hello.txt", true);
+    repo.commit("initial commit");
+
+    int testPort = 19970;
+    std::thread serverThread([&]() {
+        try {
+            HttpServer::run(&repo, testPort, false, true); // lan = true
+        } catch (...) {}
+    });
+    serverThread.detach();
+
+    // Probe port and fetch snapshot
+    std::string probeReq = "GET /api/snapshot HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
+    std::string probeResp;
+    int boundPort = testPort;
+    for (int retry = 0; retry < 30; ++retry) {
+        for (int p = testPort; p < testPort + 5; ++p) {
+            probeResp = httpExchange("127.0.0.1", p, probeReq);
+            if (probeResp.find("200 OK") != std::string::npos) {
+                boundPort = p;
+                break;
+            }
+        }
+        if (probeResp.find("200 OK") != std::string::npos) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    testPort = boundPort;
+    CHECK(probeResp.find("200 OK") != std::string::npos);
+
+    // 1. lanUrl present in LAN mode
+    size_t bodyPos = probeResp.find("\r\n\r\n");
+    CHECK(bodyPos != std::string::npos);
+    std::string snapBody = probeResp.substr(bodyPos + 4);
+    std::string parseErr;
+    JsonValue snapJson = JsonValue::parse(snapBody, &parseErr);
+    CHECK(snapJson.is_object());
+    CHECK(snapJson.contains("lan"));
+    CHECK(snapJson["lan"].as_bool() == true);
+    CHECK(snapJson.contains("lanUrl"));
+    CHECK(snapJson["lanUrl"].is_string());
+    std::string lanUrlStr = snapJson["lanUrl"].as_string();
+    CHECK(!lanUrlStr.empty());
+    CHECK(lanUrlStr.rfind("http://", 0) == 0);
+
+    // Get ETag
+    size_t etagPos = probeResp.find("ETag: ");
+    CHECK(etagPos != std::string::npos);
+    size_t etagEnd = probeResp.find("\r\n", etagPos);
+    std::string currentEtag = probeResp.substr(etagPos + 6, etagEnd - (etagPos + 6));
+    CHECK(!currentEtag.empty());
+
+    // 2. Comma-separated If-None-Match list containing current ETag
+    std::string commaIfNoneMatch = "\"old-etag-1\", " + currentEtag + ", \"older-etag-2\"";
+    std::string clientOrigin = "http://127.0.0.1:" + std::to_string(testPort);
+    std::string req304 = "GET /api/snapshot HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: " + clientOrigin +
+                         "\r\nIf-None-Match: " + commaIfNoneMatch + "\r\nConnection: close\r\n\r\n";
+    std::string resp304 = httpExchange("127.0.0.1", testPort, req304);
+
+    // Must return 304 Not Modified
+    CHECK(resp304.find("304 Not Modified") != std::string::npos);
+
+    // 3. CORS headers must be present on 304 response
+    CHECK(resp304.find("Access-Control-Allow-Origin: " + clientOrigin) != std::string::npos);
+    CHECK(resp304.find("Access-Control-Allow-Methods:") != std::string::npos);
+    CHECK(resp304.find("Vary: Origin") != std::string::npos);
+
+    removeDir(dir);
+    std::cout << "PASSED\n";
+}
+
+void test_b5_port_search_boundary() {
+    std::cout << "[Test B5] Port search starting at 65530 with ports taken never goes past 65535... " << std::flush;
+    fs::path dir = fs::current_path() / "test_repo_cli_b5";
+    cleanDir(dir);
+    Repository::init(dir);
+    Repository repo(dir);
+
+    // Occupy ports 65530 through 65535
+    std::vector<socket_t> occupiedSocks;
+    for (int p = 65530; p <= 65535; ++p) {
+        socket_t s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (s != INVALID_SOCKET) {
+            int opt = 1;
+#ifdef _WIN32
+            setsockopt(s, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char*)&opt, sizeof(opt));
+#else
+            setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+#endif
+            sockaddr_in addr{};
+            addr.sin_family = AF_INET;
+            addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+            addr.sin_port = htons(static_cast<uint16_t>(p));
+            if (bind(s, (struct sockaddr*)&addr, sizeof(addr)) == 0 && listen(s, 1) == 0) {
+                occupiedSocks.push_back(s);
+            } else {
+                CLOSESOCK(s);
+            }
+        }
+    }
+
+    bool threw = false;
+    std::string errMsg;
+    try {
+        HttpServer::run(&repo, 65530, false, false);
+    } catch (const MiniGitException& e) {
+        threw = true;
+        errMsg = e.what();
+    }
+
+    for (socket_t s : occupiedSocks) {
+        CLOSESOCK(s);
+    }
+
+    CHECK(threw);
+    CHECK(errMsg.find("65530-65535") != std::string::npos);
+    CHECK(errMsg.find("65560") == std::string::npos);
+
+    removeDir(dir);
+    std::cout << "PASSED\n";
+}
+
+void test_b6_concurrent_repo_mutations() {
+    std::cout << "[Test B6] Concurrency: 20 parallel API calls modifying repo... " << std::flush;
+    fs::path dir = fs::current_path() / "test_repo_cli_b6";
+    cleanDir(dir);
+    Repository::init(dir);
+    Repository repo(dir);
+
+    writeFile(dir / "initial.txt", "v0\n");
+    repo.add("initial.txt", true);
+    repo.commit("initial commit");
+
+    int testPort = 19972;
+    std::thread serverThread([&]() {
+        try {
+            HttpServer::run(&repo, testPort, false, false);
+        } catch (...) {}
+    });
+    serverThread.detach();
+
+    // Probe port
+    std::string probeReq = "GET /api/snapshot HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
+    std::string probeResp;
+    int boundPort = testPort;
+    for (int retry = 0; retry < 30; ++retry) {
+        for (int p = testPort; p < testPort + 5; ++p) {
+            probeResp = httpExchange("127.0.0.1", p, probeReq);
+            if (probeResp.find("200 OK") != std::string::npos) {
+                boundPort = p;
+                break;
+            }
+        }
+        if (probeResp.find("200 OK") != std::string::npos) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    testPort = boundPort;
+    CHECK(probeResp.find("200 OK") != std::string::npos);
+
+    // Launch 20 concurrent worker threads making API calls modifying the repo
+    std::vector<std::thread> workers;
+    std::atomic<int> successCount{0};
+    std::atomic<int> failureCount{0};
+
+    for (int i = 0; i < 20; ++i) {
+        workers.emplace_back([i, testPort, &successCount, &failureCount]() {
+            std::string filename = "worker_" + std::to_string(i) + ".txt";
+            std::string fileContent = "content from worker " + std::to_string(i) + "\n";
+
+            // 1. /api/file/save
+            std::string saveBody = "{\"path\":\"" + filename + "\",\"content\":\"" + fileContent + "\"}";
+            std::string saveReq = "POST /api/file/save HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: " +
+                                  std::to_string(saveBody.size()) + "\r\nConnection: close\r\n\r\n" + saveBody;
+            std::string saveResp = httpExchange("127.0.0.1", testPort, saveReq);
+
+            // 2. /api/stage
+            std::string stageBody = "{\"path\":\"" + filename + "\"}";
+            std::string stageReq = "POST /api/stage HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: " +
+                                   std::to_string(stageBody.size()) + "\r\nConnection: close\r\n\r\n" + stageBody;
+            std::string stageResp = httpExchange("127.0.0.1", testPort, stageReq);
+
+            // 3. /api/commit
+            std::string commitBody = "{\"message\":\"commit from worker " + std::to_string(i) + "\"}";
+            std::string commitReq = "POST /api/commit HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: " +
+                                    std::to_string(commitBody.size()) + "\r\nConnection: close\r\n\r\n" + commitBody;
+            std::string commitResp = httpExchange("127.0.0.1", testPort, commitReq);
+
+            // 4. /api/checkout main
+            std::string chkBody = "{\"target\":\"main\"}";
+            std::string chkReq = "POST /api/checkout HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: " +
+                                 std::to_string(chkBody.size()) + "\r\nConnection: close\r\n\r\n" + chkBody;
+            std::string chkResp = httpExchange("127.0.0.1", testPort, chkReq);
+
+            bool ok = (saveResp.find("HTTP/1.1 ") != std::string::npos &&
+                       stageResp.find("HTTP/1.1 ") != std::string::npos &&
+                       commitResp.find("HTTP/1.1 ") != std::string::npos &&
+                       chkResp.find("HTTP/1.1 ") != std::string::npos);
+            bool noServerCrash = (saveResp.find("500 Internal") == std::string::npos &&
+                                  stageResp.find("500 Internal") == std::string::npos &&
+                                  commitResp.find("500 Internal") == std::string::npos &&
+                                  chkResp.find("500 Internal") == std::string::npos);
+            if (ok && noServerCrash) {
+                successCount++;
+            } else {
+                failureCount++;
+            }
+        });
+    }
+
+    for (auto& w : workers) {
+        w.join();
+    }
+
+    CHECK(failureCount == 0);
+    CHECK(successCount == 20);
+
+    // Afterwards: repo passes full log walk and every object reads back
+    repo.reload();
+    auto commits = repo.log();
+    CHECK(!commits.empty());
+
+    ObjectStore store(dir / ".minigit" / "objects");
+    for (const auto& cItem : commits) {
+        CHECK(!cItem.hash().empty());
+        auto c = store.loadAs<Commit>(cItem.hash());
+        CHECK(c != nullptr);
+        CHECK(c->hash() == cItem.hash());
+
+        Hash tHash = c->tree();
+        CHECK(!tHash.empty());
+        auto t = store.loadAs<Tree>(tHash);
+        CHECK(t != nullptr);
+        CHECK(t->hash() == tHash);
+
+        for (const auto& [entryName, bHash] : t->entries()) {
+            CHECK(!bHash.empty());
+            auto b = store.loadAs<Blob>(bHash);
+            CHECK(b != nullptr);
+            CHECK(b->hash() == bHash);
+        }
+    }
+
+    // Every object in object store reads back
+    auto allHashes = store.listAll();
+    CHECK(!allHashes.empty());
+    for (const auto& h : allHashes) {
+        auto obj = store.load(h);
+        CHECK(obj != nullptr);
+        CHECK(obj->hash() == h);
+    }
+
+    removeDir(dir);
+    std::cout << "PASSED\n";
+}
+
 int main() {
 #ifdef _WIN32
     WSADATA wsaData;
@@ -1978,6 +2600,13 @@ int main() {
     test_l4_pairing_status_unknown_vs_denied();
     test_m2_server_idle_timeout_and_oversized_headers();
     test_group1_http_unauth_body_limit_and_slowloris();
+    test_a6_pairing();
+    test_a5_connection_flooding();
+    test_a4_http_parsing();
+    test_a2_cli();
+    test_b4_snapshot_etag_cors();
+    test_b5_port_search_boundary();
+    test_b6_concurrent_repo_mutations();
 
     std::cout << "\nALL CLI & SERVER TESTS PASSED SUCCESSFULLY!\n";
     return 0;

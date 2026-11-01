@@ -687,6 +687,115 @@ int main() {
 
     std::cout << "  -> PASSED: 3-way merge succeeded, 2 parents verified, security bounds enforced.\n";
 
+    // -------------------------------------------------------------
+    // TEST 9: B3 Poisoned bundle (item 8): bad header, non-stoll size, missing objects, corrupt object
+    // -------------------------------------------------------------
+    std::cout << "[Test 9] Testing B3 poisoned bundles (bad header, non-stoll size, missing objects, corrupt object)...\n";
+    fs::path b3Dir = tempBase / "repo_b3";
+    cleanDir(b3Dir);
+    Repository::init(b3Dir);
+    Repository repoB3(b3Dir);
+    writeFile(b3Dir / "f.txt", "v1\n");
+    repoB3.add("f.txt", true);
+    Hash b3BaseCommit = repoB3.commit("initial");
+
+    auto countObjects = [](const fs::path& rDir) -> int {
+        int count = 0;
+        fs::path objDir = rDir / ".minigit" / "objects";
+        if (fs::exists(objDir)) {
+            for (const auto& entry : fs::recursive_directory_iterator(objDir)) {
+                if (fs::is_regular_file(entry)) count++;
+            }
+        }
+        return count;
+    };
+
+    int initObjCount = countObjects(b3Dir);
+    CHECK(initObjCount > 0);
+
+    // 1. Bad header
+    {
+        bool threw = false;
+        try {
+            repoB3.importBundle("NOT_A_VALID_BUNDLE_HEADER\nrandom junk");
+        } catch (const MiniGitException&) {
+            threw = true;
+        }
+        CHECK(threw);
+        CHECK(countObjects(b3Dir) == initObjCount);
+        CHECK(repoB3.head() == b3BaseCommit);
+    }
+
+    // 2. Size that doesn't parse as stoll
+    {
+        bool threw = false;
+        std::string badSizeBundle =
+            "{\n"
+            "  \"objects\": {\n"
+            "    \"1111111111111111111111111111111111111111\": {\"type\": \"blob\", \"size\": \"not_a_number\", \"content\": \"hello\"}\n"
+            "  }\n"
+            "}";
+        try {
+            repoB3.importBundle(badSizeBundle);
+        } catch (const MiniGitException&) {
+            threw = true;
+        }
+        CHECK(threw);
+        CHECK(countObjects(b3Dir) == initObjCount);
+        CHECK(repoB3.head() == b3BaseCommit);
+    }
+
+    // 3. Refs pointing to missing objects
+    {
+        bool threw = false;
+        Blob validBlob("valid payload\n");
+        Tree validTree;
+        validTree.set("valid.txt", validBlob.hash());
+
+        // A bundle with valid blob and tree, but branch 'poison' points to a commit that doesn't exist
+        std::ostringstream missingObjBundle;
+        missingObjBundle << "{\n"
+                         << "  \"objects\": {\n"
+                         << "    \"" << validBlob.hash().str() << "\": {\"type\": \"blob\", \"content\": \"valid payload\\n\" },\n"
+                         << "    \"" << validTree.hash().str() << "\": {\"type\": \"tree\", \"data\": {\"valid.txt\": \"" << validBlob.hash().str() << "\"}}\n"
+                         << "  },\n"
+                         << "  \"branches\": {\n"
+                         << "    \"poison\": \"9999999999999999999999999999999999999999\"\n"
+                         << "  }\n"
+                         << "}";
+        try {
+            repoB3.importBundle(missingObjBundle.str());
+        } catch (const MiniGitException&) {
+            threw = true;
+        }
+        CHECK(threw);
+        // Valid blob and tree must NOT have been written to disk!
+        CHECK(countObjects(b3Dir) == initObjCount);
+        CHECK(!repoB3.branchExists("poison"));
+        CHECK(repoB3.head() == b3BaseCommit);
+    }
+
+    // 4. Corrupt object (hash mismatch)
+    {
+        bool threw = false;
+        std::string corruptBundle =
+            "{\n"
+            "  \"objects\": {\n"
+            "    \"0000000000000000000000000000000000000000\": {\"type\": \"blob\", \"content\": \"corrupt data\"}\n"
+            "  }\n"
+            "}";
+        try {
+            repoB3.importBundle(corruptBundle);
+        } catch (const MiniGitException&) {
+            threw = true;
+        }
+        CHECK(threw);
+        CHECK(countObjects(b3Dir) == initObjCount);
+        CHECK(repoB3.head() == b3BaseCommit);
+    }
+
+    std::cout << "  -> PASSED: B3 poisoned bundles refused with MiniGitException; store and refs untouched.\n";
+
     fs::current_path(origCwd);
     cleanDir(tempBase);
 

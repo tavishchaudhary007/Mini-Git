@@ -1,4 +1,5 @@
 #include "Commands.h"
+#include <sstream>
 #include <cstdlib>
 #include <ctime>
 #include <iostream>
@@ -56,13 +57,27 @@ void AddCmd::execute(Repository* repo, const Args& args) {
     }
 }
 void CommitCmd::execute(Repository* repo, const Args& args) {
+    std::vector<std::string> messages;
+    for (size_t i = 0; i < args.size(); ++i) {
+        if (args[i] == "-m") {
+            if (i + 1 >= args.size()) usageError(*this);
+            messages.push_back(args[++i]);
+        } else {
+            usageError(*this);
+        }
+    }
+    if (messages.empty()) usageError(*this);
     std::string msg;
-    for (size_t i = 0; i + 1 < args.size(); ++i)
-        if (args[i] == "-m") msg = args[i + 1];
-    if (msg.empty()) usageError(*this);
+    for (size_t i = 0; i < messages.size(); ++i) {
+        if (i > 0) msg += "\n\n";
+        msg += messages[i];
+    }
     Hash h = repo->commit(msg);
     std::string b = repo->currentBranch();
-    cout << "[" << (b.empty() ? "detached" : b) << " " << h.shortStr() << "] " << msg << "\n";
+    std::string firstLine = msg;
+    auto nl = firstLine.find('\n');
+    if (nl != std::string::npos) firstLine = firstLine.substr(0, nl);
+    cout << "[" << (b.empty() ? "detached" : b) << " " << h.shortStr() << "] " << firstLine << "\n";
 }
 
 void LogCmd::execute(Repository* repo, const Args& args) {
@@ -84,8 +99,17 @@ void LogCmd::execute(Repository* repo, const Args& args) {
             if (c.hasParent2()) {
                 cout << "Merge: " << c.parent().shortStr() << " " << c.parent2().shortStr() << "\n";
             }
-            cout << "Author: " << c.author() << "\nDate:   " << formatCommitDate(c.time()) << "\n\n    "
-                 << c.message() << "\n\n";
+            std::string indented;
+            std::istringstream iss(c.message());
+            std::string line;
+            bool first = true;
+            while (std::getline(iss, line)) {
+                if (!first) indented += "\n";
+                indented += "    " + line;
+                first = false;
+            }
+            cout << "Author: " << c.author() << "\nDate:   " << formatCommitDate(c.time()) << "\n\n"
+                 << indented << "\n\n";
         }
         if (stat) {
             auto stats = repo->commitStats(c.hash());
@@ -101,10 +125,19 @@ void LogCmd::execute(Repository* repo, const Args& args) {
                     } else {
                         size_t total = item.added + item.removed;
                         std::string bar;
-                        size_t plusCount = total > 0 ? (item.added * 20 / (stats.totalAdded + stats.totalRemoved + 1)) : 0;
-                        size_t minusCount = total > 0 ? (item.removed * 20 / (stats.totalAdded + stats.totalRemoved + 1)) : 0;
-                        if (plusCount == 0 && item.added > 0) plusCount = 1;
-                        if (minusCount == 0 && item.removed > 0) minusCount = 1;
+                        size_t plusCount = item.added;
+                        size_t minusCount = item.removed;
+                        if (total > 20) {
+                            plusCount = (item.added * 20) / total;
+                            minusCount = (item.removed * 20) / total;
+                            if (plusCount == 0 && item.added > 0) plusCount = 1;
+                            if (minusCount == 0 && item.removed > 0) minusCount = 1;
+                            while (plusCount + minusCount > 20) {
+                                if (plusCount > minusCount && plusCount > 1) plusCount--;
+                                else if (minusCount > 1) minusCount--;
+                                else break;
+                            }
+                        }
                         bar.append(plusCount, '+');
                         bar.append(minusCount, '-');
                         cout << " " << item.path << pad << " | " << total << " " << bar << "\n";
@@ -201,8 +234,11 @@ void BranchCmd::execute(Repository* repo, const Args& args) {
 void CheckoutCmd::execute(Repository* repo, const Args& args) {
     if (args.size() != 1) usageError(*this);
     if (repo->head().empty()) {
-        cout << "branch '" << args[0] << "' has no commits yet\n";
-        return;
+        if (args[0] == repo->currentBranch() || repo->branchExists(args[0])) {
+            cout << "branch '" << args[0] << "' has no commits yet\n";
+            return;
+        }
+        throw BranchException("branch '" + args[0] + "' not found");
     }
     repo->checkout(args[0]);
     std::string b = repo->currentBranch();
@@ -338,5 +374,12 @@ void UiCmd::execute(Repository* repo, const Args& args) {
 }
 
 void ServeCmd::execute(Repository* repo, const Args& args) {
-    UiCmd().execute(repo, args);
+    try {
+        UiCmd().execute(repo, args);
+    } catch (const MiniGitException& e) {
+        if (std::string(e.what()).rfind("usage: minigit ui", 0) == 0) {
+            usageError(*this);
+        }
+        throw;
+    }
 }

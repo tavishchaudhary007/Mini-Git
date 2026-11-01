@@ -6,7 +6,7 @@ cd /d "%~dp0"
 echo [1/2] Building Mini-Git...
 set SRCS=
 for %%f in (src\*.cpp) do call set SRCS=%%SRCS%% %%f
-g++ -std=c++17 -Iinclude %SRCS% -o minigit.exe -lws2_32
+g++ -std=c++17 -Iinclude -pthread %SRCS% -o minigit.exe -pthread -lws2_32
 if errorlevel 1 (
   echo Build failed. Is g++ installed and on PATH?
   exit /b 1

@@ -2,14 +2,16 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <iosfwd>
 #include "Commands.h"
 
 // Frontend: parses argv, dispatches to a Command, converts exceptions to exit codes.
 class CLI {
     std::map<std::string, std::unique_ptr<Command>> commands_;
     void registerCommand(std::unique_ptr<Command> c) { commands_[c->name()] = std::move(c); }
-    void printUsage() const;
+    void printUsage(std::ostream& os) const;
 public:
     CLI();
+    void printUsage() const;
     int run(int argc, char** argv);
 };

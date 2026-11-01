@@ -1,6 +1,6 @@
 CXX      ?= g++
-CXXFLAGS ?= -std=c++17 -Wall -Wextra -Wpedantic -O2 -Iinclude
-LDFLAGS  ?=
+CXXFLAGS ?= -std=c++17 -Wall -Wextra -Wpedantic -O2 -Iinclude -pthread
+LDFLAGS  ?= -pthread
 EXE      :=
 
 ifeq ($(OS),Windows_NT)
@@ -17,7 +17,9 @@ OBJ_LIB  := $(filter-out build/main.o, $(OBJ))
 
 all: minigit$(EXE)
 
+ifneq ($(EXE),)
 minigit: minigit$(EXE)
+endif
 
 minigit$(EXE): $(OBJ)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
@@ -45,6 +47,8 @@ build/test_core_fixes$(EXE): tests/test_core_fixes.cpp $(OBJ_LIB) | build
 
 TEST_TARGETS := build/test_fixes$(EXE) build/test_p2p$(EXE) build/test_cli_server$(EXE) build/test_core_fixes$(EXE)
 
+test-build: $(TEST_TARGETS)
+
 test: $(TEST_TARGETS)
 	./build/test_fixes$(EXE)
 	./build/test_p2p$(EXE)
@@ -54,4 +58,4 @@ test: $(TEST_TARGETS)
 clean:
 	@$(PYTHON) -c "import shutil, os, glob; shutil.rmtree('build', ignore_errors=True); [os.remove(f) for f in glob.glob('minigit*') if f in ('minigit', 'minigit.exe') and os.path.isfile(f)]"
 
-.PHONY: all minigit clean test ui
+.PHONY: all minigit clean test test-build ui

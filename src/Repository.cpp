@@ -1783,27 +1783,44 @@ static std::time_t parseIsoTimestamp(const std::string& iso) {
     }
 }
 
-std::string Repository::importBundleJson(const std::string& bundleJson) {
+std::string Repository::importBundleInternal(const std::string& bundleJson, bool throwOnError) {
+    auto fail = [&](const std::string& msg, int imported = 0, int present = 0, int rejected = 0) -> std::string {
+        if (throwOnError) {
+            throw MiniGitException(msg);
+        }
+        std::map<std::string, JsonValue> errRes;
+        errRes["ok"] = JsonValue(false);
+        errRes["error"] = JsonValue(msg);
+        errRes["objectsImported"] = JsonValue(imported);
+        errRes["objectsPresent"] = JsonValue(present);
+        errRes["objectsRejected"] = JsonValue(rejected);
+        return JsonValue(errRes).serialize();
+    };
+
     std::string parseErr;
     JsonValue root = JsonValue::parse(bundleJson, &parseErr);
     if (!root.is_object()) {
-        std::map<std::string, JsonValue> errRes;
-        errRes["ok"] = JsonValue(false);
-        errRes["error"] = JsonValue("Malformed JSON bundle: " + (parseErr.empty() ? "expected JSON object" : parseErr));
-        errRes["objectsImported"] = JsonValue(0);
-        errRes["objectsPresent"] = JsonValue(0);
-        errRes["objectsRejected"] = JsonValue(0);
-        return JsonValue(errRes).serialize();
+        return fail("Malformed JSON bundle: " + (parseErr.empty() ? "expected JSON object" : parseErr));
     }
 
     if (!root.contains("objects") || !root["objects"].is_object()) {
-        std::map<std::string, JsonValue> errRes;
-        errRes["ok"] = JsonValue(false);
-        errRes["error"] = JsonValue("Invalid bundle: missing 'objects' dictionary");
-        errRes["objectsImported"] = JsonValue(0);
-        errRes["objectsPresent"] = JsonValue(0);
-        errRes["objectsRejected"] = JsonValue(0);
-        return JsonValue(errRes).serialize();
+        return fail("Invalid bundle: missing 'objects' dictionary");
+    }
+
+    if (root.contains("size")) {
+        const auto& sVal = root["size"];
+        if (sVal.is_string()) {
+            try {
+                size_t idx = 0;
+                std::string s = sVal.as_string();
+                std::stoll(s, &idx);
+                if (idx != s.size()) return fail("Invalid bundle size: not an integer");
+            } catch (...) {
+                return fail("Invalid bundle size: not an integer");
+            }
+        } else if (!sVal.is_number()) {
+            return fail("Invalid bundle size type");
+        }
     }
 
     struct BlobItem { Hash hash; std::string content; };
@@ -1819,8 +1836,34 @@ std::string Repository::importBundleJson(const std::string& bundleJson) {
     for (const auto& [hashStr, objVal] : objs) {
         if (hashStr.size() != 40 || !objVal.is_object()) {
             objectsRejected++;
+            if (throwOnError) return fail("Corrupt object: invalid hash or structure");
             continue;
         }
+
+        if (objVal.contains("size")) {
+            const auto& sVal = objVal["size"];
+            if (sVal.is_string()) {
+                try {
+                    size_t idx = 0;
+                    std::string s = sVal.as_string();
+                    long long sz = std::stoll(s, &idx);
+                    if (idx != s.size() || sz < 0) {
+                        objectsRejected++;
+                        if (throwOnError) return fail("Invalid object size: " + s);
+                        continue;
+                    }
+                } catch (...) {
+                    objectsRejected++;
+                    if (throwOnError) return fail("Invalid object size: not an integer");
+                    continue;
+                }
+            } else if (!sVal.is_number()) {
+                objectsRejected++;
+                if (throwOnError) return fail("Invalid object size type");
+                continue;
+            }
+        }
+
         Hash expectedHash(hashStr);
         std::string type = objVal["type"].as_string();
 
@@ -1830,6 +1873,7 @@ std::string Repository::importBundleJson(const std::string& bundleJson) {
                 std::string decErr;
                 if (!Base64::decode(objVal["content"].as_string(), content, decErr)) {
                     objectsRejected++;
+                    if (throwOnError) return fail("Invalid base64 in blob: " + decErr);
                     continue;
                 }
             } else {
@@ -1839,24 +1883,20 @@ std::string Repository::importBundleJson(const std::string& bundleJson) {
                 Blob b(content);
                 if (b.hash() != expectedHash) {
                     objectsRejected++;
+                    if (throwOnError) return fail("Corrupt blob: hash mismatch");
                 } else {
                     verifiedBlobs.push_back({expectedHash, std::move(content)});
                 }
             } catch (...) {
                 objectsRejected++;
+                if (throwOnError) return fail("Corrupt blob");
             }
         } else if (type == "tree") {
             Tree t;
             if (objVal.contains("data") && objVal["data"].is_object()) {
                 for (const auto& [p, hVal] : objVal["data"].as_object()) {
                     if (!isSafeRepoPath(p)) {
-                        std::map<std::string, JsonValue> errRes;
-                        errRes["ok"] = JsonValue(false);
-                        errRes["error"] = JsonValue("Unsafe path in bundle tree: " + p);
-                        errRes["objectsImported"] = JsonValue(0);
-                        errRes["objectsPresent"] = JsonValue(0);
-                        errRes["objectsRejected"] = JsonValue(0);
-                        return JsonValue(errRes).serialize();
+                        return fail("Unsafe path in bundle tree: " + p);
                     }
                     t.set(p, Hash(hVal.as_string()));
                 }
@@ -1865,11 +1905,13 @@ std::string Repository::importBundleJson(const std::string& bundleJson) {
                 Tree parsedTree = Tree::parse(t.serialize());
                 if (parsedTree.hash() != expectedHash) {
                     objectsRejected++;
+                    if (throwOnError) return fail("Corrupt tree: hash mismatch");
                 } else {
                     verifiedTrees.push_back({expectedHash, std::move(parsedTree)});
                 }
             } catch (...) {
                 objectsRejected++;
+                if (throwOnError) return fail("Corrupt tree");
             }
         } else if (type == "commit") {
             if (objVal.contains("data") && objVal["data"].is_object()) {
@@ -1888,6 +1930,7 @@ std::string Repository::importBundleJson(const std::string& bundleJson) {
                 }
                 if (badAuthor) {
                     objectsRejected++;
+                    if (throwOnError) return fail("Invalid commit author: illegal characters");
                     continue;
                 }
                 std::time_t t = 0;
@@ -1902,31 +1945,136 @@ std::string Repository::importBundleJson(const std::string& bundleJson) {
                     Commit parsedCommit = Commit::parse(c.serialize());
                     if (parsedCommit.hash() != expectedHash) {
                         objectsRejected++;
+                        if (throwOnError) return fail("Corrupt commit: hash mismatch");
                     } else {
                         verifiedCommits.push_back({expectedHash, std::move(parsedCommit)});
                     }
                 } catch (...) {
                     objectsRejected++;
+                    if (throwOnError) return fail("Corrupt commit");
                 }
             } else {
                 objectsRejected++;
+                if (throwOnError) return fail("Invalid commit: missing data");
             }
         } else {
             objectsRejected++;
+            if (throwOnError) return fail("Unknown object type: " + type);
         }
     }
 
     if (objectsRejected > 0) {
-        std::map<std::string, JsonValue> errRes;
-        errRes["ok"] = JsonValue(false);
-        errRes["error"] = JsonValue("Hash verification failed: " + std::to_string(objectsRejected) + " object(s) rejected; refs untouched.");
-        errRes["objectsImported"] = JsonValue(0);
-        errRes["objectsPresent"] = JsonValue(0);
-        errRes["objectsRejected"] = JsonValue(objectsRejected);
-        return JsonValue(errRes).serialize();
+        return fail("Hash verification failed: " + std::to_string(objectsRejected) + " object(s) rejected; refs untouched.", 0, 0, objectsRejected);
     }
 
-    // Save in dependency order: Blobs, Trees, Commits
+    std::map<Hash, const BlobItem*> pendingBlobs;
+    std::map<Hash, const TreeItem*> pendingTrees;
+    std::map<Hash, const CommitItem*> pendingCommits;
+
+    for (const auto& item : verifiedBlobs) pendingBlobs[item.hash] = &item;
+    for (const auto& item : verifiedTrees) pendingTrees[item.hash] = &item;
+    for (const auto& item : verifiedCommits) pendingCommits[item.hash] = &item;
+
+    auto objExists = [&](const Hash& h) -> bool {
+        if (h.empty() || h.str() == "-") return true;
+        if (store_.exists(h)) return true;
+        if (pendingBlobs.count(h) || pendingTrees.count(h) || pendingCommits.count(h)) return true;
+        return false;
+    };
+
+    // Before creating or fast-forwarding any branch, verify the tip commit, its tree, all blobs and parents exist; otherwise reject the whole bundle
+    bool bundleInvalid = false;
+    std::string bundleInvalidReason;
+    if (root.contains("branches") && root["branches"].is_object()) {
+        for (const auto& [bName, tipVal] : root["branches"].as_object()) {
+            if (!RefManager::isValidBranchName(bName) || bName.rfind("peer-", 0) == 0) {
+                continue;
+            }
+            if (tipVal.is_null() || !tipVal.is_string() || tipVal.as_string().size() != 40) {
+                continue;
+            }
+            Hash target(tipVal.as_string());
+            if (!objExists(target)) {
+                bundleInvalid = true;
+                bundleInvalidReason = "Missing tip commit " + target.shortStr() + " for branch '" + bName + "'";
+                break;
+            }
+
+            if (pendingBlobs.count(target) || pendingTrees.count(target)) {
+                continue;
+            }
+            if (store_.exists(target)) {
+                try {
+                    auto cCheck = store_.loadAs<Commit>(target);
+                } catch (const InvalidObjectException&) {
+                    continue;
+                } catch (...) {
+                    continue;
+                }
+            }
+
+            try {
+                std::set<Hash> visited;
+                auto verifyCommitTree = [&](auto self, const Hash& ch) -> bool {
+                    if (ch.empty() || ch.str() == "-") return true;
+                    if (visited.count(ch)) return true;
+                    visited.insert(ch);
+                    if (!objExists(ch)) return false;
+                    try {
+                        const Commit* cPtr = nullptr;
+                        std::unique_ptr<Commit> loadedC;
+                        if (pendingCommits.count(ch)) {
+                            cPtr = &(pendingCommits[ch]->commit);
+                        } else {
+                            loadedC = store_.loadAs<Commit>(ch);
+                            cPtr = loadedC.get();
+                        }
+                        if (!cPtr) return false;
+                        if (!objExists(cPtr->tree())) return false;
+
+                        const Tree* tPtr = nullptr;
+                        std::unique_ptr<Tree> loadedT;
+                        if (pendingTrees.count(cPtr->tree())) {
+                            tPtr = &(pendingTrees[cPtr->tree()]->tree);
+                        } else {
+                            loadedT = store_.loadAs<Tree>(cPtr->tree());
+                            tPtr = loadedT.get();
+                        }
+                        if (!tPtr) return false;
+
+                        for (const auto& [path, bHash] : tPtr->entries()) {
+                            if (!objExists(bHash)) return false;
+                        }
+                        if (!cPtr->parent().empty() && cPtr->parent().str() != "-") {
+                            if (!self(self, cPtr->parent())) return false;
+                        }
+                        if (cPtr->hasParent2() && !cPtr->parent2().empty()) {
+                            if (!self(self, cPtr->parent2())) return false;
+                        }
+                    } catch (...) {
+                        return false;
+                    }
+                    return true;
+                };
+
+                if (!verifyCommitTree(verifyCommitTree, target)) {
+                    bundleInvalid = true;
+                    bundleInvalidReason = "Missing object (commit, tree, blob, or parent) for branch '" + bName + "' with tip " + target.shortStr();
+                    break;
+                }
+            } catch (const InvalidObjectException&) {
+                continue;
+            } catch (...) {
+                continue;
+            }
+        }
+    }
+
+    if (bundleInvalid) {
+        return fail("Bundle rejected: " + bundleInvalidReason + "; refs untouched.", 0, 0, objectsRejected);
+    }
+
+    // Now save in dependency order: Blobs, Trees, Commits
     int objectsImported = 0;
     int objectsPresent = 0;
 
@@ -1955,75 +2103,6 @@ std::string Repository::importBundleJson(const std::string& bundleJson) {
             store_.save(item.commit);
             objectsImported++;
         }
-    }
-
-    // Before creating or fast-forwarding any branch, verify the tip commit, its tree, all blobs and parents exist; otherwise reject the whole bundle
-    bool bundleInvalid = false;
-    std::string bundleInvalidReason;
-    if (root.contains("branches") && root["branches"].is_object()) {
-        for (const auto& [bName, tipVal] : root["branches"].as_object()) {
-            if (!RefManager::isValidBranchName(bName) || bName.rfind("peer-", 0) == 0) {
-                continue;
-            }
-            if (tipVal.is_null() || !tipVal.is_string() || tipVal.as_string().size() != 40) {
-                continue;
-            }
-            Hash target(tipVal.as_string());
-            if (!store_.exists(target)) {
-                bundleInvalid = true;
-                bundleInvalidReason = "Missing tip commit " + target.shortStr() + " for branch '" + bName + "'";
-                break;
-            }
-
-            try {
-                auto commit = store_.loadAs<Commit>(target);
-                std::set<Hash> visited;
-                auto verifyCommitTree = [&](auto self, const Hash& ch) -> bool {
-                    if (ch.empty() || ch.str() == "-") return true;
-                    if (visited.count(ch)) return true;
-                    visited.insert(ch);
-                    if (!store_.exists(ch)) return false;
-                    try {
-                        auto c = store_.loadAs<Commit>(ch);
-                        if (!store_.exists(c->tree())) return false;
-                        auto tree = store_.loadAs<Tree>(c->tree());
-                        for (const auto& [path, bHash] : tree->entries()) {
-                            if (!store_.exists(bHash)) return false;
-                        }
-                        if (!c->parent().empty() && c->parent().str() != "-") {
-                            if (!self(self, c->parent())) return false;
-                        }
-                        if (c->hasParent2() && !c->parent2().empty()) {
-                            if (!self(self, c->parent2())) return false;
-                        }
-                    } catch (...) {
-                        return false;
-                    }
-                    return true;
-                };
-
-                if (!verifyCommitTree(verifyCommitTree, target)) {
-                    bundleInvalid = true;
-                    bundleInvalidReason = "Missing object (commit, tree, blob, or parent) for branch '" + bName + "' with tip " + target.shortStr();
-                    break;
-                }
-            } catch (const InvalidObjectException&) {
-                // Non-commit tip (handled by branchesSkippedInvalid with warning in branch loop)
-                continue;
-            } catch (...) {
-                continue;
-            }
-        }
-    }
-
-    if (bundleInvalid) {
-        std::map<std::string, JsonValue> errRes;
-        errRes["ok"] = JsonValue(false);
-        errRes["error"] = JsonValue("Bundle rejected: " + bundleInvalidReason + "; refs untouched.");
-        errRes["objectsImported"] = JsonValue(objectsImported);
-        errRes["objectsPresent"] = JsonValue(objectsPresent);
-        errRes["objectsRejected"] = JsonValue(objectsRejected);
-        return JsonValue(errRes).serialize();
     }
 
     // Process Branches
@@ -2112,6 +2191,7 @@ std::string Repository::importBundleJson(const std::string& bundleJson) {
                     activeBranchDirtyRefused = true;
                     refuseReason = e.what();
                 }
+                if (throwOnError) throw;
             }
         }
     }
@@ -2168,6 +2248,10 @@ std::string Repository::importBundleJson(const std::string& bundleJson) {
         }
     }
 
+    if (throwOnError && !ok) {
+        throw MiniGitException(message.empty() ? "Bundle import failed" : message);
+    }
+
     std::map<std::string, JsonValue> resObj;
     resObj["ok"] = JsonValue(ok);
     resObj["message"] = JsonValue(message);
@@ -2191,6 +2275,14 @@ std::string Repository::importBundleJson(const std::string& bundleJson) {
     resObj["peerRefs"] = makeJsonArr(peerRefs);
 
     return JsonValue(resObj).serialize();
+}
+
+std::string Repository::importBundleJson(const std::string& bundleJson) {
+    return importBundleInternal(bundleJson, false);
+}
+
+void Repository::importBundle(const std::string& bundleData) {
+    importBundleInternal(bundleData, true);
 }
 
 std::string Repository::gitStatus() const {
@@ -2309,3 +2401,5 @@ std::string Repository::importFromGit() {
     recordReflog("git_import", Hash(), h, "Imported from standard Git");
     return "Successfully imported current working tree as commit [" + h.shortStr() + "].";
 }
+
+
