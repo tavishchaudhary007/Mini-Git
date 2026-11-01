@@ -7,3 +7,4 @@ minigit_*.exe
 .minigit/
 __pycache__/
 *.pyc
+test_repo_cli_b6/
