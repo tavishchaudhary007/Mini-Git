@@ -117,3 +117,32 @@ jobs:
         run: |
           chmod +x tests/demo.sh
           ./tests/demo.sh
+
+  libcxx:
+    name: Clang libc++ (-stdlib=libc++)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Clang and libc++
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libc++-dev libc++abi-dev
+
+      - name: Clean build with Clang libc++ (-stdlib=libc++)
+        run: |
+          make clean
+          make all test-build CXX=clang++ CXXFLAGS="-std=c++17 -Wall -Wextra -Wpedantic -Werror -O2 -Iinclude -pthread -stdlib=libc++" LDFLAGS="-stdlib=libc++ -lc++abi -pthread"
+
+      - name: Run test suites with libc++
+        run: |
+          ./build/test_fixes
+          ./build/test_p2p
+          ./build/test_cli_server
+          ./build/test_core_fixes

@@ -1813,8 +1813,8 @@ std::string Repository::importBundleInternal(const std::string& bundleJson, bool
             try {
                 size_t idx = 0;
                 std::string s = sVal.as_string();
-                std::stoll(s, &idx);
-                if (idx != s.size()) return fail("Invalid bundle size: not an integer");
+                long long parsedSize = std::stoll(s, &idx);
+                if (idx != s.size() || parsedSize < 0) return fail("Invalid bundle size: not an integer");
             } catch (...) {
                 return fail("Invalid bundle size: not an integer");
             }
