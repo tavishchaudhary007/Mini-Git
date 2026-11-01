@@ -2483,6 +2483,7 @@ void test_b6_concurrent_repo_mutations() {
     std::vector<std::thread> workers;
     std::atomic<int> successCount{0};
     std::atomic<int> failureCount{0};
+    auto tStart = std::chrono::steady_clock::now();
 
     for (int i = 0; i < 20; ++i) {
         workers.emplace_back([i, testPort, &successCount, &failureCount]() {
@@ -2493,25 +2494,25 @@ void test_b6_concurrent_repo_mutations() {
             std::string saveBody = "{\"path\":\"" + filename + "\",\"content\":\"" + fileContent + "\"}";
             std::string saveReq = "POST /api/file/save HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: " +
                                   std::to_string(saveBody.size()) + "\r\nConnection: close\r\n\r\n" + saveBody;
-            std::string saveResp = httpExchange("127.0.0.1", testPort, saveReq);
+            std::string saveResp = httpExchange("127.0.0.1", testPort, saveReq, 30);
 
             // 2. /api/stage
             std::string stageBody = "{\"path\":\"" + filename + "\"}";
             std::string stageReq = "POST /api/stage HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: " +
                                    std::to_string(stageBody.size()) + "\r\nConnection: close\r\n\r\n" + stageBody;
-            std::string stageResp = httpExchange("127.0.0.1", testPort, stageReq);
+            std::string stageResp = httpExchange("127.0.0.1", testPort, stageReq, 30);
 
             // 3. /api/commit
             std::string commitBody = "{\"message\":\"commit from worker " + std::to_string(i) + "\"}";
             std::string commitReq = "POST /api/commit HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: " +
                                     std::to_string(commitBody.size()) + "\r\nConnection: close\r\n\r\n" + commitBody;
-            std::string commitResp = httpExchange("127.0.0.1", testPort, commitReq);
+            std::string commitResp = httpExchange("127.0.0.1", testPort, commitReq, 30);
 
             // 4. /api/checkout main
             std::string chkBody = "{\"target\":\"main\"}";
             std::string chkReq = "POST /api/checkout HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: " +
                                  std::to_string(chkBody.size()) + "\r\nConnection: close\r\n\r\n" + chkBody;
-            std::string chkResp = httpExchange("127.0.0.1", testPort, chkReq);
+            std::string chkResp = httpExchange("127.0.0.1", testPort, chkReq, 30);
 
             bool ok = (saveResp.find("HTTP/1.1 ") != std::string::npos &&
                        stageResp.find("HTTP/1.1 ") != std::string::npos &&
@@ -2524,6 +2525,16 @@ void test_b6_concurrent_repo_mutations() {
             if (ok && noServerCrash) {
                 successCount++;
             } else {
+                auto getStatusLine = [](const std::string& resp) {
+                    if (resp.empty()) return std::string("EMPTY");
+                    size_t pos = resp.find("\r\n");
+                    if (pos == std::string::npos) pos = resp.find('\n');
+                    return (pos == std::string::npos) ? resp : resp.substr(0, pos);
+                };
+                std::cerr << "\n[B6 Worker " << i << " failed] save: " << getStatusLine(saveResp)
+                          << ", stage: " << getStatusLine(stageResp)
+                          << ", commit: " << getStatusLine(commitResp)
+                          << ", chk: " << getStatusLine(chkResp) << std::endl;
                 failureCount++;
             }
         });
@@ -2533,6 +2544,8 @@ void test_b6_concurrent_repo_mutations() {
         w.join();
     }
 
+    auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - tStart).count();
+    CHECK(elapsedMs < 30000);
     CHECK(failureCount == 0);
     CHECK(successCount == 20);
 
@@ -2575,11 +2588,16 @@ void test_b6_concurrent_repo_mutations() {
     std::cout << "PASSED\n";
 }
 
-int main() {
+int main(int argc, char* argv[]) {
 #ifdef _WIN32
     WSADATA wsaData;
     WSAStartup(MAKEWORD(2, 2), &wsaData);
 #endif
+
+    if (argc > 1 && std::string(argv[1]) == "b6") {
+        test_b6_concurrent_repo_mutations();
+        return 0;
+    }
 
     std::cout << "============================================\n";
     std::cout << "  Mini-Git CLI & Server Verification Tests\n";
