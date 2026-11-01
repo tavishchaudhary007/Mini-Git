@@ -3647,20 +3647,21 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                 
                 if (IS_SERVER_MODE) {
                     const postRes = await apiPost('sync/import-bundle', bundle, { silent: true });
-                    if (postRes && postRes.ok) {
-                        const peerRefs = postRes.peerRefs || (postRes.result && postRes.result.peerRefs);
-                        if (!peerRefs || peerRefs.length === 0) {
-                            showToast(postRes.message || "Synchronized with LAN peer successfully!");
-                        }
+                    const peerRefs = postRes ? (postRes.peerRefs || (postRes.result && postRes.result.peerRefs)) : null;
+                    if (peerRefs && peerRefs.length > 0) {
+                        const peerBranch = peerRefs[0];
+                        showToast(postRes.error || postRes.message || `Diverged: peer tip saved as ${peerBranch}`, 'warning', {
+                            label: `Merge ${peerBranch}`,
+                            onClick: async () => {
+                                await mergeBranchUI(peerBranch);
+                            }
+                        });
                         closeLanSyncModal();
-                    } else if (postRes) {
-                        const peerRefs = postRes.peerRefs || (postRes.result && postRes.result.peerRefs);
-                        if (peerRefs && peerRefs.length > 0) {
-                            // apiPost already showed the Merge warning toast with action button
-                            closeLanSyncModal();
-                        } else {
-                            showToast(postRes.error || postRes.message || "P2P sync failed", "error");
-                        }
+                    } else if (postRes && postRes.ok) {
+                        showToast(postRes.message || "Synchronized with LAN peer successfully!");
+                        closeLanSyncModal();
+                    } else {
+                        showToast(postRes?.error || postRes?.message || "P2P sync failed", "error");
                     }
                 } else {
                     if (bundle.objects) Object.assign(OBJECTS, bundle.objects);
@@ -3814,26 +3815,21 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                     const bundle = JSON.parse(e.target.result);
                     if (IS_SERVER_MODE) {
                         const res = await apiPost('sync/import-bundle', bundle, { silent: true });
-                        if (res && res.ok) {
-                            const peerRefs = res.peerRefs || (res.result && res.result.peerRefs);
-                            if (!peerRefs || peerRefs.length === 0) {
-                                showToast(res.message || "Bundle imported successfully");
-                            }
+                        const peerRefs = res ? (res.peerRefs || (res.result && res.result.peerRefs)) : null;
+                        if (peerRefs && peerRefs.length > 0) {
+                            const peerBranch = peerRefs[0];
+                            showToast(res.error || res.message || `Diverged: peer tip saved as ${peerBranch}`, 'warning', {
+                                label: `Merge ${peerBranch}`,
+                                onClick: async () => {
+                                    await mergeBranchUI(peerBranch);
+                                }
+                            });
                             closeLanSyncModal();
-                        } else if (res) {
-                            const peerRefs = res.peerRefs || (res.result && res.result.peerRefs);
-                            if (peerRefs && peerRefs.length > 0) {
-                                const peerBranch = peerRefs[0];
-                                showToast(res.error || res.message || `Diverged: peer tip saved as ${peerBranch}`, 'warning', {
-                                    label: `Merge ${peerBranch}`,
-                                    onClick: async () => {
-                                        await mergeBranchUI(peerBranch);
-                                    }
-                                });
-                                closeLanSyncModal();
-                            } else {
-                                showToast(res.error || res.message || "Bundle import failed", "error");
-                            }
+                        } else if (res && res.ok) {
+                            showToast(res.message || "Bundle imported successfully");
+                            closeLanSyncModal();
+                        } else {
+                            showToast(res?.error || res?.message || "Bundle import failed", "error");
                         }
                     } else {
                         if (bundle.objects) Object.assign(OBJECTS, bundle.objects);
@@ -4605,13 +4601,13 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
                     await refreshRepositorySnapshot(true);
                 }
             } else {
-      )MGHTML",
-    R"MGHTML(          showToast("Revert commit is only supported in server mode ('minigit ui')", "warning");
+                showToast("Revert commit is only supported in server mode ('minigit ui')", "warning");
             }
         }
 
         /* ---------------------------------------------------------------------
-         * UI RENDERING & COMPONENT SYNCHRONIZATION
+         * UI RENDERING & COMPONENT SY)MGHTML",
+    R"MGHTML(NCHRONIZATION
          * --------------------------------------------------------------------- */
         function updateUI() {
             renderDashboardMetrics();
@@ -5597,14 +5593,14 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
             const detached = isHeadDetached();
 
             const coords = new Map();
-            commits)MGHTML",
-    R"MGHTML(.forEach((c, idx) => {
+            commits.forEach((c, idx) => {
                 coords.set(c.hash, {
                     x: startX + (c.lane || 0) * laneStep,
                     y: startY + idx * rowStep,
                     node: c,
                     index: idx
-                });
+                )MGHTML",
+    R"MGHTML(});
             });
 
             // 1. Draw Edges first so circles stay on top
@@ -5993,7 +5989,7 @@ window.MINIGIT_LIVE = /*__MINIGIT_DATA__*/null;</script>
 
 inline const std::string kFrontendTemplate = []() {
     std::string s;
-    s.reserve(320933);
+    s.reserve(320692);
     for (const char* chunk : kFrontendChunks) {
         s.append(chunk);
     }

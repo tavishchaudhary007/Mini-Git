@@ -17,7 +17,7 @@ assert(scriptMatch && scriptMatch.length >= 4, "Must find script tags in fronten
 const mainScript = scriptMatch[3].replace(/<\/?script\b[^>]*>/gi, '');
 
 function extractFunction(name) {
-    const reg = new RegExp(`async function ${name}\\b[\\s\\S]*?\\n {8}\\}`);
+    const reg = new RegExp(`(?:async\\s+)?function ${name}\\b[\\s\\S]*?\\n {8}\\}`);
     const match = mainScript.match(reg);
     assert(match, `Must find ${name} in frontend.html`);
     return match[0];
@@ -148,6 +148,160 @@ async function runTests() {
 
         const pollSrc = extractFunction('pollPendingPairRequests');
         assert(pollSrc.includes('DECISION_IN_FLIGHT'), "pollPendingPairRequests must check DECISION_IN_FLIGHT");
+    }
+
+    // Test 5: executeLanPull error shows exactly 1 error toast, divergence shows exactly 1 warning toast with Merge action
+    {
+        console.log("-> Test 5: executeLanPull divergence and error toast handling");
+        const lanPullSrc = extractFunction('executeLanPull');
+
+        // 5a: Divergence (peerRefs non-empty, ok=false)
+        {
+            const toasts = [];
+            const sandbox = {
+                console,
+                IS_SERVER_MODE: true,
+                IS_SYNCING_LAN: false,
+                document: {
+                    getElementById: (id) => ({ value: 'http://192.168.1.50:8080', disabled: false })
+                },
+                localStorage: { setItem: () => {}, getItem: () => '' },
+                cleanPeerUrl: u => u,
+                getPeerSessionToken: () => 'token',
+                closeLanSyncModal: () => {},
+                fetch: async () => ({ ok: true, status: 200, json: async () => ({ branches: {}, objects: {} }) }),
+                apiPost: async () => ({ ok: false, error: 'Diverged', peerRefs: ['peer-main'] }),
+                showToast: (msg, type = 'info', action = null) => {
+                    toasts.push({ msg, type, action });
+                }
+            };
+            vm.createContext(sandbox);
+            vm.runInContext(lanPullSrc, sandbox);
+            await sandbox.executeLanPull();
+
+            const actionToasts = toasts.filter(t => t.action && t.action.label === 'Merge peer-main');
+            assert.strictEqual(actionToasts.length, 1, `Expected exactly 1 toast with 'Merge peer-main' action, got: ${JSON.stringify(toasts)}`);
+            assert.strictEqual(actionToasts[0].type, 'warning', `Expected warning toast, got: ${actionToasts[0].type}`);
+        }
+
+        // 5b: Divergence (peerRefs non-empty, ok=true)
+        {
+            const toasts = [];
+            const sandbox = {
+                console,
+                IS_SERVER_MODE: true,
+                IS_SYNCING_LAN: false,
+                document: {
+                    getElementById: (id) => ({ value: 'http://192.168.1.50:8080', disabled: false })
+                },
+                localStorage: { setItem: () => {}, getItem: () => '' },
+                cleanPeerUrl: u => u,
+                getPeerSessionToken: () => 'token',
+                closeLanSyncModal: () => {},
+                fetch: async () => ({ ok: true, status: 200, json: async () => ({ branches: {}, objects: {} }) }),
+                apiPost: async () => ({ ok: true, peerRefs: ['peer-main'] }),
+                showToast: (msg, type = 'info', action = null) => {
+                    toasts.push({ msg, type, action });
+                }
+            };
+            vm.createContext(sandbox);
+            vm.runInContext(lanPullSrc, sandbox);
+            await sandbox.executeLanPull();
+
+            const actionToasts = toasts.filter(t => t.action && t.action.label === 'Merge peer-main');
+            assert.strictEqual(actionToasts.length, 1, `Expected exactly 1 toast with 'Merge peer-main' action, got: ${JSON.stringify(toasts)}`);
+            assert.strictEqual(actionToasts[0].type, 'warning', `Expected warning toast, got: ${actionToasts[0].type}`);
+        }
+
+        // 5c: Error (peerRefs empty, ok=false)
+        {
+            const toasts = [];
+            const sandbox = {
+                console,
+                IS_SERVER_MODE: true,
+                IS_SYNCING_LAN: false,
+                document: {
+                    getElementById: (id) => ({ value: 'http://192.168.1.50:8080', disabled: false })
+                },
+                localStorage: { setItem: () => {}, getItem: () => '' },
+                cleanPeerUrl: u => u,
+                getPeerSessionToken: () => 'token',
+                closeLanSyncModal: () => {},
+                fetch: async () => ({ ok: true, status: 200, json: async () => ({ branches: {}, objects: {} }) }),
+                apiPost: async () => ({ ok: false, error: 'Corrupt bundle' }),
+                showToast: (msg, type = 'info', action = null) => {
+                    toasts.push({ msg, type, action });
+                }
+            };
+            vm.createContext(sandbox);
+            vm.runInContext(lanPullSrc, sandbox);
+            await sandbox.executeLanPull();
+
+            const errToasts = toasts.filter(t => t.type === 'error');
+            assert.strictEqual(errToasts.length, 1, `Expected exactly 1 error toast, got: ${JSON.stringify(toasts)}`);
+            assert(errToasts[0].msg.includes('Corrupt bundle'));
+        }
+    }
+
+    // Test 6: uploadRepositoryBundle error shows exactly 1 error toast, divergence shows exactly 1 warning toast with Merge action
+    {
+        console.log("-> Test 6: uploadRepositoryBundle divergence and error toast handling");
+        const uploadBundleSrc = extractFunction('uploadRepositoryBundle');
+
+        async function runUpload(apiResult) {
+            const toasts = [];
+            let onloadCb = null;
+            class MockFileReader {
+                readAsText() {
+                    if (onloadCb) {
+                        onloadCb({ target: { result: JSON.stringify({ minigit_bundle: 1 }) } });
+                    }
+                }
+                set onload(cb) { onloadCb = cb; }
+                get onload() { return onloadCb; }
+            }
+
+            const sandbox = {
+                console,
+                IS_SERVER_MODE: true,
+                FileReader: MockFileReader,
+                apiPost: async () => apiResult,
+                closeLanSyncModal: () => {},
+                showToast: (msg, type = 'info', action = null) => {
+                    toasts.push({ msg, type, action });
+                }
+            };
+            vm.createContext(sandbox);
+            vm.runInContext(uploadBundleSrc, sandbox);
+
+            sandbox.uploadRepositoryBundle({ target: { files: [{ name: 'bundle.json' }], value: 'foo' } });
+            await new Promise(r => setTimeout(r, 10));
+            return toasts;
+        }
+
+        // 6a: Divergence (peerRefs non-empty, ok=true)
+        {
+            const toasts = await runUpload({ ok: true, peerRefs: ['peer-feature'] });
+            const actionToasts = toasts.filter(t => t.action && t.action.label === 'Merge peer-feature');
+            assert.strictEqual(actionToasts.length, 1, `Expected exactly 1 toast with 'Merge peer-feature', got: ${JSON.stringify(toasts)}`);
+            assert.strictEqual(actionToasts[0].type, 'warning');
+        }
+
+        // 6b: Divergence (peerRefs non-empty, ok=false)
+        {
+            const toasts = await runUpload({ ok: false, error: 'Diverged', peerRefs: ['peer-feature'] });
+            const actionToasts = toasts.filter(t => t.action && t.action.label === 'Merge peer-feature');
+            assert.strictEqual(actionToasts.length, 1, `Expected exactly 1 toast with 'Merge peer-feature', got: ${JSON.stringify(toasts)}`);
+            assert.strictEqual(actionToasts[0].type, 'warning');
+        }
+
+        // 6c: Error (peerRefs empty, ok=false)
+        {
+            const toasts = await runUpload({ ok: false, error: 'Corrupt bundle' });
+            const errToasts = toasts.filter(t => t.type === 'error');
+            assert.strictEqual(errToasts.length, 1, `Expected exactly 1 error toast, got: ${JSON.stringify(toasts)}`);
+            assert(errToasts[0].msg.includes('Corrupt bundle'));
+        }
     }
 
     console.log("ALL A3 REGRESSION TESTS PASSED!");
